@@ -13,13 +13,13 @@ Add a sixth Hero Mode weapon, the Katana: a no-energy melee weapon that cuts ali
 - Skill references: `hero-weapons-combo` (HWC), `enemy-immunity-system` (EIS), `vfx-particle-pool` (VPP), all in `.claude/skills/`.
 - Line numbers are from the runtime code read on 2026-10-01 and are hints, not contracts.
 
-## MANDATORY MANUAL REVIEW GATE
+## MANDATORY MANUAL REVIEW GATE — USER CONFIRMED CONTINUATION
 
-**Subtask 7 (slicing core: clone, clipping planes, cap, piece physics, recycling, disposal) is the technically riskiest subtask and is the MANDATORY MANUAL REVIEW GATE.**
+**Subtask 7 (slicing core: clone, clipping planes, cap, piece physics, recycling, disposal) was the technically riskiest subtask and the MANDATORY MANUAL REVIEW GATE.**
 
 Reasons: it introduces a rendering technique with no full analogue in the codebase (`player/blackHole/dissolve.js` already clones materials and sets `clippingPlanes`/`clipShadows` and enables `localClippingEnabled`, but nothing clones a mesh group, caps a cut, or turns halves into physics pieces); it interacts with the instancer (aliens are drawn as instances unless their skin differs); it is the main draw-call and shader-variant risk; and every later subtask (goo, feel, Blade Mode) depends on it.
 
-After Subtask 7 is complete and its focused checks pass, the Coder MUST STOP, summarise what was implemented, and request the user's visual/manual review (cut surface, halves, fade, disposal, FPS overlay). Subtasks 8 to 16 MUST NOT start until the user explicitly confirms. Subtasks 1 to 6 may be completed before the gate, in order.
+The user confirmed on 2026-10-01 that work has already progressed to Subtask 14 and that the Subtask 7 gate no longer blocks continuation. This records authorization to continue beyond the gate; it does not claim that browser screenshots or FPS measurements were archived. Do not repeat the Subtask 7 stop for this plan run. Subtasks 14–16 remain subject to their own acceptance criteria and safety gates.
 
 Secondary caution (not a separate gate): Subtask 10 (Blade Mode slow-motion reconciliation) is the second riskiest and is reviewed by the user together with Subtask 12 in Subtask 16's manual test pass.
 
