@@ -8,7 +8,8 @@ import { PERSON } from '../scale.js';
  * ===========================================================================
  * Every number Hero Mode is tuned by, in one place: Roger's run, the plasma
  * rifle and its mega beam, the machines after him, the cameras and the HUD.
- * The behaviour they drive is described in heroMode.js and GAME_RULES.md.
+ * The behaviour they drive is described in heroMode.js and GAME_DESIGN.md;
+ * numeric contracts are indexed in .claude/rules.md.
  */
 
 /** What one plasma shot takes off an alien ship's hull (aliens.js, mothership.js). */

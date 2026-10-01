@@ -5,8 +5,10 @@ measured, what it showed, what was done about it, and the traps to avoid.
 Kept up to date with every measured change, so nothing has to be found out
 twice. The three files each have one job:
 
-- **`GAME_RULES.md`**: the rules of the game and how each event is meant
-  to play out, as the player sees it.
+- **`GAME_DESIGN.md`**: the narrative gameplay guide and how each event is
+  meant to feel to the player.
+- **`.claude/rules.md`**: exact implementation contracts and protected
+  gameplay values.
 - **`NOTES.md`**: the behaviour agreed with Roger, and ideas for later.
 - **`FINDINGS.md`** (this file): measurements, lessons and traps, with the
   charts in `docs/perf/`.

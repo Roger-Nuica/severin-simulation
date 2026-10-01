@@ -14,7 +14,7 @@
  * input -- the same shape filled from the network instead of the DOM -- and
  * the game code does not change.
  *
- * Bindings (GAME_RULES.md "Hero Mode"):
+ * Bindings (GAME_DESIGN.md "Hero Mode"):
  *   W A S D             run (the arrow keys do nothing, on request)
  *   right mouse button  raise / lower the weapon
  *   left button, Enter  fire (Enter held charges the rifle; Enter at a car's

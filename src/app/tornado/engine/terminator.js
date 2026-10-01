@@ -36,7 +36,7 @@ import { createTerminatorHits } from './terminator/hits.js';
  *
  * With Hero Mode on (engine/heroMode.js) the squad comes for Roger instead
  * of the townspeople: straight at him, and reaching him is the end of him.
- * His plasma rifle knocks one back; a mega beam (the three-second charge)
+ * His plasma rifle knocks one back; a mega beam (the two-second charge)
  * takes it down for good, the same way the EMP does.
  *
  * The aliens (engine/aliens.js) are the other hunters in town, and the two

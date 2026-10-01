@@ -11,6 +11,29 @@ This repo is a single-page Three.js disaster sandbox running inside Next.js. The
 - Registry pattern: subsystems live on `ctx.systems`
 - Design preference: per-instance state and lazy lookups, not module-level globals
 
+## Project commands
+
+```bash
+npm install
+npm run dev
+npm run build
+npm run start
+npm run lint
+```
+
+This project does not currently include a real automated test suite. Validation is primarily through lint and production build checks.
+
+## AGENT WORKFLOW
+
+This repository expects specialized agents to be used in sequence for non-trivial work.
+
+1. `lead.md` — for raw tasks, GDDs, bug reports, and feature briefs. This agent writes the plan file, not production code.
+2. `explorer.md` — for mapping the task to the relevant files and conventions. This agent is read-only.
+3. `coder.md` — for executing a single approved subtask from the plan.
+4. `verifier.md` — for independent QA validation against the original acceptance criteria.
+
+For new task work, always start with the lead agent. Do not skip planning unless the request is trivial and explicitly small.
+
 ## Fresh-session workflow
 
 A fresh Claude session should be able to start directly from the repo.
@@ -84,7 +107,9 @@ Reuse the weapon, enemy, and damage contracts instead of building a parallel mel
 - `src/app/tornado/engine/sound/` — procedural audio and cues
 - `public/sounds/` — audio assets
 - `docs/` — architecture, combat, weapons, enemies, performance notes
-- `GAME_RULES.md`, `FINDINGS.md`, `NOTES.md` — gameplay and design references
+- `GAME_DESIGN.md` — player-facing gameplay narrative and design context
+- `.claude/rules.md` — implementation contracts, exact numeric gameplay values, and hard constraints
+- `FINDINGS.md`, `NOTES.md` — measurements, decisions, and design history
 
 ## Architecture
 
@@ -121,6 +146,15 @@ Key rules:
 - Prefer small, targetted edits over broad refactors.
 - Preserve lifecycle reset/dispose behavior.
 - Reuse existing damage, effect, and sound paths instead of duplicating them.
+
+## Business / gameplay rules that must not be broken
+
+- Treat `.claude/rules.md` as the implementation source for protected gameplay values; treat `GAME_DESIGN.md` as the narrative design guide. Report disagreements instead of reconciling them silently.
+- Keep black hole gameplay behavior stable unless the task explicitly requires a rule change: 20 s duration, 100 m pull radius, and 40 m no-escape zone remain the active contract.
+- Reuse the existing combat pipeline and enemy registry instead of creating parallel damage systems.
+- Respect enemy-specific hit acceptance and immunity rules; do not make all enemies weak to the same damage source.
+- Keep the simulation’s lifecycle reset/dispose behavior intact for all new systems.
+- Do not introduce global state or duplicate central systems just to make a feature easier to code.
 
 ## Performance rules
 
