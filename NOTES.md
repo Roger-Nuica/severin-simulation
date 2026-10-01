@@ -359,7 +359,7 @@ the wheel now, see "Scripted events and the black hole" below.)
   - Entity caps and a particle budget: 10,000 particles; the heavy benchmark
     peaks at ~6,800.
   - The player's input read into a queue and consumed by the frame.
-  - Test button: 🧪 Abilities.
+  - The 🧪 Abilities test button is gone; energy is infinite (`ENERGY.infinite`), recharge code kept.
 - **PR 0b — Sound settings. Done.**
   - 🔊 Sounds section (`engine/settings.js`), holding Mute and the volume
     too. 🎥 Camera & sound is now 🎥 Camera.

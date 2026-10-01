@@ -312,10 +312,6 @@ export default function TornadoSimulator() {
               {/* engine/terminator.js: only the Electric Tornado's EMP stops it. */}
               <button id="btn-terminator" className="pill event" type="button"
                 title="Send in a Terminator. It hunts people, and only an EMP discharge from the Electric Tornado can destroy it.">🤖 Terminator</button>
-              {/* engine/player/abilities.js: the test button for the hero's
-                  energy and abilities (plan PR 0): Hero Mode on, a full bar. */}
-              <button id="btn-test-abilities" className="pill event" type="button"
-                title="Test the abilities: starts Hero Mode with a full energy bar. Q is Time Slow, the mouse wheel switches weapon.">🧪 Abilities</button>
               {/* engine/trex.js: a cyber T-Rex walks into town breathing fire
                   (plan PR 3). One at a time. */}
               <button id="btn-trex" className="pill event" type="button"
