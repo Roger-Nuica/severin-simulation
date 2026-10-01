@@ -192,18 +192,6 @@ export function createAbilitySystem(ctx) {
    * @returns {void}
    */
   function initAbilities() {
-    // The panel's test button: Hero Mode on, the bar full.
-    const test = document.getElementById('btn-test-abilities');
-    if (test) {
-      test.addEventListener('click', () => {
-        if (!ctx.Hero || !ctx.Hero.active) {
-          const hero = document.getElementById('btn-hero');
-          if (hero) hero.click();
-        }
-        ctx.systems.energy.hero.set(1);
-        ctx.events.emit('announce', { title: 'ABILITIES TEST', sub: 'Energy full · Q time slow · E teleport · R EMP · wheel switches weapon' });
-      }, { signal: ctx.signal });
-    }
     const T = ABILITIES.timeSlow;
     let bullet = false;
     register({
