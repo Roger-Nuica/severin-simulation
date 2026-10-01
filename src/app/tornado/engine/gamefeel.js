@@ -120,6 +120,12 @@ const EVENTS = {
   fire: { shake: 0.14, time: 0.16 },
   piece: { shake: 0.26, time: 0.16 },
   person: { shake: 0.12, time: 0.12, combo: true },
+  // A Katana cut (hero/katana/feel.js): a small shake, and a combo link
+  // because a cut is a thing being destroyed, deliberately counted like a
+  // tree or a car. It is neither heavy (it never feeds the slow-motion burst
+  // detector) nor frequent: the blade's cooldown is 0.35 s, so a chain of
+  // cuts cannot flood the meter the way a shedding building would.
+  slice: { shake: 0.14, time: 0.12, combo: true },
   tree: { shake: 0.22, time: 0.16, combo: true },
   car: { shake: 0.3, time: 0.18, combo: true },
   // A moving vehicle plucked off its path (environment/train.js). Weighted

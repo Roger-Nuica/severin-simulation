@@ -133,6 +133,10 @@ const GRADE_SPLIT_INTENSITY = 0.35;
 // rather than simply dark.
 const GRADE_TOE_LIFT = new THREE.Vector3(0.0, 0.006, 0.013);
 const GRADE_VIGNETTE = 0.32;
+// Extra vignette at full Blade Mode, and the seconds its ease takes to cover
+// about 63 % of the way (a time-based lerp, not a per-frame one).
+const BLADE_VIGNETTE = 0.16;
+const BLADE_VIGNETTE_TAU = 0.15;
 // Above this (linear, per channel max) values start rolling off smoothly
 // towards 1.0 instead of clipping; everything below is untouched.
 const HIGHLIGHT_KNEE = 0.75;
@@ -180,7 +184,13 @@ export function createPostSystem(ctx) {
     // Bullet Time (player/abilities.js): 1 while it runs. The picture eases
     // to it (bulletTimeShown): drained of colour, a heavier vignette.
     bulletTime: 0,
-    bulletTimeShown: 0
+    bulletTimeShown: 0,
+    // Katana Blade Mode (hero/katana/bladeUi.js): 1 while it lasts. A vignette
+    // only (never saturation or camera), eased in REAL seconds so it is
+    // frame-rate independent; `bladeVignetteAt` is the last frame's clock.
+    bladeVignette: 0,
+    bladeVignetteShown: 0,
+    bladeVignetteAt: 0
   };
 
   const FULLSCREEN_VERTEX = `
@@ -692,7 +702,18 @@ export function createPostSystem(ctx) {
     Post.bulletTimeShown += (Post.bulletTime - Post.bulletTimeShown) * 0.12;
     const bt = Post.bulletTimeShown;
     u.uSaturation.value = (GRADE_SATURATION_BASE - intensity * GRADE_SATURATION_INTENSITY) * (1 - 0.55 * bt);
-    u.uVignette.value = GRADE_VIGNETTE + 0.4 * bt;
+    // Idle (no Blade Mode, fully eased out): no clock read, no exp, and the
+    // last-frame clock is dropped so the next ease starts from a zero step.
+    if (Post.bladeVignette > 0 || Post.bladeVignetteShown > 0.0005) {
+      const now = performance.now();
+      const bladeDt = Post.bladeVignetteAt > 0 ? Math.min(0.25, Math.max(0, (now - Post.bladeVignetteAt) / 1000)) : 0;
+      Post.bladeVignetteAt = now;
+      Post.bladeVignetteShown += (Post.bladeVignette - Post.bladeVignetteShown) * (1 - Math.exp(-bladeDt / BLADE_VIGNETTE_TAU));
+    } else {
+      Post.bladeVignetteShown = 0;
+      Post.bladeVignetteAt = 0;
+    }
+    u.uVignette.value = GRADE_VIGNETTE + 0.4 * bt + BLADE_VIGNETTE * Post.bladeVignetteShown;
     u.uSplit.value = GRADE_SPLIT_BASE + intensity * GRADE_SPLIT_INTENSITY;
     u.uDebugView.value = Post.debugView;
     u.uExposure.value = Post.exposure * Post.exposureScale * Post.brightness;

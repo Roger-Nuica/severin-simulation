@@ -23,11 +23,13 @@ Orchestrate a new or complex feature from planning through implementation and ve
 ### Faza 2: Implementare
 
 1. Use the role and limits defined in `.claude/agents/coder.md`.
-2. Implement the plan's subtasks in dependency order. Before writing new code, inspect `.claude/skills/` for an applicable `SKILL.md` and reuse its project pattern.
+2. Read `.claude/rules.md` in full the first time a subtask is prepared in this run. For every subsequent subtask in the same run, cite only the specific rule IDs relevant to that subtask instead of re-reading the whole file — unless the subtask touches a system not yet covered by rules already reviewed in this run, in which case re-check the full file for that system.
+2a. Classify each dependency-ready subtask as **low-risk** or **requires separate agent** before dispatching. A subtask is low-risk only if ALL of the following hold: it involves no new design decision or implementation choice (e.g., renaming, file moves, mechanical refactors, trivial wiring, simple test additions); it does not touch any system covered by the fixed safety gates below (immunities, weapon/damage contracts, performance/particle/entity caps); and it has no branching outcome that could affect later subtasks. Consecutive low-risk subtasks may be implemented within a single Coder agent invocation, provided each one is still completed, checked, and marked in the plan individually, in dependency order. Any subtask carrying real risk, a design choice, or a new technique without an existing project analogue must still be dispatched as its own separate agent call — never batched.
 3. Keep existing enemy immunities, weapon contracts, lifecycle behaviour, and performance caps intact. Do not increase particle, entity, or performance budgets without explicit user approval.
-4. Mark each completed plan subtask with `[x] DONE`, recording the files changed and result.
-5. After the designated highest-risk subtask, stop and request the user's visual/manual review. Do not implement dependent subtasks until the user confirms continuation.
-6. At the end of Phase 2, run lint and build. If either fails and the cause is not clearly isolated, stop and report the failure; do not proceed to Phase 3 with an unexplained broken build.
+4. Implement the plan's subtasks in dependency order. Before writing new code, inspect `.claude/skills/` for an applicable `SKILL.md` and reuse its project pattern.
+5. Mark each completed plan subtask with `[x] DONE`, recording the files changed and result. Keep the per-subtask completion note to 3-4 bullet points maximum: files changed, what was implemented, checks run and their result, and any open concern. Do not restate the subtask description or produce long explanatory paragraphs per subtask. The final end-of-run summary required at the end of this skill may remain fuller, since it is produced only once per run.
+6. After the designated highest-risk subtask, stop and request the user's visual/manual review. Do not implement dependent subtasks until the user confirms continuation.
+7. At the end of Phase 2, run lint and build. If either fails and the cause is not clearly isolated, stop and report the failure; do not proceed to Phase 3 with an unexplained broken build.
 
 ### Faza 3: Verificare
 
@@ -59,6 +61,8 @@ Stop immediately, report the evidence, and wait for the user's decision if:
 ### Oprire obligatorie pentru verificare manuală
 
 After the highest-risk technical subtask identified by Lead is complete, stop before implementing dependent work. Summarise what was implemented and request a visual/manual check from the user. This gate is mandatory when the subtask introduces a rendering, physics, or algorithmic technique that does not already exist in the codebase. Continue only after explicit user confirmation.
+
+Low-risk and batched subtasks may proceed continuously without pausing for confirmation after each one. This does not weaken or delay the mandatory stop defined above: the stop for the plan's flagged highest-risk subtask, or any subtask matching the fixed safety gates, always applies in full, regardless of batching or auto mode.
 
 ## Rezumat la final sau la oprire
 

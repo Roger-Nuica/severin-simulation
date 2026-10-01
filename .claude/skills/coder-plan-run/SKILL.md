@@ -30,6 +30,8 @@ Before invoking the Coder agent:
 4. Verify protected numeric values in the runtime implementation. Treat runtime code as the source of truth; if it conflicts with `.claude/rules.md` on the system being changed, stop and report the exact conflict before implementation.
 5. Brief the agent defined in `.claude/agents/coder.md` to implement exactly this one subtask, preserve scope, run the narrowest relevant check, and update the plan with completion status and files changed.
 
+Apply the batching, rules-citation, and reporting-length rules defined in `.claude/skills/full-autonomous-run/SKILL.md` (Faza 2) when dispatching each subtask here. Batching never applies to the plan's flagged highest-risk subtask or to any subtask matching the fixed safety gates — those are always dispatched individually and always trigger the mandatory stop.
+
 Do not dispatch independent subtasks concurrently. Run them in plan order, respecting dependencies and keeping each Coder assignment to one subtask.
 
 ### 3. Confirm the subtask result

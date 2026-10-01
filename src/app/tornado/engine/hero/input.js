@@ -78,6 +78,9 @@ export function createHeroInput(ctx, S, api) {
     S.keys.left = held.left;
     S.keys.right = held.right;
     const phase = () => S.state.phase;
+    // The Katana is only ever drawn on foot, upright and unfrozen: a car, a
+    // daze, a freeze, death or the win puts it away at once.
+    if (S.weapons.katanaState().drawn && (phase() !== 'running' || S.state.frozen > 0)) S.weapons.katanaCancel();
     for (const e of input.drain()) {
       switch (e.type) {
         case 'keydown': {
@@ -98,6 +101,8 @@ export function createHeroInput(ctx, S, api) {
             else if (phase() === 'running') api.flashMessage('RIGHT-CLICK to raise the weapon · ENTER to fire');
           } else if (code === 'Escape' && phase() === 'aiming') {
             api.leaveAim();
+          } else if (code === 'Escape' && S.weapons.katanaState().drawn) {
+            S.weapons.katanaCancel();
           } else if ((phase() === 'running' || phase() === 'aiming' || phase() === 'dazed') && !(S.state.frozen > 0)) {
             ctx.systems.abilities.press(code);
           }
@@ -110,26 +115,39 @@ export function createHeroInput(ctx, S, api) {
           if (phase() === 'running' || phase() === 'aiming' || phase() === 'dazed') {
             api.cancelCharge();
             S.weapons.cycle(e.dir);
+            // Cycled onto the Katana from the raised rifle: back to third person.
+            if (phase() === 'aiming' && S.weapons.current() === 'katana') api.leaveAim();
             if (S.viewRifle) S.viewRifle.group.visible = phase() === 'aiming' && S.weapons.current() === 'rifle';
           }
           break;
         case 'mousedown':
           if (!(e.onCanvas || S.state.locked)) break;
-          if (e.button === 2) api.toggleAim();
-          else if (e.button === 0 && phase() === 'aiming') pullTrigger();
+          if (e.button === 2) {
+            // The Katana is drawn in the follow camera, never raised into aim.
+            if (S.weapons.current() === 'katana') {
+              if (S.weapons.katanaState().drawn || (phase() === 'running' && !(S.state.frozen > 0))) S.weapons.katanaToggle();
+            } else api.toggleAim();
+          } else if (e.button === 0 && phase() === 'aiming') pullTrigger();
+          else if (e.button === 0) S.weapons.katanaPress();
           break;
         case 'mouseup':
-          if (e.button === 0) releaseTrigger();
+          if (e.button === 0) {
+            releaseTrigger();
+            S.weapons.katanaRelease();
+          }
           break;
         case 'blur':
           releaseKeys();
           api.cancelCharge();
           S.weapons.triggerUp();
+          S.weapons.katanaCancel();
           break;
         case 'pointerlock': {
           // Esc under a pointer lock goes to the browser, which drops the
           // lock: that is the way out of aim mode then.
           if (S.state.locked && !e.locked && phase() === 'aiming') api.leaveAim();
+          // Esc under the Katana's lock: the browser dropped it, so put it away.
+          if (S.state.locked && !e.locked) S.weapons.katanaCancel();
           S.state.locked = e.locked;
           break;
         }
@@ -144,6 +162,8 @@ export function createHeroInput(ctx, S, api) {
       S.state.yaw -= look.dx * HERO.lookSensitivity;
       S.state.pitch = THREE.MathUtils.clamp(S.state.pitch - look.dy * HERO.lookSensitivity, HERO.pitchMin, HERO.pitchMax);
     }
+    // The same drain feeds the Katana's virtual cursor and swipe.
+    S.weapons.katanaLook(look.dx, look.dy);
   }
 
   // ---------------------------------------------------------------------

@@ -21,6 +21,7 @@ import { createSmoothCriminalSystem } from './engine/smoothCriminal.js';
 import { createHeroModeSystem } from './engine/heroMode.js';
 import { createHeroSoundSystem } from './engine/sound/hero.js';
 import { createBlackHoleSoundSystem } from './engine/sound/blackHole.js';
+import { createKatanaSoundSystem } from './engine/sound/katana.js';
 import { createEmpChargeSystem } from './engine/empCharge.js';
 import { createEmpHumSoundSystem } from './engine/sound/empHum.js';
 import { createCreatureSoundSystem } from './engine/sound/creatures.js';
@@ -790,6 +791,8 @@ export function createSimulation(container) {
   const { initSmoothCriminal, updateSmoothCriminal, resetSmoothCriminal, disposeSmoothCriminal } = smoothCriminalSystem;
   // Hero Mode: Roger, the bunker and the machine after him (engine/heroMode.js).
   register('heroSound', createHeroSoundSystem(ctx));
+  // The Katana's own voice (sound/katana.js): its own bus, no creature voices (R-046).
+  register('katanaSound', createKatanaSoundSystem(ctx));
   const heroSystem = createHeroModeSystem(ctx);
   register('heroMode', heroSystem);
   const { initHero, updateHero, resetHero, disposeHero } = heroSystem;
@@ -1544,6 +1547,7 @@ export function createSimulation(container) {
     disposeReinforcements();
     disposeHero();
     ctx.systems.heroSound.disposeHeroSound();
+    ctx.systems.katanaSound.disposeKatanaSound();
     for (const { groundFx: { GroundSpray, PathTrack } } of tornadoRegistry.instances) {
       if (GroundSpray.points) {
         Sim.three.scene.remove(GroundSpray.points);

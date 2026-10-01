@@ -136,6 +136,7 @@ export { ALIEN_SKIN_GLOW } from './aliens/config.js';
  *   nearestAlien: (x: number, z: number, radius: number) => Object|null,
  *   strikeAlien: (alien: Object, from: THREE.Vector3) => void,
  *   targets: () => Object[],
+ *   eachCuttable: (visit: (alien: Alien, kind: Object) => void) => void,
  *   shipTargets: () => Object[],
  *   huntersPresent: () => boolean,
  *   plannedSpot: () => {x: number, z: number, dirX: number, dirZ: number},
@@ -289,17 +290,27 @@ export function createAliensSystem(ctx) {
   // Lifecycle
   // ---------------------------------------------------------------------
 
+  /**
+   * The registry entry of the crew, kept so the Katana can hit through it
+   * (enemies.hit needs the kind) without a second lookup. Set by initAliens.
+   * @type {Object|null}
+   */
+  let alienKind = null;
+
   /** @returns {void} */
   function initAliens() {
     // In the shared register of enemies (engine/enemies.js): the crew on the
     // ground, killed by the plasma rifle, lightning, the T-Rex's flames or a
     // samurai's sword (engine/spaceship/samurai.js).
-    ctx.systems.enemies.registerKind({
+    alienKind = {
       kind: 'alien',
       list: targets,
       position: (alien) => alien.root.position,
       accepts: ['plasma', 'bolt', 'fire', 'blade'],
       damage: (alien, hit) => {
+        // The Katana (engine/hero/katana) sends a cut: the alien is removed
+        // and its root handed over. A samurai's blade has none: slashKill.
+        if (hit.type === 'blade' && hit.cut) return api.sliceKill(alien, hit.cut.takeOver, hit.cut.plane);
         if (hit.type === 'blade') api.slashKill(alien);
         else api.plasmaKill(alien, hit.at || alien.root.position);
         return true;
@@ -311,7 +322,8 @@ export function createAliensSystem(ctx) {
         Sim.three.scene.remove(alien.root);
         alien.skin.dispose();
       }
-    });
+    };
+    ctx.systems.enemies.registerKind(alienKind);
     // The ship and the hunter ships, for the black hole
     // (engine/effects/consumables.js): gone, with no crash of their own.
     ctx.systems.consumables.register({
@@ -621,6 +633,22 @@ export function createAliensSystem(ctx) {
     return S.aliens.filter(alien => alien.phase === 'patrol' || alien.phase === 'escort');
   }
 
+  /**
+   * The Katana's own view of the crew: every alien it may cut (patrol, escort
+   * or exiting down the ramp), with the registry kind to hit it through.
+   * Additive: `targets()` and the registry's list are untouched, so the rifle
+   * and the Black Hole Gun still see only patrol and escort. Walks the live
+   * list in place and allocates nothing (R-044).
+   * @param {(alien: Alien, kind: Object) => void} visit
+   * @returns {void}
+   */
+  function eachCuttable(visit) {
+    if (!alienKind) return;
+    for (const alien of S.aliens) {
+      if (alien.phase === 'patrol' || alien.phase === 'escort' || alien.phase === 'exiting') visit(alien, alienKind);
+    }
+  }
+
   /** @returns {number} people taken through the hatch this run */
   function abductedCount() {
     return S.state.abducted;
@@ -728,7 +756,7 @@ export function createAliensSystem(ctx) {
   }
 
   return {
-    initAliens, updateAliens, abductedCount, markers, nearestAlien: api.nearestAlien, strikeAlien: api.strikeAlien, targets,
+    initAliens, updateAliens, abductedCount, markers, nearestAlien: api.nearestAlien, strikeAlien: api.strikeAlien, targets, eachCuttable,
     shipTargets: api.shipTargets, huntersPresent: api.huntersPresent, plannedSpot: api.plannedSpot, frameLanding: api.frameLanding, plasmaKill: api.plasmaKill, boltKill: api.boltKill,
     sendSecondWave: api.sendSecondWave, mutate: api.mutate, mutatedCount: api.mutatedCount, instanceSources,
     resetAliens, disposeAliens

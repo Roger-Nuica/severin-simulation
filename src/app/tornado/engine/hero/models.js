@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { createSpinningStarsTexture } from '../../utils/textures.js';
 import { HERO } from './config.js';
+import { createKatanaRig } from './katana/model.js';
 
 /**
  * ===========================================================================
@@ -301,6 +302,9 @@ export function createHeroModels(ctx, S, api) {
     obj.armSplay = Math.abs(obj.limbs.armL.rotation.z);
     S.rifle = buildRifle();
     obj.limbs.armR.add(S.rifle);
+    // The Katana's sheath, blade and swoosh (hero/katana/model.js), posed by poseRoger.
+    S.katanaRig = createKatanaRig(ctx, S, { keepGeo, keepMat });
+    S.katanaRig.attach(obj);
     S.nameTag = buildNameTag();
     Sim.three.scene.add(S.nameTag);
     const starsTexture = createSpinningStarsTexture();
