@@ -109,7 +109,8 @@ Reuse the weapon, enemy, and damage contracts instead of building a parallel mel
 - `docs/` — architecture, combat, weapons, enemies, performance notes
 - `GAME_DESIGN.md` — player-facing gameplay narrative and design context
 - `.claude/rules.md` — implementation contracts, exact numeric gameplay values, and hard constraints
-- `FINDINGS.md`, `NOTES.md` — measurements, decisions, and design history
+- `FINDINGS.md` — measurements, benchmarks, and performance lessons
+- `PROJECT_HISTORY.md` — archived decision snapshots and the superseded roadmap; not a source of current behavior
 
 ## Architecture
 

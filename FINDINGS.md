@@ -9,7 +9,7 @@ twice. The three files each have one job:
   meant to feel to the player.
 - **`.claude/rules.md`**: exact implementation contracts and protected
   gameplay values.
-- **`NOTES.md`**: the behaviour agreed with Roger, and ideas for later.
+- **`PROJECT_HISTORY.md`**: archived decision snapshots, roadmap history, and unapproved future ideas; not a source of current behavior.
 - **`FINDINGS.md`** (this file): measurements, lessons and traps, with the
   charts in `docs/perf/`.
 

@@ -32,7 +32,14 @@
  */
 
 /** @typedef {'plasma'|'bullet'|'bolt'|'emp'|'fire'|'freeze'|'gravity'|'cleanse'|'blade'} DamageType */
-/** @typedef {{type: DamageType, amount?: number, at?: {x: number, y?: number, z: number}, mega?: boolean}} Hit */
+/**
+ * `cut` is only read by the aliens' adapter, for the Katana's blade hit: the
+ * alien is removed and `takeOver` receives its root (see crew.js sliceKill).
+ * `plane` is the slash's cut plane in world space (a point on it and its
+ * normal), for the slicing core: the alien's owner hands it, with the root
+ * and the alien's skin, to `takeOver`.
+ * @typedef {{type: DamageType, amount?: number, at?: {x: number, y?: number, z: number}, mega?: boolean, cut?: {takeOver?: (root: import('three').Object3D, plane?: any, skin?: import('three').Material) => void, plane?: {point: {x: number, y: number, z: number}, normal: {x: number, y: number, z: number}}}}} Hit
+ */
 /** @typedef {'frozen'|'disintegrated'|'absorbed'} EnemyState */
 
 /**

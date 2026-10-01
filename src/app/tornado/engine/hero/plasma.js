@@ -113,6 +113,8 @@ export function createHeroPlasma(ctx, S, api) {
    */
   function enterAim() {
     if (S.state.phase !== 'running') return;
+    // The Katana stays in third person (heroWeapons.js katanaToggle).
+    if (S.weapons.current() === 'katana') return;
     S.state.drawn = true;
     if (S.rifle) S.rifle.visible = true;
     S.state.phase = 'aiming';

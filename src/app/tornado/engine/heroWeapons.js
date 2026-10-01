@@ -3,6 +3,13 @@ import * as THREE from 'three';
 import { HOLE } from './player/blackHole.js';
 import { createBullets } from './hero/bullets.js';
 import { createFireGun } from './hero/fireGun.js';
+import { createKatanaSlash } from './hero/katana/slash.js';
+import { createKatanaPieces } from './hero/katana/pieces.js';
+import { createKatanaGoo } from './hero/katana/goo.js';
+import { createKatanaFeel } from './hero/katana/feel.js';
+import { createKatanaBlade } from './hero/katana/blade.js';
+import { createKatanaBladeUi } from './hero/katana/bladeUi.js';
+import { createKatanaBladeCut } from './hero/katana/bladeCut.js';
 
 /**
  * ===========================================================================
@@ -49,10 +56,10 @@ import { createFireGun } from './hero/fireGun.js';
  * the rest of a run's resources when Hero Mode ends.
  */
 
-export const WEAPONS = ['rifle', 'minigun', 'railgun', 'fire', 'blackhole'];
-const WEAPON_NAMES = { rifle: 'PLASMA RIFLE', minigun: 'MINIGUN', railgun: 'RAILGUN', fire: 'FIRE GUN', blackhole: 'BLACK HOLE GUN' };
+export const WEAPONS = ['rifle', 'minigun', 'railgun', 'fire', 'blackhole', 'katana'];
+const WEAPON_NAMES = { rifle: 'PLASMA RIFLE', minigun: 'MINIGUN', railgun: 'RAILGUN', fire: 'FIRE GUN', blackhole: 'BLACK HOLE GUN', katana: 'KATANA' };
 // Each weapon's colour on the HUD's WEAPON line (the railgun is yellow now).
-const WEAPON_COLOURS = { rifle: '', minigun: '#e8c46a', railgun: '#ffd83a', fire: '#ff8a3a', blackhole: '#c99bff' };
+const WEAPON_COLOURS = { rifle: '', minigun: '#e8c46a', railgun: '#ffd83a', fire: '#ff8a3a', blackhole: '#c99bff', katana: '#9fe8ff' };
 // The railgun's yellow: its coils, its flash, its ring.
 const RAIL_YELLOW = new THREE.Color(2.4, 2.0, 0.35);
 
@@ -85,6 +92,29 @@ const UP = new THREE.Vector3(0, 1, 0);
  * @property {() => THREE.Vector3} rogerPosition
  * @property {(unit: Object, killAt: number) => number} pursuerBulletHit one
  *   of his own pursuers hit by a round; the rounds it has taken so far
+ * @property {import('./hero/katana/slash.js').KatanaSlashEnv} katanaBody what
+ *   the Katana's quick slash needs of Roger (heading, state, movement helpers)
+ */
+
+/**
+ * @typedef {Object} KatanaInput the Katana's swipe input (Subtask 2), read by
+ *   the slash logic later; the numbers are the mouse's own movement, in pixels
+ * @property {boolean} drawn right-click toggled it; third person, the phase stays 'running'
+ * @property {boolean} down the left button is held
+ * @property {number} hold real seconds the button has been held (0 when up)
+ * @property {number} pressX where the virtual cursor was when the button went down (the cut line's start)
+ * @property {number} pressY
+ * @property {number} swipeX mouse movement along x since the button went down
+ * @property {number} swipeY mouse movement along y since the button went down
+ * @property {number} cursorX the virtual cursor, driven by accumulated movement (0 to innerWidth)
+ * @property {number} cursorY the virtual cursor (0 to innerHeight)
+ */
+
+/**
+ * @typedef {Object} KatanaRelease what a button release hands the slash logic
+ * @property {number} dx swipe movement along x
+ * @property {number} dy swipe movement along y
+ * @property {number} hold real seconds held
  */
 
 /**
@@ -93,6 +123,7 @@ const UP = new THREE.Vector3(0, 1, 0);
  * @returns {{
  *   startRun: () => void,
  *   endRun: () => void,
+ *   dispose: () => void,
  *   current: () => string,
  *   cycle: (dir?: number) => void,
  *   showView: (on: boolean) => void,
@@ -103,7 +134,15 @@ const UP = new THREE.Vector3(0, 1, 0);
  *   hudLine: () => string,
  *   isHot: (kind: string) => boolean|null,
  *   bulletTime: (on: boolean) => void,
- *   hudColour: () => string
+ *   hudColour: () => string,
+ *   katanaToggle: () => boolean,
+ *   katanaPress: () => boolean,
+ *   katanaRelease: () => KatanaRelease|null,
+ *   katanaCancel: () => void,
+ *   katanaLook: (dx: number, dy: number) => void,
+ *   katanaState: () => Readonly<KatanaInput>,
+ *   katanaBlade: () => import('./hero/katana/blade.js').KatanaBlade,
+ *   katanaBladeLine: () => Readonly<import('./hero/katana/bladeUi.js').BladeLine>
  * }}
  */
 export function createHeroWeapons(ctx, hero) {
@@ -133,6 +172,51 @@ export function createHeroWeapons(ctx, hero) {
   let fireGun = null;
   /** @type {{group: THREE.Group, muzzle: THREE.Object3D, flash: THREE.Mesh, pilot: THREE.Mesh}|null} */
   let fireView = null;
+  /** @type {KatanaInput} */
+  const katana = { drawn: false, down: false, hold: 0, pressX: 0, pressY: 0, swipeX: 0, swipeY: 0, cursorX: 0, cursorY: 0 };
+  /** @type {ReturnType<typeof createKatanaPieces>|null} the cut halves (hero/katana/pieces.js), made on first use, disposed in endRun */
+  let pieces = null;
+  /**
+   * The slicing core, made when the Katana is first drawn or first cuts.
+   * @returns {ReturnType<typeof createKatanaPieces>}
+   */
+  function ensurePieces() {
+    if (!pieces) {
+      pieces = createKatanaPieces(ctx, {
+        onCut: (from, to, normal) => {
+          ensureGoo().burst(from, to, normal);
+          feel.flash(from, to);
+        }
+      });
+    }
+    return pieces;
+  }
+  /** @type {ReturnType<typeof createKatanaGoo>|null} the alien blood (hero/katana/goo.js): made once a simulation, emptied in endRun, disposed with the simulation */
+  let goo = null;
+  /**
+   * The alien blood, made on the first cut (its pool is tracked by the
+   * particle budget, which cannot untrack, so it is never remade per run).
+   * @returns {ReturnType<typeof createKatanaGoo>}
+   */
+  function ensureGoo() {
+    if (!goo) goo = createKatanaGoo(ctx);
+    return goo;
+  }
+  /** The cut's hit-stop, shake, flash and bonus score (hero/katana/feel.js): one per simulation, cleared in endRun, disposed with the simulation. */
+  const feel = createKatanaFeel(ctx);
+  /** The Katana's quick slash (hero/katana/slash.js): one per simulation, cleared with `katanaCancel`. */
+  const slash = createKatanaSlash(ctx, { ...hero.katanaBody, pieces: ensurePieces, feel: () => feel });
+  /** Blade Mode (hero/katana/blade.js): one per simulation, left by `katanaCancel`, freed in dispose. */
+  const bladeCut = createKatanaBladeCut(ctx, {
+    input: () => katana,
+    position: hero.katanaBody.position,
+    rig: hero.katanaBody.rig,
+    pieces: ensurePieces,
+    feel: () => feel
+  });
+  const blade = createKatanaBlade(ctx, { canAct: hero.katanaBody.canAct, cut: bladeCut.resolve });
+  /** Blade Mode's vignette, alien highlights and cut line (hero/katana/bladeUi.js): one per simulation, cleared in katanaCancel and endRun, freed in dispose. */
+  const bladeUi = createKatanaBladeUi(ctx, { active: blade.active, input: () => katana, position: hero.katanaBody.position });
   const muzzleAt = new THREE.Vector3();
   /** @type {THREE.Mesh|null} the railgun's ring on the ground */
   let reticle = null;
@@ -430,13 +514,15 @@ export function createHeroWeapons(ctx, hero) {
    */
   function cycle(dir = 1) {
     triggerUp();
+    katanaCancel();
     state.weapon = (state.weapon + (dir < 0 ? WEAPONS.length - 1 : 1)) % WEAPONS.length;
     if (state.shown) showView(true);
     const w = current();
     const extra = w === 'minigun' ? ` · ${state.ammo} rounds`
       : w === 'railgun' ? ' · click to call a bolt down'
         : w === 'fire' ? ' · hold to burn · the only thing the Yeti fears'
-          : w === 'blackhole' ? ` · ${HOLE.cost * 10}% energy a shot` : '';
+          : w === 'blackhole' ? ` · ${HOLE.cost * 10}% energy a shot`
+            : w === 'katana' ? ' · RIGHT-CLICK to draw · click or swipe to cut · hold for Blade Mode' : '';
     hero.flashMessage(`${WEAPON_NAMES[w]}${extra}`);
   }
 
@@ -475,6 +561,128 @@ export function createHeroWeapons(ctx, hero) {
   /** @returns {void} */
   function triggerUp() {
     state.firing = false;
+  }
+
+  // ---------------------------------------------------------------------
+  // The Katana's draw state, swipe input and quick slash
+  // ---------------------------------------------------------------------
+
+  /**
+   * Lets go of the pointer lock the drawn Katana asked for.
+   * @returns {void}
+   */
+  function releaseKatanaLock() {
+    const canvas = Sim.three.renderer.domElement;
+    if (document.pointerLockElement === canvas) document.exitPointerLock();
+  }
+
+  /**
+   * Right-click with the Katana in hand: drawn, or put away. It stays in the
+   * follow camera (the phase is not touched); the pointer is locked while it
+   * is out and the virtual cursor starts at the middle of the window.
+   * @returns {boolean} whether it is drawn now
+   */
+  function katanaToggle() {
+    if (katana.drawn) {
+      katanaCancel();
+      return false;
+    }
+    if (current() !== 'katana') return false;
+    katana.drawn = true;
+    // The cut's shader variants are built now, not at the first cut.
+    ensurePieces().prewarm();
+    katana.cursorX = window.innerWidth / 2;
+    katana.cursorY = window.innerHeight / 2;
+    try {
+      const request = Sim.three.renderer.domElement.requestPointerLock();
+      if (request && typeof request.then === 'function') {
+        // A lock granted after the Katana was already put away is let go at once.
+        request.then(() => { if (!katana.drawn) releaseKatanaLock(); }, () => {});
+      }
+    } catch {
+      // No lock (an embedding frame may not allow it): the mouse still moves the cursor.
+    }
+    return true;
+  }
+
+  /**
+   * The left button goes down on the drawn Katana: the swipe and the hold
+   * clock start from zero.
+   * @returns {boolean} whether it was taken (drawn and not already down)
+   */
+  function katanaPress() {
+    if (!katana.drawn || katana.down) return false;
+    katana.down = true;
+    katana.hold = 0;
+    katana.pressX = katana.cursorX;
+    katana.pressY = katana.cursorY;
+    katana.swipeX = 0;
+    katana.swipeY = 0;
+    return true;
+  }
+
+  /**
+   * Takes the press's swipe and hold and clears them, with no slash.
+   * @returns {KatanaRelease|null} null if no press was taken
+   */
+  function takeRelease() {
+    if (!katana.down) return null;
+    const out = { dx: katana.swipeX, dy: katana.swipeY, hold: katana.hold };
+    katana.down = false;
+    katana.hold = 0;
+    katana.swipeX = 0;
+    katana.swipeY = 0;
+    return out;
+  }
+
+  /**
+   * The left button comes up: Blade Mode, if it is on, takes the release and
+   * ends; otherwise a short press is a quick slash (a swipe picks its
+   * direction, a plain click runs the chain), and a press held past Blade
+   * Mode's threshold fires nothing.
+   * @returns {KatanaRelease|null} the swipe and the hold, or null if no press was taken
+   */
+  function katanaRelease() {
+    const out = takeRelease();
+    if (out && katana.drawn && !blade.release(out)) slash.release(out);
+    return out;
+  }
+
+  /**
+   * Puts the Katana away and drops anything held: the wheel, Esc, a blur, a
+   * car, a daze, a freeze, death, the run ending.
+   * @returns {void}
+   */
+  function katanaCancel() {
+    const wasDrawn = katana.drawn;
+    katana.drawn = false;
+    takeRelease();
+    blade.cancel();
+    bladeUi.clear();
+    slash.cancel();
+    if (wasDrawn) releaseKatanaLock();
+  }
+
+  /**
+   * The frame's mouse movement, handed on by hero/input.js (which is the one
+   * place that drains the input's look, so it is not drained twice).
+   * @param {number} dx
+   * @param {number} dy
+   * @returns {void}
+   */
+  function katanaLook(dx, dy) {
+    if (!katana.drawn || (!dx && !dy)) return;
+    katana.cursorX = Math.min(window.innerWidth, Math.max(0, katana.cursorX + dx));
+    katana.cursorY = Math.min(window.innerHeight, Math.max(0, katana.cursorY + dy));
+    if (katana.down) {
+      katana.swipeX += dx;
+      katana.swipeY += dy;
+    }
+  }
+
+  /** @returns {Readonly<KatanaInput>} the live swipe state (one object, updated in place) */
+  function katanaState() {
+    return katana;
   }
 
   // ---------------------------------------------------------------------
@@ -649,6 +857,20 @@ export function createHeroWeapons(ctx, hero) {
   function update(rawDt, aiming, cam, aimDir) {
     state.recoil = Math.max(0, state.recoil - rawDt * 5);
     state.railCooldown = Math.max(0, state.railCooldown - rawDt);
+    // The Katana's hold clock: real time, so Blade Mode's threshold does not
+    // stretch with Time Slow.
+    if (katana.down) katana.hold += rawDt;
+    // Blade Mode begins at the hold threshold and times itself out, both on real time.
+    blade.update(katana.drawn && katana.down ? katana.hold : 0, rawDt);
+    // The quick slash's cooldown, wind-up and lunge, on the same real clock.
+    slash.update(rawDt);
+    // Blade Mode's vignette, highlights and cut line follow the virtual cursor (real time).
+    bladeUi.update(rawDt);
+    // The cut halves fly, bounce and fade on the world clock (slow motion applies).
+    if (pieces) pieces.update(rawDt * ctx.systems.time.scale('world'));
+    if (goo) goo.update(rawDt * ctx.systems.time.scale('world'));
+    // The cut's hit-stop and flash run on real time, so they end in slow motion too.
+    feel.update(rawDt);
 
     if (aiming && state.firing && current() === 'minigun') {
       state.fireClock += rawDt;
@@ -738,6 +960,7 @@ export function createHeroWeapons(ctx, hero) {
     if (w === 'minigun') return kind === 'person' || kind === 'terminator' || kind === 'unit' || kind === 'enemy';
     if (w === 'railgun' || w === 'blackhole') return kind !== 'sky';
     if (w === 'fire') return kind === 'person' || kind === 'enemy' || kind === 'building';
+    // The Katana has no crosshair in third person, so it never turns one red.
     return null;
   }
 
@@ -750,6 +973,10 @@ export function createHeroWeapons(ctx, hero) {
    * @returns {void}
    */
   function startRun() {
+    katanaCancel();
+    blade.clear();
+    bladeUi.clear();
+    feel.clear();
     Object.assign(state, {
       weapon: 0, ammo: MINIGUN.ammo, firing: false, fireClock: 0, spin: 0, recoil: 0,
       railCooldown: 0, shown: false
@@ -762,11 +989,21 @@ export function createHeroWeapons(ctx, hero) {
    * @returns {void}
    */
   function endRun() {
+    katanaCancel();
+    blade.clear();
+    bladeUi.clear();
     state.firing = false;
     state.shown = false;
     for (const vm of [minigunView, railgunView, holeView, fireView]) if (vm) Sim.three.scene.remove(vm.group);
     if (bullets) bullets.dispose();
     if (fireGun) fireGun.dispose();
+    if (pieces) pieces.dispose();
+    pieces = null;
+    if (goo) goo.clear();
+    // Their GPU resources (the flash quad, the ring pool, the cut-line node)
+    // go with the run; each is rebuilt on first use in the next one.
+    feel.dispose();
+    bladeUi.dispose();
     if (reticle) Sim.three.scene.remove(reticle);
     if (holeReticle) Sim.three.scene.remove(holeReticle);
     minigunView = null;
@@ -779,9 +1016,25 @@ export function createHeroWeapons(ctx, hero) {
     reticle = null;
   }
 
+  /**
+   * The end of the simulation: what outlives a run is freed (the alien blood's pool).
+   * @returns {void}
+   */
+  function dispose() {
+    endRun();
+    blade.dispose();
+    bladeUi.dispose();
+    if (goo) goo.dispose();
+    goo = null;
+    feel.dispose();
+  }
+
   return {
-    startRun, endRun, current, cycle, showView, triggerDown, triggerUp,
+    startRun, endRun, dispose, current, cycle, showView, triggerDown, triggerUp,
     placeView, update, hudLine, isHot, bulletTime,
+    katanaToggle, katanaPress, katanaRelease, katanaCancel, katanaLook, katanaState,
+    katanaBlade: () => blade,
+    katanaBladeLine: () => bladeUi.line(),
     hudColour: () => WEAPON_COLOURS[/** @type {keyof typeof WEAPON_COLOURS} */ (current())] || ''
   };
 }

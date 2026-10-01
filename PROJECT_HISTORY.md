@@ -1,13 +1,12 @@
-# Tornado simulator — agreed behaviour and ideas for later
+# Tornado Simulator — Project History
 
-A running record kept with Roger, so each working session starts from the
-same understanding. **Agreed behaviour** is what the game is meant to do
-now: read it before changing anything it touches, and update it when a
-request changes it. **Ideas for later** are not built yet. The gameplay
-narrative is in `GAME_DESIGN.md` and implementation contracts are in
-`.claude/rules.md`; this file is the why and the what-next.
+> **Archive notice:** This file preserves dated decision snapshots, a completed roadmap, and unapproved future ideas. Its contents are historical context and may be stale; do not treat them as current requirements or use them to infer runtime behavior.
+>
+> The runtime code is the source of truth for implemented behavior. Use `.claude/rules.md` for verified implementation contracts and numeric values, and `GAME_DESIGN.md` for the current player-facing gameplay description. Keep this archive for the reasoning and history behind changes.
 
-## Agreed behaviour
+## Historical decision snapshots
+
+The entries below record what was agreed or reported at the time they were written. They are retained as an audit trail and are not guaranteed to describe the current build.
 
 ### Controls, Bullet Time, the Fire Gun (2026-10-01, on request)
 - **W A S D everywhere**, the arrow keys removed (no fallback): Hero Mode,
@@ -299,9 +298,9 @@ narrative is in `GAME_DESIGN.md` and implementation contracts are in
   It happens on `main` too. Probably React StrictMode's double mount leaving
   the discarded instance's Reset listener attached.
 
-## Roadmap: energy, abilities, enemies, new content (agreed 2026-09-30)
+## Archived roadmap: energy, abilities, enemies, new content (recorded 2026-09-30)
 
-One PR per step, each tried on the Vercel preview before the next.
+This is a historical plan, not an active roadmap. Its PR ordering, completion labels, open questions, and implementation details may have been superseded. Check current plans, runtime code, and `.claude/rules.md` before acting on anything listed here.
 
 ### Decisions
 - The new **energy** is separate from the plasma rifle's charge. It pays only
@@ -477,7 +476,7 @@ the wheel now, see "Scripted events and the black hole" below.)
   the funnel can empty, with the AIR COWBOY mission), **🦈 the Sharkspout**
   (`engine/waterspout/sharks.js`) and the moon gravity.
 
-### Open questions
+### Questions recorded at the time (current status unknown)
 - The energy costs are starting values, to be calibrated.
 - The Chuck Norris scene:
   - "Altered physics" after it: kept, as 10 s of low gravity (decided in
@@ -487,12 +486,12 @@ the wheel now, see "Scripted events and the black hole" below.)
 - Missions: they stay after PR 5 (only the NPC behaviour moved up to after
   PR 1b).
 
-### Decided later
+### Decisions recorded later
 - Chuck Norris: the simulation slowed, the player keeps control
   (2026-09-30).
 - NPC behaviour comes right after PR 1b (2026-09-30).
 
-## Ideas for later
+## Unapproved future ideas (not committed)
 
 ### Online, single player
 - Deploy the Next.js app (it builds to a static page) to Vercel or any

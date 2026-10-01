@@ -629,6 +629,42 @@ export function createAlienCrew(ctx, S, api) {
   }
 
   /**
+   * The Katana (engine/hero/katana): the alien is cut and leaves the crew
+   * at once, with no fire and no burning animation. Additive beside
+   * slashKill. The base kill (ALIENS.killScore) is scored here exactly once,
+   * as ignite() would, but Sim.stats.aliensBurned is not touched (it counts
+   * burned aliens for the Fire crew mission) and no death cry or fire event
+   * is played: the Katana's own sound and game feel do that.
+   *
+   * Ownership of `alien.root`: when `takeOver` is given it receives the root
+   * (still in the scene, at the alien's pose) and becomes responsible for
+   * removing it; the owner then neither removes it nor disposes the skin
+   * here (resetAliens still disposes the skin on reset, so the taker must
+   * clone any material it keeps). Without `takeOver` the root is removed and
+   * the skin disposed straight away, as the burning path does when it ends.
+   * `plane` (the cut's plane in world space) and the alien's own skin are
+   * handed on to `takeOver` with the root, for the slicing core
+   * (hero/katana/pieces.js).
+   * @param {Alien} alien
+   * @param {((root: THREE.Object3D, plane?: any, skin?: THREE.Material) => void)} [takeOver]
+   * @param {any} [plane] the slash's cut plane ({point, normal}), read at once by `takeOver`
+   * @returns {boolean} whether the alien was cut (false: not in a cuttable phase)
+   */
+  function sliceKill(alien, takeOver, plane) {
+    if (alien.phase !== 'patrol' && alien.phase !== 'escort' && alien.phase !== 'exiting') return false;
+    for (const a of S.abductees) if (a.escorts) a.escorts = a.escorts.filter(e => e !== alien);
+    alien.phase = 'dead';
+    ctx.systems.damage.addDamageScore(ALIENS.killScore);
+    if (takeOver) {
+      takeOver(alien.root, plane, alien.skin);
+    } else {
+      Sim.three.scene.remove(alien.root);
+      alien.skin.dispose();
+    }
+    return true;
+  }
+
+  /**
    * A lightning bolt landing (strikeTargeting.js -- the Lightning tile, and
    * Roger's railgun): any of the crew inside `radius` of it burns, as the
    * Firenado or a plasma shot would take them.
@@ -651,5 +687,5 @@ export function createAlienCrew(ctx, S, api) {
     return killed;
   }
 
-  return { insideBuilding, pickPatrolTarget, poseWalk, updateAlien, dance, unDance, checkFirenado, ignite, currentTarget, nearestTarget, rampage, nearestAlien, fireAt, strikeAlien, grabTerminators, huntRoger, plasmaKill, slashKill, boltKill };
+  return { insideBuilding, pickPatrolTarget, poseWalk, updateAlien, dance, unDance, checkFirenado, ignite, currentTarget, nearestTarget, rampage, nearestAlien, fireAt, strikeAlien, grabTerminators, huntRoger, plasmaKill, slashKill, sliceKill, boltKill };
 }

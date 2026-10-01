@@ -159,9 +159,10 @@ export function createHeroMovement(ctx, S, api) {
    * covered; the rifle held up while aiming; and the dazed stagger with arms
    * out. (It used to be a stiff lean-forward run.)
    * @param {number} moved world units covered this frame
+   * @param {number} dt real seconds, for the Katana's draw and slash animation
    * @returns {void}
    */
-  function poseRoger(moved) {
+  function poseRoger(moved, dt) {
     const L = S.roger.limbs;
     const frac = THREE.MathUtils.clamp(Math.abs(S.state.speed) / HERO.runSpeed, 0, 1);
     S.state.cycle += moved * HERO.stride;
@@ -180,6 +181,16 @@ export function createHeroMovement(ctx, S, api) {
     if (S.roger.torso) S.roger.torso.rotation.y = moving ? -s * 0.28 * (0.4 + frac) : 0;
     if (S.roger.quiff) S.roger.quiff.rotation.x = -0.35 + Math.abs(c) * 0.12 * frac;
 
+    // The Katana's rig (hero/katana/model.js) shows the sheath while it is the
+    // weapon in hand and takes the arms once it is drawn; a daze or the rifle's
+    // aim puts it away at once. It reads the weapons API, never S.state.drawn.
+    const weapons = S.weapons;
+    const katanaHeld = S.katanaRig && weapons
+      ? S.katanaRig.step(
+        dt, weapons.current() === 'katana', weapons.katanaState().drawn, frac,
+        S.state.phase === 'dazed' || S.state.phase === 'aiming'
+      )
+      : false;
     if (S.state.phase === 'dazed') {
       L.armL.rotation.set(-0.55 - s * 0.12, 0, -1.15);
       L.armR.rotation.set(-0.55 + s * 0.12, 0, 1.15);
@@ -199,6 +210,7 @@ export function createHeroMovement(ctx, S, api) {
       const out = S.roger.armSplay + 0.12 + 0.1 * frac;
       L.armL.rotation.set(-s * armAmp, s * 0.25 * frac, -out);
       L.armR.rotation.set(s * armAmp, s * 0.25 * frac, out);
+      if (katanaHeld) S.katanaRig.applyArms(L.armL, L.armR);
     }
   }
 
@@ -287,7 +299,7 @@ export function createHeroMovement(ctx, S, api) {
     // Ran into a wall: the run cycle stops with him.
     if (S.state.phase === 'running' && moved < Math.abs(S.state.speed) * dt * 0.3) S.state.speed *= 0.5;
     S.roger.mesh.rotation.y = S.state.heading;
-    poseRoger(moved);
+    poseRoger(moved, dt);
 
     S.nameTag.position.set(p.x, p.y + HERO.tagHeight, p.z);
     S.stars.visible = S.state.phase === 'dazed';

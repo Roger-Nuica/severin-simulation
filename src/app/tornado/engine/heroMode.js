@@ -336,7 +336,17 @@ export function createHeroModeSystem(ctx) {
   S.weapons = createHeroWeapons(ctx, {
     keepGeo: api.keepGeo, keepMat: api.keepMat, traceAim: api.traceAim,
     flashMessage: api.flashMessage, pursuerBulletHit: api.pursuerBulletHit,
-    rogerPosition: () => S.roger.mesh.position
+    rogerPosition: () => S.roger.mesh.position,
+    // What the Katana's quick slash reads of Roger (hero/katana/slash.js);
+    // the movement helpers are looked up lazily, as `api` fills in.
+    katanaBody: {
+      heading: () => S.state.heading,
+      canAct: () => S.state.phase === 'running' && !(S.state.frozen > 0),
+      rig: () => S.katanaRig || null,
+      position: () => S.roger.mesh.position,
+      blockedAt: (x, z, pad) => api.blockedAt(x, z, pad),
+      pushOut: (p, pad) => api.pushOut(p, pad)
+    }
   });
 
   // ---------------------------------------------------------------------
@@ -524,6 +534,8 @@ export function createHeroModeSystem(ctx) {
     S.rings = [];
     S.viewRifle = null;
     S.doorCar = null;
+    // The Katana's rig went with S.roger's meshes above; no stale reference between runs.
+    S.katanaRig = null;
     if (S.hud) S.hud.classList.remove('door', 'driving');
 
     for (const id of EXCLUSIVE_BUTTONS) {
@@ -751,6 +763,7 @@ export function createHeroModeSystem(ctx) {
   /** @returns {void} */
   function disposeHero() {
     resetHero();
+    if (S.weapons) S.weapons.dispose();
     for (const el of [S.hud, S.crosshair, S.banner, S.over]) if (el && el.parentNode) el.parentNode.removeChild(el);
     S.hud = S.crosshair = S.banner = S.over = null;
     S.button = null;
