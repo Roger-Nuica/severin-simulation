@@ -29,6 +29,12 @@
  */
 
 export const ENERGY = {
+  // On request (2026-10-01): the abilities and the Black Hole Gun cost
+  // nothing. The bar, its sources and the power plants' terminals all still
+  // work underneath (the level is tracked and charged as before); only what
+  // the hero can spend and what the HUD reads is pinned full. Set false to
+  // bring the old economy back.
+  infinite: true,
   segments: 10,
   // Where a run starts, as a fraction of the bar (to be calibrated once
   // there are ways to fill it).
@@ -86,12 +92,12 @@ export function createEnergy() {
 
   /** @returns {number} 0..1 */
   function level() {
-    return value;
+    return ENERGY.infinite ? 1 : value;
   }
 
   /** @returns {number} whole segments filled */
   function segments() {
-    return Math.floor(value * ENERGY.segments + 1e-6);
+    return Math.floor(level() * ENERGY.segments + 1e-6);
   }
 
   /**
@@ -108,6 +114,7 @@ export function createEnergy() {
    */
   function spend(n) {
     if (!canSpend(n)) return false;
+    if (ENERGY.infinite) return true;
     value = Math.max(0, value - n / ENERGY.segments);
     return true;
   }
@@ -175,7 +182,8 @@ export function createEnergySystem(ctx) {
     const d = Math.hypot(roger.x - x, roger.z - z);
     if (d >= reach) return 0;
     const got = system.hero.charge(size * ABSORB.full * (1 - d / reach), source);
-    if (got <= 0) return 0;
+    // The bar is full for good while ENERGY.infinite: no glow, no notices.
+    if (got <= 0 || ENERGY.infinite) return got;
     const now = ctx.now();
     flashUntil = now + ABSORB.flashSeconds;
     unshown += got;
