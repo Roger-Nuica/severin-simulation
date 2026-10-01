@@ -254,7 +254,7 @@ jobs:
           const plan = fs.readFileSync(planPath, 'utf8');
           const heading = new RegExp(`^- \\[x\\](?: DONE)? \\*\\*Subtask ${id}\\b[^\\n]*$`, 'm');
           const match = plan.match(heading);
-          if (match) fs.writeFileSync(planPath, plan.replace(heading, match[0].replace(/^- \\[x\\](?: DONE)?/, '- [ ]')));
+          if (match) fs.writeFileSync(planPath, plan.replace(heading, match[0].replace(/^- \[x\](?: DONE)?/, '- [ ]')));
           const failures = [];
           if (process.env.LINT_OUTCOME === 'failure') failures.push('npm run lint failed');
           if (process.env.BUILD_OUTCOME === 'failure') failures.push('npm run build failed');
