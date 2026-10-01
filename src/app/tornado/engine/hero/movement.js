@@ -1,0 +1,331 @@
+// @ts-check
+import * as THREE from 'three';
+import { PERSON_SCALE } from '../environment/people.js';
+import { HERO, STREETS_ALONG_X, STREETS_ALONG_Z } from './config.js';
+
+/**
+ * ===========================================================================
+ * SECTION HM.2 — Roger on foot
+ * ===========================================================================
+ * Where he may stand (not inside a building), where he comes in and where
+ * the bunker is, his walk and his swagger, being dazed.
+ */
+
+/**
+ * @param {Object} ctx
+ * @param {Object} S the shared state (see heroMode.js)
+ * @param {Object} api every module's functions, by name
+ * @returns {Object}
+ */
+export function createHeroMovement(ctx, S, api) {
+  const { Sim, container } = ctx;
+
+  // ---------------------------------------------------------------------
+  // Placing things
+  // ---------------------------------------------------------------------
+
+  /**
+   * @param {number} x
+   * @param {number} z
+   * @param {number} pad
+   * @returns {boolean} whether a standing building's footprint covers it
+   */
+  function inBuilding(x, z, pad) {
+    return someSolid((cx, cz, hw, hd) => Math.abs(x - cx) < hw + pad && Math.abs(z - cz) < hd + pad);
+  }
+
+  /**
+   * Every box on the ground that Roger and his pursuers stop against: the
+   * town's standing buildings, the backdrop town's blocks still standing
+   * (environment/backdrop.js) now that he can walk out to them, and the dam
+   * wall (flood.js; open at the breach once it has burst). Each is visited
+   * as its centre and half extents, until `visit` says to stop.
+   * @param {(cx: number, cz: number, hw: number, hd: number) => boolean} visit
+   * @returns {boolean} whether `visit` stopped it
+   */
+  function someSolid(visit) {
+    for (const building of ctx.Environment.buildings) {
+      if (building.damageState === 'collapsed') continue;
+      const fp = building.mesh.userData.footprint;
+      if (!fp) continue;
+      const b = building.mesh.position;
+      if (visit(b.x, b.z, fp.width / 2, fp.depth / 2)) return true;
+    }
+    const backdrop = ctx.systems.backdrop;
+    for (const block of backdrop ? backdrop.solidBlocks() : []) {
+      if (block.state === 0 && visit(block.x, block.z, block.hw, block.hd)) return true;
+    }
+    const flood = ctx.systems.flood;
+    for (const wall of flood ? flood.damSolids() : []) {
+      if (visit(wall.x, wall.z, wall.hw, wall.hd)) return true;
+    }
+    // The volcano's cone (engine/volcano.js).
+    const volcano = ctx.systems.volcano;
+    for (const block of volcano ? volcano.solids() : []) {
+      if (visit(block.x, block.z, block.hw, block.hd)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * @param {number} x
+   * @param {number} z
+   * @param {number} pad
+   * @returns {boolean} whether something walking can stand here
+   */
+  function blockedAt(x, z, pad) {
+    if (Math.abs(x) > HERO.bound || Math.abs(z) > HERO.bound) return true;
+    // The dam is the west edge of the world (flood/dam.js westLimit).
+    if (x < ctx.systems.flood.westLimit() + pad) return true;
+    if (ctx.systems.chasm && ctx.systems.chasm.gapAt(x, z) > -1.5) return true;
+    return inBuilding(x, z, pad);
+  }
+
+  /**
+   * Out of any footprint along the shorter way, as the Terminator is.
+   * @param {THREE.Vector3} p mutated in place
+   * @param {number} pad
+   * @returns {void}
+   */
+  function pushOut(p, pad) {
+    someSolid((cx, cz, hw, hd) => {
+      const dx = p.x - cx;
+      const dz = p.z - cz;
+      const ox = hw + pad - Math.abs(dx);
+      const oz = hd + pad - Math.abs(dz);
+      if (ox <= 0 || oz <= 0) return false;
+      if (ox < oz) p.x += Math.sign(dx || 1) * ox;
+      else p.z += Math.sign(dz || 1) * oz;
+      return false;
+    });
+    p.x = THREE.MathUtils.clamp(p.x, Math.max(-HERO.bound, ctx.systems.flood.westLimit() + pad), HERO.bound);
+    p.z = THREE.MathUtils.clamp(p.z, -HERO.bound, HERO.bound);
+  }
+
+  /**
+   * A pavement spot on one of the streets, clear of buildings and well away
+   * from every funnel.
+   * @returns {{x: number, z: number}}
+   */
+  function pickSpawn() {
+    let fallback = { x: 0, z: -8 };
+    for (let i = 0; i < 40; i++) {
+      const alongX = Math.random() < 0.67;
+      const lines = alongX ? STREETS_ALONG_X : STREETS_ALONG_Z;
+      const line = lines[Math.floor(Math.random() * lines.length)] + (Math.random() < 0.5 ? -3.5 : 3.5);
+      const along = (Math.random() * 2 - 1) * 90;
+      const x = alongX ? along : line;
+      const z = alongX ? line : along;
+      if (i === 0) fallback = { x, z };
+      if (blockedAt(x, z, 2)) continue;
+      let clear = true;
+      for (const { Vortex } of ctx.tornadoes.active) {
+        if (Math.hypot(x - Vortex.center.x, z - Vortex.center.z) < HERO.spawnFunnelClearance) clear = false;
+      }
+      if (clear) return { x, z };
+    }
+    return fallback;
+  }
+
+  /**
+   * One shelter door (shelters.js) for this run: a good run away from
+   * Roger, or the farthest there is.
+   * @param {number} x
+   * @param {number} z
+   * @returns {{x: number, z: number}}
+   */
+  function pickBunker(x, z) {
+    const doors = ctx.Environment.buildings.filter(b => b.shelter && b.damageState !== 'collapsed')
+      .flatMap(b => b.shelterEntrances || []);
+    if (!doors.length) return { x: -x || 60, z: -z || 60 };
+    const [lo, hi] = HERO.bunkerDistance;
+    const good = doors.filter(d => {
+      const dist = Math.hypot(d.x - x, d.z - z);
+      return dist >= lo && dist <= hi;
+    });
+    if (good.length) return good[Math.floor(Math.random() * good.length)];
+    return doors.reduce((a, b) => (Math.hypot(a.x - x, a.z - z) > Math.hypot(b.x - x, b.z - z) ? a : b));
+  }
+
+  // ---------------------------------------------------------------------
+  // Roger
+  // ---------------------------------------------------------------------
+
+  /**
+   * Poses the figure: a swagger rather than the town's plain run, on
+   * request -- the shoulders rolling against the stride, the hips swaying
+   * side to side, a spring in the step, legs a little apart, elbows out
+   * over the big arms, the quiff bouncing -- whose rate is the ground
+   * covered; the rifle held up while aiming; and the dazed stagger with arms
+   * out. (It used to be a stiff lean-forward run.)
+   * @param {number} moved world units covered this frame
+   * @returns {void}
+   */
+  function poseRoger(moved) {
+    const L = S.roger.limbs;
+    const frac = THREE.MathUtils.clamp(Math.abs(S.state.speed) / HERO.runSpeed, 0, 1);
+    S.state.cycle += moved * HERO.stride;
+    const s = Math.sin(S.state.cycle);
+    const c = Math.cos(S.state.cycle);
+    const moving = frac > 0.02;
+    const legAmp = moving ? 0.4 + 0.7 * frac : 0;
+    L.legL.rotation.set(s * legAmp, 0, moving ? -0.06 : -0.03);
+    L.legR.rotation.set(-s * legAmp, 0, moving ? 0.06 : 0.03);
+    const root = S.roger.mesh;
+    // The spring: up on each step, twice a stride.
+    root.position.y = Math.abs(c) * 0.13 * frac * PERSON_SCALE;
+    root.rotation.x = 0.14 * frac;
+    // Hips swaying over the planted foot, shoulders rolling against the legs.
+    root.rotation.z = moving ? s * 0.07 * (0.5 + frac) : 0;
+    if (S.roger.torso) S.roger.torso.rotation.y = moving ? -s * 0.28 * (0.4 + frac) : 0;
+    if (S.roger.quiff) S.roger.quiff.rotation.x = -0.35 + Math.abs(c) * 0.12 * frac;
+
+    if (S.state.phase === 'dazed') {
+      L.armL.rotation.set(-0.55 - s * 0.12, 0, -1.15);
+      L.armR.rotation.set(-0.55 + s * 0.12, 0, 1.15);
+      root.rotation.z = Math.sin(S.state.timer * 3.4) * 0.18;
+      root.rotation.x = 0;
+      return;
+    }
+    const aiming = S.state.drawn && S.state.phase !== 'won';
+    if (aiming) {
+      // The rifle up and forward, the left hand under the barrel.
+      L.armR.rotation.set(-1.45, 0, 0.05);
+      L.armL.rotation.set(-1.25, 0, -0.45);
+    } else {
+      // Arms swinging wide past the chest, elbows out; hanging loose
+      // (still wide of the body) when he stands.
+      const armAmp = moving ? 0.35 + 0.65 * frac : 0;
+      const out = S.roger.armSplay + 0.12 + 0.1 * frac;
+      L.armL.rotation.set(-s * armAmp, s * 0.25 * frac, -out);
+      L.armR.rotation.set(s * armAmp, s * 0.25 * frac, out);
+    }
+  }
+
+  /**
+   * Knocked silly at the edge of a funnel: out of the player's hands for a
+   * while, flung a little way, and perhaps without the rifle afterwards.
+   * @param {Object} v the Vortex that caught him
+   * @returns {void}
+   */
+  function daze(v) {
+    if (S.state.phase === 'aiming') api.leaveAim();
+    S.state.phase = 'dazed';
+    S.state.timer = 0;
+    S.state.speed = 0;
+    const p = S.roger.mesh.position;
+    const away = Math.atan2(p.x - v.center.x, p.z - v.center.z);
+    S.state.flingX = Math.sin(away) * 14;
+    S.state.flingZ = Math.cos(away) * 14;
+    S.state.dazeHeading = away + (Math.random() - 0.5) * 2;
+    S.state.dazeSpin = (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.6);
+    ctx.systems.speechBubbles.sayDazed(S.roger);
+    ctx.systems.gamefeel.addShake(0.6, 0.4);
+  }
+
+  /**
+   * @param {number} dt real seconds
+   * @returns {void}
+   */
+  function updateRoger(dt) {
+    const p = S.roger.mesh.position;
+    let moved = 0;
+    const x0 = p.x;
+    const z0 = p.z;
+
+    if (S.state.phase === 'running') {
+      const turn = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
+      S.state.heading += turn * HERO.turnRate * dt;
+      const want = S.keys.up ? HERO.runSpeed : S.keys.down ? -HERO.backSpeed : 0;
+      const step = HERO.accel * dt;
+      S.state.speed = S.state.speed < want ? Math.min(want, S.state.speed + step) : Math.max(want, S.state.speed - step * 1.5);
+      p.x += Math.sin(S.state.heading) * S.state.speed * dt;
+      p.z += Math.cos(S.state.heading) * S.state.speed * dt;
+    } else if (S.state.phase === 'dazed') {
+      S.state.timer += dt;
+      // Flung clear first, then the wandering stagger.
+      const fling = Math.max(0, 1 - S.state.timer / 0.5);
+      p.x += S.state.flingX * fling * dt * 2;
+      p.z += S.state.flingZ * fling * dt * 2;
+      S.state.dazeHeading += S.state.dazeSpin * dt;
+      S.state.heading = S.state.dazeHeading + Math.sin(S.state.timer * 0.85) * 1.1;
+      S.state.speed = 3;
+      p.x += Math.sin(S.state.heading) * S.state.speed * dt;
+      p.z += Math.cos(S.state.heading) * S.state.speed * dt;
+      if (S.state.timer > HERO.dazeSeconds * 0.55 && !S.state.saidTwice) {
+        S.state.saidTwice = true;
+        ctx.systems.speechBubbles.sayDazed(S.roger);
+      }
+      if (S.state.timer >= HERO.dazeSeconds) {
+        S.state.phase = 'running';
+        S.state.speed = 0;
+        S.state.saidTwice = false;
+        S.state.dazeImmunity = HERO.dazeImmunity;
+      }
+    } else if (S.state.phase === 'aiming') {
+      // First person: the mouse looks, W A S D walk (slowly) relative to
+      // it -- up/down forward and back, left/right strafe.
+      S.state.heading = S.state.yaw;
+      const fx = Math.sin(S.state.yaw);
+      const fz = Math.cos(S.state.yaw);
+      const ahead = (S.keys.up ? 1 : 0) - (S.keys.down ? 1 : 0);
+      const across = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
+      // Left of forward is (fz, -fx) with this module's heading convention.
+      let mx = fx * ahead + fz * across;
+      let mz = fz * ahead - fx * across;
+      const len = Math.hypot(mx, mz);
+      S.state.speed = len > 0 ? HERO.aimWalkSpeed : 0;
+      if (len > 0) {
+        mx /= len;
+        mz /= len;
+        p.x += mx * HERO.aimWalkSpeed * dt;
+        p.z += mz * HERO.aimWalkSpeed * dt;
+      }
+    }
+    pushOut(p, HERO.pad * 0.5);
+    moved = Math.hypot(p.x - x0, p.z - z0);
+    // Ran into a wall: the run cycle stops with him.
+    if (S.state.phase === 'running' && moved < Math.abs(S.state.speed) * dt * 0.3) S.state.speed *= 0.5;
+    S.roger.mesh.rotation.y = S.state.heading;
+    poseRoger(moved);
+
+    S.nameTag.position.set(p.x, p.y + HERO.tagHeight, p.z);
+    S.stars.visible = S.state.phase === 'dazed';
+    if (S.stars.visible) {
+      S.stars.position.set(p.x, HERO.starsHeight + Math.sin(S.state.timer * 2.2) * 0.06, p.z);
+      S.stars.material.rotation += dt * 2.6;
+    }
+
+    // The storm: dazed, never killed.
+    if (S.state.dazeImmunity > 0) S.state.dazeImmunity -= dt;
+    if (S.state.phase === 'running' || S.state.phase === 'aiming') {
+      for (const { Vortex } of ctx.tornadoes.active) {
+        if (Vortex.neutralized || Vortex.birth < 0.3 || S.state.dazeImmunity > 0) continue;
+        const reach = Sim.params.radius * HERO.dazeReach * (Vortex.sizeMul || 1) * Vortex.birth;
+        if (Math.hypot(p.x - Vortex.center.x, p.z - Vortex.center.z) < reach) {
+          daze(Vortex);
+          break;
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Death
+  // ---------------------------------------------------------------------
+
+  /**
+   * Roger for the things hunting him (aliens.js, terminator.js): where he
+   * is, and whether he is on foot (the crew cannot grab or shoot him in a
+   * car; the ships' lasers still can). Null when there is no Roger to get.
+   * @returns {{x: number, z: number, onFoot: boolean}|null}
+   */
+  function rogerTarget() {
+    if (!S.Hero.active || !S.roger) return null;
+    if (S.state.phase === 'dying' || S.state.phase === 'won') return null;
+    const p = S.roger.mesh.position;
+    return { x: p.x, z: p.z, onFoot: S.state.phase !== 'driving' };
+  }
+
+  return { inBuilding, someSolid, blockedAt, pushOut, pickSpawn, pickBunker, poseRoger, daze, updateRoger, rogerTarget };
+}

@@ -1,0 +1,1981 @@
+/*
+ * Styles for the tornado simulator's UI panel / stats panel / fps counter
+ * (#ui-panel, .group, #stats-panel, #fps, etc.) — TornadoSimulator.js
+ * renders JSX with those exact same ids/classes. Imported once, globally,
+ * from layout.js.
+ */
+
+:root {
+  color-scheme: dark;
+  --accent: #4fd1ff;
+  --accent-2: #a78bfa;
+  --accent-soft: rgba(127, 255, 212, 0.18);
+  --panel-bg: rgba(12, 16, 25, 0.78);
+  --panel-border: rgba(148, 190, 255, 0.16);
+  --text: #eef2fa;
+  --text-dim: #93a0b8;
+  --radius: 14px;
+  --radius-sm: 8px;
+}
+
+html, body {
+  margin: 0; padding: 0; overflow: hidden; height: 100%;
+  background: radial-gradient(ellipse 120% 90% at 50% -10%, #16233a 0%, #05070c 55%, #020305 100%);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  color: var(--text);
+}
+canvas { display: block; }
+
+@keyframes panelIn {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes swirl-spin { to { transform: rotate(360deg); } }
+
+#ui-panel {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  width: 300px;
+  /* Border-box, so max-height really is the height of the panel. There is no
+     global reset in this sheet, so without it the 34px of padding and the
+     border are added *on top of* the ceiling and the panel hangs off the
+     bottom of a short window -- measured at 704px tall in a 700px viewport. */
+  box-sizing: border-box;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 18px 18px 16px;
+  color: var(--text);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  box-shadow:
+    0 20px 60px rgba(0,0,0,0.55),
+    0 1px 0 rgba(255,255,255,0.05) inset,
+    0 0 0 1px rgba(0,0,0,0.2);
+  font-size: 13px;
+  z-index: 10;
+  animation: panelIn 0.5s cubic-bezier(.2,.8,.2,1);
+}
+#ui-panel::-webkit-scrollbar { width: 8px; }
+#ui-panel::-webkit-scrollbar-track { background: transparent; }
+#ui-panel::-webkit-scrollbar-thumb { background: rgba(148,190,255,0.2); border-radius: 8px; }
+#ui-panel::-webkit-scrollbar-thumb:hover { background: rgba(148,190,255,0.35); }
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+/* ---------------------------------------------------------------------
+   Collapsing the panel.
+
+   The panel is three hundred pixels of sliders, disaster buttons and a
+   sixteen-row readout, pinned to the top-left corner. On a laptop that is a
+   quarter of the window; on a phone held upright it is most of the screen,
+   permanently, over the thing it is controlling.
+
+   So the whole of it folds away behind its own header. The header never
+   collapses -- it is the handle, and keeping it on screen means there is
+   never a state where the control that brings the panel back is hidden
+   somewhere else. What actually folds is #panel-body.
+
+   Animated on max-height rather than height because the body's natural
+   height depends on which <details> sections are open; the ceiling is
+   generous and the transition simply runs out early when the content is
+   shorter, which costs nothing and avoids measuring anything in JS.
+   --------------------------------------------------------------------- */
+#panel-body {
+  max-height: 3000px;
+  opacity: 1;
+  overflow: hidden;
+  transition: max-height 0.38s cubic-bezier(.2,.8,.2,1), opacity 0.22s ease 0.06s;
+}
+#ui-panel.collapsed #panel-body {
+  max-height: 0;
+  opacity: 0;
+  /* Out of the tab order as well as out of sight: a collapsed panel whose
+     sliders can still be tabbed into is worse than no collapse at all. */
+  visibility: hidden;
+  transition: max-height 0.32s cubic-bezier(.4,0,.6,1), opacity 0.16s ease,
+              visibility 0s linear 0.32s;
+}
+#ui-panel.collapsed {
+  /* No longer a column of controls, so it stops reserving the height of one
+     and shrinks to the handle. */
+  width: auto;
+  min-width: 0;
+  padding-bottom: 14px;
+  overflow: visible;
+}
+#ui-panel.collapsed .panel-header { margin-bottom: 0; }
+/* Clipping the body vertically is not enough: its content still sets the
+   panel's preferred width, so a shrink-to-fit collapsed panel came out as
+   wide as the widest row inside it -- a 240px bar holding a swirl and a
+   chevron. Taking its width away too leaves the header as the only thing
+   with an opinion. The rule only applies while collapsed, so expanding
+   restores the width instantly and nothing pops on the way open. */
+#ui-panel.collapsed #panel-body { width: 0; }
+/* On for the first moments of the page's life only, while the starting state
+   is applied (see TornadoSimulator.js). Nothing should animate into the state
+   it was born in. */
+#ui-panel.panel-boot #panel-body,
+#ui-panel.panel-boot .panel-toggle-icon { transition: none; }
+
+.panel-toggle {
+  margin-left: auto;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 9px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.panel-toggle:hover {
+  background: rgba(148,190,255,0.14);
+  border-color: rgba(148,190,255,0.4);
+  color: var(--text);
+}
+.panel-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* A chevron drawn from two borders rather than an icon font or an SVG: it is
+   one element, it inherits the button's colour, and it rotates to point the
+   other way when the panel is shut. */
+.panel-toggle-icon {
+  width: 9px;
+  height: 9px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  border-radius: 1px;
+  transform: rotate(135deg) translate(-1px, -1px);
+  transition: transform 0.3s cubic-bezier(.2,.8,.2,1);
+}
+#ui-panel.collapsed .panel-toggle-icon {
+  transform: rotate(-45deg) translate(-1px, -1px);
+}
+
+/* Visible to a screen reader, not to anyone else. The toggle's own label
+   changes with its state, so it cannot rely on the chevron alone. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.panel-header .swirl {
+  width: 22px; height: 22px; border-radius: 50%; flex: none;
+  background: conic-gradient(from 0deg, var(--accent), var(--accent-2), var(--accent));
+  box-shadow: 0 0 12px var(--accent-soft), 0 0 2px rgba(255,255,255,0.6) inset;
+  animation: swirl-spin 3.5s linear infinite;
+}
+#ui-panel h1 {
+  font-size: 14px;
+  margin: 0;
+  letter-spacing: 1.6px;
+  font-weight: 700;
+  background: linear-gradient(90deg, #eaf4ff, var(--accent) 75%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.group { margin-bottom: 14px; }
+.group label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+.group label span.val {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+/* Custom range slider: the input itself becomes the styled "track" once its
+   native appearance is removed, with a separate ::-moz-range-track rule for
+   Firefox, which won't let the input's own box double as the track. */
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(127,255,212,0.35), rgba(64,200,220,0.25));
+  outline: none;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 4px rgba(127,255,212,0.18), 0 2px 6px rgba(0,0,0,0.5);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+input[type=range]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 6px rgba(127,255,212,0.25), 0 2px 8px rgba(0,0,0,0.5);
+}
+input[type=range]::-moz-range-track {
+  height: 6px; border-radius: 999px;
+  background: linear-gradient(90deg, rgba(127,255,212,0.35), rgba(64,200,220,0.25));
+}
+input[type=range]::-moz-range-thumb {
+  width: 15px; height: 15px; border-radius: 50%;
+  background: #fff; border: 2px solid var(--accent);
+  box-shadow: 0 0 0 4px rgba(127,255,212,0.18), 0 2px 6px rgba(0,0,0,0.5);
+  cursor: pointer;
+}
+
+.buttons { display: flex; gap: 8px; margin: 8px 0 0; }
+/* Chunky, game-menu buttons: a solid block with a glow on hover and a press
+   that squashes them down. Blue (.primary) for the main actions -- start
+   the storm, fly it, Hero Mode -- neutral for everything else. */
+.buttons button {
+  flex: 1;
+  min-height: 40px;
+  padding: 10px 4px;
+  border-radius: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1px;
+  box-shadow: 0 2px 0 rgba(0,0,0,0.35);
+  transition: all 0.2s ease;
+}
+.buttons button:hover:not(:disabled) {
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.28);
+  box-shadow: 0 0 16px rgba(160,200,255,0.25), 0 2px 0 rgba(0,0,0,0.35);
+  transform: translateY(-1px);
+}
+.buttons button:active:not(:disabled) { transform: scale(0.95); transition-duration: 0.06s; }
+.buttons button.primary {
+  background: linear-gradient(135deg, #2cc9b0, #7fffd4);
+  border-color: transparent;
+  color: #04211c;
+  box-shadow: 0 4px 16px rgba(127,255,212,0.28), 0 2px 0 rgba(10,60,50,0.6);
+}
+.buttons button.primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+  box-shadow: 0 0 22px rgba(127,255,212,0.55), 0 2px 0 rgba(10,60,50,0.6);
+}
+.buttons button:disabled { opacity: 0.35; cursor: default; transform: none; box-shadow: none; }
+/* Control Tornado while you are flying it: still blue, ringed in white. */
+#btn-possess.active {
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.85) inset, 0 0 22px rgba(127,255,212,0.6);
+}
+
+/* Named storm presets (engine/ui.js PRESETS), a row of pills under the title. */
+.presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 2px 0 0; }
+.presets button {
+  position: relative;
+  min-height: 36px;
+  padding: 8px 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+.presets button:hover:not(:disabled) { background: rgba(255,255,255,0.1); box-shadow: 0 0 14px rgba(160,200,255,0.25); }
+.presets button:active:not(:disabled) { transform: scale(0.95); transition-duration: 0.06s; }
+.presets button:disabled { opacity: 0.4; cursor: not-allowed; }
+.presets button.active {
+  background: linear-gradient(135deg, #2cc9b0, #7fffd4);
+  border-color: transparent;
+  color: #04211c;
+  box-shadow: 0 0 14px rgba(127,255,212,0.35);
+}
+/* The preset in force gets a badge as well as the fill. */
+.presets button.active::after {
+  content: '✓';
+  position: absolute; top: -6px; right: -4px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #ffffff; color: #0e7a6a;
+  font-size: 10px; line-height: 16px; font-weight: 900;
+  box-shadow: 0 0 8px rgba(127,255,212,0.8);
+}
+
+/* Collapsible panel sections (the <details> folds in TornadoSimulator.js).
+   The panel had grown taller than a laptop viewport, so the sliders, the
+   camera controls and the twelve-row readout each live behind a summary the
+   player can shut. */
+.fold {
+  border-top: 1px solid rgba(255,255,255,0.07);
+  margin: 0 -2px;
+  padding: 0 2px;
+}
+.fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  padding: 6px 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+.fold > summary:hover { color: var(--text); text-shadow: 0 0 10px rgba(160,210,255,0.5); }
+.fold > summary .fold-icon { font-size: 13px; line-height: 1; filter: drop-shadow(0 0 4px rgba(255,255,255,0.25)); }
+.fold > summary::-webkit-details-marker { display: none; }
+/* The disclosure triangle, drawn rather than inherited so it rotates. */
+.fold > summary::before {
+  content: '';
+  width: 0; height: 0; flex: none;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform 0.18s ease;
+}
+.fold[open] > summary::before { transform: rotate(90deg) translateX(1px); }
+/* A live value the engine writes into the summary, so a shut fold still
+   shows the one number that section is about (engine/ui.js). */
+.fold .fold-note {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+.fold[open] .fold-note { opacity: 0; }
+.fold-body { padding: 2px 0 8px; }
+.fold-body .group:last-child { margin-bottom: 4px; }
+
+/* Small pill-style buttons, shared by every toggle and event trigger in the
+   panel. Deliberately a class rather than a list of ids: it used to be the
+   latter, and every button added to the panel (Dam Break was the last) came
+   out as an unstyled native button until its id was remembered here. */
+.audio-group label,
+.camera-group label { align-items: center; }
+
+.pill {
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.pill:hover:not(:disabled) { background: rgba(255,255,255,0.1); }
+.pill:disabled { opacity: 0.35; cursor: default; }
+
+#btn-mute.active { background: rgba(255,93,93,0.16); border-color: rgba(255,93,93,0.5); color: #ffb3b3; }
+
+#btn-cinematic.active,
+#btn-chase.active,
+#btn-cockpit.active,
+#btn-daymode.active,
+#btn-possess.active {
+  background: linear-gradient(135deg, #2cc9b0, #7fffd4);
+  border-color: transparent;
+  color: #04211c;
+  box-shadow: 0 0 14px rgba(127,255,212,0.35);
+}
+.pill-row { display: flex; gap: 6px; }
+
+/* The one-shot disaster triggers: a two-up grid so four of them fit without
+   wrapping a label onto a second line, which is what the old flex row did to
+   "Dam Break". */
+.event-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+.event-grid .pill.event {
+  min-height: 36px;
+  padding: 8px 4px;
+  border-radius: 10px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 2px 0 rgba(0,0,0,0.35);
+  transition: all 0.2s ease;
+}
+/* Every disaster tile: a darker fill and a glow in its own colour on hover,
+   squashed on the press. */
+.event-grid .pill.event:hover:not(:disabled) {
+  background: rgba(0,0,0,0.28);
+  box-shadow: 0 0 14px currentColor, 0 2px 0 rgba(0,0,0,0.35);
+  transform: translateY(-1px);
+}
+.event-grid .pill.event:active:not(:disabled) { transform: scale(0.95); transition-duration: 0.06s; }
+.event-grid .pill.event:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
+/* The disasters that stay on until switched off light up while they are. */
+@keyframes eventPulse {
+  0%, 100% { box-shadow: 0 0 10px currentColor, 0 0 0 1px currentColor inset; }
+  50% { box-shadow: 0 0 22px currentColor, 0 0 0 1px currentColor inset; }
+}
+.event-grid .pill.event.active {
+  background: rgba(255,255,255,0.12);
+  border-color: currentColor;
+  animation: eventPulse 1.4s ease-in-out infinite;
+}
+#btn-ignite { border-color: rgba(255, 138, 60, 0.4); color: #ffd2a8; }
+#btn-earthquake { border-color: rgba(180, 140, 90, 0.45); color: #e8c9a0; }
+#btn-flood { border-color: rgba(70, 160, 200, 0.45); color: #b3e2f5; }
+#btn-meteors { border-color: rgba(150, 160, 200, 0.45); color: #d3d9f0; }
+#btn-strike { border-color: rgba(170, 190, 255, 0.55); color: #dfe6ff; }
+/* Lightning targeting on: a crosshair over the town. */
+.strike-aim canvas { cursor: crosshair; }
+#btn-downburst { border-color: rgba(150, 200, 225, 0.5); color: #d4ecf7; }
+#btn-landing { border-color: rgba(95, 212, 255, 0.45); color: #bfeeff; }
+#btn-terminator { border-color: rgba(255, 80, 60, 0.45); color: #ffc2b8; }
+#btn-electric { border-color: rgba(120, 190, 255, 0.5); color: #bfe4ff; }
+#btn-wedge { border-color: rgba(214, 190, 150, 0.5); color: #f0dfc2; }
+#btn-doomsday { border-color: rgba(255, 110, 80, 0.55); color: #ffb9a6; }
+#preset-fujiwhara { border-color: rgba(190, 140, 255, 0.5); color: #dcc6ff; }
+
+#chase-hud {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  gap: 28px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  padding: 10px 28px;
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.2);
+  z-index: 10;
+}
+#chase-hud.visible { display: flex; animation: panelIn 0.35s cubic-bezier(.2,.8,.2,1); }
+#chase-hud .row { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+#chase-hud .row span:first-child { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-dim); }
+#chase-hud .row span:last-child {
+  font-size: 18px; font-weight: 800; color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 16px rgba(127,255,212,0.5);
+}
+
+/* Possess mode's on-screen key hint (engine/possess.js): a small D-pad,
+   bottom-centre like #chase-hud above (the two modes are mutually exclusive,
+   so they never need to share the screen), whose arrows light up to match
+   whichever WASD/arrow keys are currently held. */
+#possess-hud {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  z-index: 10;
+}
+#possess-hud.visible { display: flex; animation: panelIn 0.35s cubic-bezier(.2,.8,.2,1); }
+.possess-pad { position: relative; width: 108px; height: 108px; }
+.possess-key {
+  position: absolute;
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 15px;
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.4);
+  transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease, transform 0.1s ease;
+}
+.possess-key.up { top: 0; left: 37px; }
+.possess-key.left { top: 37px; left: 0; }
+.possess-key.down { top: 74px; left: 37px; }
+.possess-key.right { top: 37px; left: 74px; }
+.possess-key.active {
+  background: linear-gradient(135deg, #2cc9b0, #7fffd4);
+  border-color: transparent;
+  color: #04211c;
+  transform: scale(1.08);
+  box-shadow: 0 0 20px rgba(127,255,212,0.55);
+}
+
+#chase-gameover {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at 50% 40%, rgba(30,10,10,0.35), rgba(5,3,3,0.82));
+  backdrop-filter: blur(3px);
+  z-index: 20;
+}
+#chase-gameover.visible { display: flex; animation: panelIn 0.4s cubic-bezier(.2,.8,.2,1); }
+#chase-gameover .panel {
+  background: var(--panel-bg);
+  border: 1px solid rgba(255,93,93,0.25);
+  border-radius: var(--radius);
+  padding: 28px 32px;
+  color: var(--text);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: 0 24px 70px rgba(0,0,0,0.6), 0 0 40px rgba(255,93,93,0.12);
+  min-width: 270px;
+  text-align: center;
+}
+#chase-gameover h2 {
+  margin: 0 0 16px 0;
+  font-size: 17px;
+  letter-spacing: 0.5px;
+  color: #ff8a8a;
+  text-shadow: 0 0 20px rgba(255,93,93,0.4);
+}
+#chase-gameover .row {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+#chase-gameover .row span:last-child { color: #fff; font-variant-numeric: tabular-nums; font-weight: 600; }
+#chase-gameover button.primary {
+  margin-top: 18px;
+  width: 100%;
+  padding: 10px 0;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: linear-gradient(135deg, #2cc9b0, #7fffd4);
+  color: #04211c;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  box-shadow: 0 4px 16px rgba(127,255,212,0.3);
+  transition: filter 0.15s ease, transform 0.1s ease;
+}
+#chase-gameover button.primary:hover { filter: brightness(1.08); }
+#chase-gameover button.primary:active { transform: translateY(1px); }
+
+/* Two columns rather than twelve stacked rows: the readout is a glance-at
+   board, and at one row per line it was taller than everything above it put
+   together. */
+#stats-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 12px;
+}
+#stats-panel .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  min-width: 0;
+}
+#stats-panel .row span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#stats-panel .row span.v { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+#damage-label {
+  margin-top: 8px;
+  text-align: center;
+  padding: 8px 0;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06) inset;
+  transition: background 0.3s ease;
+}
+#damage-label::before { content: '👥 '; }
+/* Humans still out in the town (ui.js updateStatsPanel). */
+#humans-status {
+  margin-top: 6px;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.04);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+#humans-status .humans-main { color: var(--text); }
+#humans-status .humans-main strong { font-size: 14px; }
+#humans-status .humans-sub { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+
+/* Combo counter (engine/gamefeel.js). Borrows the accent colour, weight and
+   tabular figures of the chase HUD's big readouts, sitting top-centre where
+   nothing else competes for the space. Font size and opacity are written per
+   frame by the engine, so neither is set here. */
+#combo-hud {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 18px rgba(127, 255, 212, 0.55), 0 2px 10px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 11;
+  animation: comboPop 0.18s cubic-bezier(.2,.9,.3,1.4);
+}
+@keyframes comboPop {
+  from { transform: translateX(-50%) scale(1.25); }
+  to { transform: translateX(-50%) scale(1); }
+}
+
+#fps {
+  position: fixed;
+  bottom: 12px;
+  right: 14px;
+  color: var(--text-dim);
+  font-size: 10px;
+  z-index: 10;
+  font-variant-numeric: tabular-nums;
+  background: rgba(12,16,25,0.6);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 3px 8px;
+  border-radius: 6px;
+  backdrop-filter: blur(8px);
+  letter-spacing: 0.4px;
+}
+
+/* Firenado banner (engine/firenado.js): bold, restrained, fades in and out
+   over the scene near the top; never intercepts input. */
+.firenado-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.firenado-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.firenado-banner .title {
+  font: 800 38px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #ffd9a8;
+  text-shadow: 0 0 22px rgba(255, 110, 30, 0.55), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.firenado-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(255, 138, 60, 0.28);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* Chemical works banner (environment/factory.js): the same shape as the
+   other event banners, in a toxic yellow-green. */
+.factory-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.factory-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.factory-banner .title {
+  font: 800 40px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #e9f5c4;
+  text-shadow: 0 0 26px rgba(170, 220, 70, 0.6), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.factory-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(180, 220, 90, 0.35);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* Dam break banner (engine/flood.js): the same shape as the other event
+   banners, in a cold water blue. */
+.flood-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.flood-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.flood-banner .title {
+  font: 800 40px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #cfeaf6;
+  text-shadow: 0 0 26px rgba(70, 170, 220, 0.7), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.flood-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(90, 180, 225, 0.35);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* The banner stack (utils/banners.js). Every event banner is a child of this
+   rather than a fixed element of its own, so two disasters at once read as
+   two lines instead of two texts drawn over each other.
+
+   A banner that is not showing is taken out of the flow rather than hidden
+   with display:none — it still has to be laid out for its opacity transition
+   to run, and leaving it in the column would reserve a gap for something
+   invisible. */
+#banner-stack {
+  position: fixed;
+  left: 50%;
+  top: 14%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+  z-index: 12;
+}
+#banner-stack > div {
+  position: static;
+  left: auto;
+  top: auto;
+  transform: translateY(-6px);
+}
+#banner-stack > div.visible { transform: translateY(0); }
+#banner-stack > div:not(.visible) { position: absolute; }
+/* Past three at once the column stops being a stack of announcements and
+   becomes a wall of capitals with the simulation somewhere behind it, which
+   the Doomsday script reaches within seconds (see utils/banners.js). The
+   oldest are folded away and go for good when their own timers expire. */
+#banner-stack > div.stack-hidden { display: none; }
+
+/* Electric tornado banner (engine/electricStorm.js): the same shape as the
+   other event banners, in the charged blue-white of the arcs themselves. */
+.electric-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.electric-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.electric-banner .title {
+  font: 800 40px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #eaf8ff;
+  text-shadow: 0 0 30px rgba(120, 215, 255, 0.85), 0 0 60px rgba(90, 180, 255, 0.5), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.electric-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: #bfe8ff;
+  background: var(--panel-bg);
+  border: 1px solid rgba(140, 220, 255, 0.5);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* Meteor banner (engine/meteors.js): the same shape as the other event
+   banners, in a cold blue-white -- it is the one disaster that does not come
+   out of the storm. */
+.meteor-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.meteor-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.meteor-banner .title {
+  font: 800 40px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #dbe9ff;
+  text-shadow: 0 0 26px rgba(120, 170, 255, 0.7), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.meteor-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(140, 180, 255, 0.35);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* Fuel tanker banner (environment/tanker.js): same shape as the Firenado and
+   earthquake banners, in a hotter white-orange since it marks the single
+   biggest explosion in the simulation. */
+.tanker-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.tanker-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.tanker-banner .title {
+  font: 800 40px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #fff3d2;
+  text-shadow: 0 0 26px rgba(255, 150, 40, 0.75), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.tanker-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(127, 255, 212, 0.35);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* Earthquake banner (engine/earthquake.js): same shape as the Firenado
+   banner above, under its own class/palette (dusty amber-brown rather than
+   fire-orange) so the two events read as distinct at a glance. */
+.earthquake-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.earthquake-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.earthquake-banner .title {
+  font: 800 38px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #e8c9a0;
+  text-shadow: 0 0 22px rgba(140, 100, 50, 0.55), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.earthquake-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(180, 140, 90, 0.32);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* Downburst (engine/downburst.js): the warning flashes amber-red like a
+   weather alert, the rest in the pale grey-blue of the rain shaft. */
+.downburst-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  text-align: center;
+}
+.downburst-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.downburst-banner .title {
+  font: 800 36px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 5px; text-transform: uppercase;
+  color: #d4ecf7;
+  text-shadow: 0 0 22px rgba(120, 180, 220, 0.55), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.downburst-banner.alert .title {
+  color: #ffb070;
+  text-shadow: 0 0 24px rgba(255, 90, 40, 0.7), 0 2px 10px rgba(0, 0, 0, 0.6);
+  animation: downburstAlert 0.55s steps(2, jump-none) infinite;
+}
+@keyframes downburstAlert {
+  0% { opacity: 1; }
+  100% { opacity: 0.35; }
+}
+.downburst-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(150, 200, 225, 0.35);
+  border-radius: 999px; padding: 4px 12px;
+}
+.downburst-banner.alert .sub { border-color: rgba(255, 120, 60, 0.55); color: #ffd2b0; }
+
+/* Fujiwhara merge banner (engine/fujiwhara.js): "TORNADOES MERGED" in red,
+   with the "Fujiwhara effect" line under it in the same red, glowing capitals
+   at a smaller size rather than in a pill. */
+.merge-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.merge-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.merge-banner .title,
+.merge-banner .sub {
+  font: 800 38px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #ff3b30;
+  text-shadow: 0 0 24px rgba(255, 40, 20, 0.7), 0 0 50px rgba(200, 0, 0, 0.45), 0 2px 10px rgba(0, 0, 0, 0.7);
+}
+.merge-banner .sub {
+  font-size: 20px;
+  letter-spacing: 4px;
+}
+
+/* Speech bubbles above people (engine/environment/speechBubbles.js). Under
+   the panels (z-index 10), never intercepting input. */
+.speech-layer { position: fixed; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
+.speech-bubble {
+  position: absolute; left: 0; top: 0; display: none;
+  padding: 5px 11px; margin-top: -10px;
+  background: rgba(248, 246, 240, 0.94); color: #1b1e24;
+  font: 600 13px/1.25 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  border-radius: 12px; white-space: nowrap;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35);
+  transform-origin: 50% 100%;
+  /* Own compositor layer: the per-frame transform then moves an already
+     rasterised bubble instead of repainting its text and shadow. */
+  will-change: transform, opacity;
+  animation: bubbleIn 0.2s ease-out;
+}
+.speech-bubble::after {
+  content: ''; position: absolute; left: 50%; bottom: -7px; margin-left: -7px;
+  border: 7px solid transparent; border-bottom: 0; border-top-color: rgba(248, 246, 240, 0.94);
+}
+.speech-bubble.panic { background: rgba(255, 238, 222, 0.96); color: #b3261e; }
+.speech-bubble.panic::after { border-top-color: rgba(255, 238, 222, 0.96); }
+/* Dazed survivors (see environment/peopleMotion.js): a woozy, off-kilter
+   bubble -- italic, tinted to match the stars spinning over their head, and
+   rocking gently rather than sitting square like everyone else's. */
+.speech-bubble.dazed {
+  background: rgba(255, 248, 226, 0.95); color: #6b4a12;
+  font-style: italic;
+  animation: bubbleIn 0.2s ease-out, bubbleWoozy 1.6s ease-in-out infinite;
+}
+.speech-bubble.dazed::after { border-top-color: rgba(255, 248, 226, 0.95); }
+@keyframes bubbleWoozy {
+  0%, 100% { rotate: -2.5deg; }
+  50% { rotate: 2.5deg; }
+}
+@keyframes bubbleIn { from { opacity: 0; margin-top: 0; } to { opacity: 1; margin-top: -10px; } }
+
+/* GTA-style minimap (engine/ui/minimap.js), bottom-right above the fps
+   counter. The canvas draws the map inside a circular clip; this is the
+   glass frame around it. */
+.minimap {
+  position: fixed;
+  right: 16px;
+  bottom: 42px;
+  width: 196px;
+  height: 196px;
+  display: none;
+  border-radius: 50%;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.2), 0 0 0 4px rgba(12,16,25,0.35);
+  pointer-events: none;
+  z-index: 10;
+  overflow: hidden;
+}
+.minimap.visible { display: block; animation: panelIn 0.35s cubic-bezier(.2,.8,.2,1); }
+.minimap canvas { width: 100%; height: 100%; }
+@media (max-width: 700px) {
+  .minimap { width: 140px; height: 140px; }
+}
+
+/* Gas main banner (engine/gasMains.js): the same shape as the other event
+   banners, in the pale blue-white of burning gas rather than fire orange --
+   what comes out of a main burns much hotter and much cleaner than a
+   building does. */
+.gas-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.gas-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.gas-banner .title {
+  font: 800 40px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #ffe8c4;
+  text-shadow: 0 0 26px rgba(255, 176, 88, 0.75), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.gas-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(255, 190, 110, 0.35);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* Lavanado banner (engine/lavanado.js): the same shape again, in molten
+   orange-red -- it is the earthquake's material being thrown by the storm, so
+   it reads as lava rather than as fire. */
+.lava-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.lava-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.lava-banner .title {
+  font: 800 40px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #ffd0a0;
+  text-shadow: 0 0 30px rgba(255, 96, 24, 0.85), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.lava-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(255, 120, 50, 0.4);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* Steam explosion banner (engine/collisions.js): the flood front reaching
+   molten ground. A cold scalding white, because the one thing it is not is
+   an explosion made of fire. */
+.steam-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.steam-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.steam-banner .title {
+  font: 800 40px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #f2fbff;
+  text-shadow: 0 0 30px rgba(220, 245, 255, 0.85), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.steam-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(210, 238, 250, 0.4);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* Emergency-response banner (engine/emergency/index.js): the same shape as
+   the other event banners, in the cold blue of a light bar. This is the one
+   family of messages that is good news. */
+.rescue-banner, .evac-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.rescue-banner.visible, .evac-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.rescue-banner .title, .evac-banner .title {
+  font: 800 34px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 5px; text-transform: uppercase;
+  color: #d8f2ff;
+  text-shadow: 0 0 26px rgba(70, 180, 255, 0.75), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.rescue-banner .sub, .evac-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(90, 190, 255, 0.35);
+  border-radius: 999px; padding: 4px 12px;
+}
+/* The evacuation's own messages are warmer -- a bus is not an emergency
+   vehicle, and "bus away" should not look like "unit down". */
+.evac-banner .title { color: #ffeec4; text-shadow: 0 0 26px rgba(255, 200, 90, 0.7), 0 2px 10px rgba(0, 0, 0, 0.6); }
+.evac-banner .sub { border-color: rgba(255, 205, 110, 0.35); }
+
+/* Kill-cam (engine/killcam.js). Letterbox bars and a caption over the
+   replay, plus a full-screen fader for the cut in and out. The bars slide in
+   rather than appearing, which is most of what makes the cut read as
+   deliberate. */
+.killcam {
+  position: fixed; inset: 0;
+  pointer-events: none; z-index: 9997;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.killcam.visible { opacity: 1; }
+.killcam-bar {
+  position: absolute; left: 0; right: 0;
+  height: 9vh;
+  background: #05070a;
+  transform: translateY(-100%);
+  transition: transform 0.35s cubic-bezier(.2,.8,.2,1);
+}
+.killcam-top { top: 0; }
+.killcam-bottom { bottom: 0; transform: translateY(100%); }
+.killcam.visible .killcam-bar { transform: translateY(0); }
+.killcam-label {
+  position: absolute; left: 50%; bottom: calc(9vh + 18px);
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 9px;
+  font: 700 12px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 3.2px; text-transform: uppercase;
+  color: #e6edf5;
+  background: rgba(6, 9, 14, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px; padding: 7px 15px 7px 12px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.killcam-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #e0392b;
+  box-shadow: 0 0 10px rgba(224, 57, 43, 0.9);
+  animation: killcamPulse 1.1s ease-in-out infinite;
+}
+@keyframes killcamPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+.killcam-fade {
+  position: fixed; inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none; z-index: 9999;
+}
+
+/* Screen crack overlay (engine/screenCrack.js). A generated crack pattern
+   whose opacity directly tracks the EF5 wedge's own live blend (0..1), so it
+   comes up and clears with the wedge rather than accumulating -- the JS side
+   already writes a new value every frame while the wedge ramps, so the
+   transition here is only smoothing over single-frame jitter, not doing the
+   easing itself. Sits below the kill-cam's own letterbox/fade (which still
+   needs to be able to cut to a clean black over it), above every ordinary
+   banner. `screen` blend mode is what makes the crack lines read as catching
+   the light rather than sitting on the image as flat white paint --
+   transparent pixels (everywhere but the cracks themselves) contribute
+   nothing, so it never tints the rest of the frame. */
+.screen-crack {
+  position: fixed; inset: 0;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  opacity: 0;
+  transition: opacity 0.15s linear;
+  pointer-events: none; z-index: 9990;
+  mix-blend-mode: screen;
+}
+.screen-crack.shatter { animation: screenCrackShatter 0.5s ease-out; }
+@keyframes screenCrackShatter {
+  0% { filter: brightness(1); }
+  12% { filter: brightness(2.6); }
+  100% { filter: brightness(1); }
+}
+
+/* Sinkhole banner (engine/sinkhole.js). The one disaster with no fire, no
+   blast and no colour in it: dead grey-brown, the shade of the hole. */
+.sinkhole-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.sinkhole-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.sinkhole-banner .title {
+  font: 800 38px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #cdc3b6;
+  text-shadow: 0 0 24px rgba(0, 0, 0, 0.95), 0 2px 10px rgba(0, 0, 0, 0.8);
+}
+.sinkhole-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(150, 138, 124, 0.35);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* EF5 wedge banner (engine/wedge.js): the dirt-and-daylight colour of the
+   funnel itself rather than one of the disasters' fire and water, because the
+   wedge is not an event happening to the town — it is the storm. */
+.wedge-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.wedge-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.wedge-banner .title {
+  font: 800 42px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 7px; text-transform: uppercase;
+  color: #f0e6d6;
+  text-shadow: 0 0 30px rgba(190, 168, 132, 0.7), 0 2px 12px rgba(0, 0, 0, 0.85);
+}
+.wedge-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: #e6d9c2;
+  background: var(--panel-bg);
+  border: 1px solid rgba(214, 190, 150, 0.45);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* Doomsday banner (engine/doomsday.js): the only red one, and the largest,
+   since it is the announcement that all of the others are coming. */
+.doomsday-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.doomsday-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.doomsday-banner .title {
+  font: 800 44px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 8px; text-transform: uppercase;
+  color: #ffe9e4;
+  text-shadow: 0 0 34px rgba(255, 90, 60, 0.8), 0 0 70px rgba(200, 40, 20, 0.45),
+    0 2px 12px rgba(0, 0, 0, 0.85);
+}
+.doomsday-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: #ffd2c6;
+  background: var(--panel-bg);
+  border: 1px solid rgba(255, 120, 90, 0.5);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* The one line the Doomsday script keeps on screen while it runs: what is
+   coming next and how long there is left to watch for it. It lives in the
+   banner stack with the banners (utils/banners.js) so it lays out in the same
+   column instead of drawing over whichever disaster has just landed, and it is
+   deliberately small — the banners are the event, this is the running order. */
+#doomsday-hud {
+  font: 700 12px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 2px; text-transform: uppercase;
+  color: #ffd2c6;
+  background: var(--panel-bg);
+  border: 1px solid rgba(255, 120, 90, 0.45);
+  border-radius: 999px; padding: 6px 14px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  font-variant-numeric: tabular-nums;
+}
+#doomsday-hud.visible { opacity: 1; }
+
+/* ---------------------------------------------------------------------
+   Phones.
+
+   The panel was built for a laptop: a fixed 300px column down the left with
+   a full-height readout. On a 390px-wide screen that is four fifths of the
+   width and all of the height, sitting on top of the simulation, and there
+   was no way to get it out of the way.
+
+   Here it becomes a sheet: full width inside a gutter, capped at half the
+   viewport so there is always weather visible above it, and starting
+   collapsed (see ui.js) so the first thing on screen is the tornado rather
+   than a wall of sliders. Collapsed it is a small bar in the corner.
+
+   The breakpoint also catches a laptop in a narrow split view, which is the
+   other place the old layout was unusable.
+   --------------------------------------------------------------------- */
+@media (max-width: 700px) {
+  #ui-panel {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    width: auto;
+    max-height: 52vh;
+    padding: 14px 14px 12px;
+    border-radius: 14px;
+  }
+  /* Collapsed it stops spanning the width and sits back in the corner, so
+     nothing but the handle is between the player and the storm. */
+  #ui-panel.collapsed {
+    right: auto;
+    max-height: none;
+  }
+  /* The title is the widest thing in the header and the least useful; the
+     swirl already says what this is. */
+  #ui-panel.collapsed h1 { display: none; }
+  #ui-panel.collapsed .panel-toggle { margin-left: 4px; }
+
+  /* Two columns of stats at this width are two columns of truncation. */
+  #stats-panel { grid-template-columns: 1fr; }
+  /* Touch targets. Everything in here was sized for a cursor. */
+  .pill, .presets button { min-height: 38px; }
+  input[type="range"] { height: 26px; }
+
+  /* The event banners are sized for a desktop viewport and overflow a phone
+     screen, which turns the most dramatic moments into a wall of clipped
+     letters. */
+  #banner-stack { top: 10%; width: 92vw; }
+  #banner-stack .title,
+  .firenado-banner .title, .factory-banner .title, .flood-banner .title,
+  .electric-banner .title, .meteor-banner .title, .tanker-banner .title,
+  .gas-banner .title, .lava-banner .title, .steam-banner .title,
+  .rescue-banner .title, .evac-banner .title, .sinkhole-banner .title,
+  .wedge-banner .title, .doomsday-banner .title {
+    font-size: 24px;
+    letter-spacing: 3px;
+  }
+  /* The running order is a whole line of text at a size meant for a laptop. */
+  #doomsday-hud { font-size: 10px; letter-spacing: 1.2px; padding: 5px 10px; }
+  #banner-stack .merge-banner .sub { font-size: 14px; letter-spacing: 2px; }
+}
+
+/* Short-and-wide: a phone on its side, where height is the scarce axis. */
+@media (max-height: 520px) {
+  #ui-panel { max-height: calc(100vh - 20px); top: 10px; }
+}
+
+/* Spaceship landing (engine/spaceship.js). The banner is the earthquake
+   banner's shape in the ship's cold cyan. */
+.spaceship-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.spaceship-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.spaceship-banner .title {
+  font: 800 38px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #bfeeff;
+  text-shadow: 0 0 22px rgba(95, 212, 255, 0.55), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.spaceship-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(95, 212, 255, 0.32);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* The cockpit: "inside looking out" without any interior geometry. The window
+   is a rounded cut-out whose enormous box-shadow spread is the dark hull
+   around it, with an inset shadow for the vignette and a thin lit rim. Two
+   struts cross it for scale. Above every banner and the screen crack, below
+   the kill-cam's cut to black. */
+.ship-cockpit {
+  position: fixed; inset: 0;
+  pointer-events: none; z-index: 9996;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  overflow: hidden;
+}
+.ship-cockpit.visible { opacity: 1; }
+.ship-window {
+  position: absolute;
+  left: 7%; right: 7%; top: 9%; bottom: 17%;
+  border-radius: 46% 46% 20% 20% / 36% 36% 16% 16%;
+  box-shadow:
+    0 0 0 200vmax #06080c,
+    inset 0 0 110px 36px rgba(0, 0, 0, 0.82),
+    inset 0 0 0 3px rgba(95, 212, 255, 0.35);
+  transition: box-shadow 0.3s ease;
+}
+.ship-cockpit.braking .ship-window {
+  box-shadow:
+    0 0 0 200vmax #06080c,
+    inset 0 0 110px 36px rgba(0, 0, 0, 0.78),
+    inset 0 0 0 3px rgba(127, 255, 212, 0.55);
+}
+.ship-strut {
+  position: absolute; top: 5%; bottom: 13%;
+  width: 14px;
+  background: linear-gradient(90deg, #030407, #1a1f27 45%, #030407);
+  box-shadow: 0 0 18px rgba(0, 0, 0, 0.8);
+}
+.ship-strut-l { left: 31%; transform: rotate(9deg); }
+.ship-strut-r { right: 31%; transform: rotate(-9deg); }
+.ship-hud {
+  position: absolute; left: 50%; bottom: 6%;
+  transform: translateX(-50%);
+  display: flex; gap: 22px; align-items: center;
+  font: 700 13px/1 ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  letter-spacing: 2.4px; text-transform: uppercase;
+  color: #8fe3ff;
+  text-shadow: 0 0 10px rgba(95, 212, 255, 0.7);
+}
+.ship-cockpit.braking .ship-hud-state {
+  color: #ffc07a;
+  text-shadow: 0 0 10px rgba(255, 150, 60, 0.8);
+  animation: shipWarn 0.35s steps(2, end) infinite;
+}
+@keyframes shipWarn { 50% { opacity: 0.35; } }
+.ship-fade {
+  position: fixed; inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none; z-index: 9998;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ship-cockpit.braking .ship-hud-state { animation: none; }
+}
+/* The Rocket Strike's nose camera (engine/spaceship/rocket.js): the cockpit's
+   frame round a round window, heat at its rim, a reticle on the impact
+   point, and the HUD in the rocket's orange. "braking" is the locked last
+   second. */
+.ship-cockpit.rocket .ship-window {
+  left: 50%; top: 50%; right: auto; bottom: auto;
+  width: min(92vw, 118vh); height: min(92vw, 118vh);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 200vmax #07080b,
+    inset 0 0 120px 40px rgba(0, 0, 0, 0.75),
+    inset 0 0 60px 6px rgba(255, 120, 40, 0.35),
+    inset 0 0 0 3px rgba(255, 170, 90, 0.5);
+}
+.ship-cockpit.rocket.braking .ship-window {
+  box-shadow:
+    0 0 0 200vmax #07080b,
+    inset 0 0 120px 40px rgba(0, 0, 0, 0.7),
+    inset 0 0 80px 12px rgba(255, 70, 30, 0.55),
+    inset 0 0 0 3px rgba(255, 90, 60, 0.8);
+}
+.rocket-reticle {
+  position: absolute; left: 50%; top: 50%;
+  width: 46px; height: 46px;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(255, 190, 120, 0.85);
+  border-radius: 50%;
+  box-shadow: 0 0 12px rgba(255, 140, 60, 0.6);
+}
+.rocket-reticle::before, .rocket-reticle::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  background: rgba(255, 190, 120, 0.85);
+  transform: translate(-50%, -50%);
+}
+.rocket-reticle::before { width: 70px; height: 2px; }
+.rocket-reticle::after { width: 2px; height: 70px; }
+.ship-cockpit.rocket.braking .rocket-reticle { border-color: #ff5a3c; }
+.ship-cockpit.rocket .ship-hud { color: #ffc690; text-shadow: 0 0 10px rgba(255, 130, 50, 0.7); bottom: 4%; }
+
+/* Landing Support's targeting (engine/spaceship/targeting.js): the two
+   options at the bottom of the screen while the marker is down. */
+.support-hud {
+  position: fixed; left: 50%; bottom: 7%;
+  transform: translate(-50%, 8px);
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  min-width: 300px;
+  padding: 10px 14px;
+  background: var(--panel-bg);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  font: 700 12px/1.2 ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  letter-spacing: 1.4px; text-transform: uppercase;
+  color: var(--text-dim);
+  pointer-events: none; z-index: 13;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.support-hud.visible { opacity: 1; transform: translate(-50%, 0); }
+.support-title { color: #e8eef5; letter-spacing: 3px; text-align: center; }
+.support-option { display: flex; align-items: center; gap: 10px; }
+.support-option b, .support-foot b {
+  display: inline-block; min-width: 22px; padding: 2px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 5px;
+  text-align: center; color: #fff;
+}
+.support-option .name { flex: 1; }
+.support-option[data-k="samurai"] .name { color: #8fc8ff; }
+.support-option[data-k="rocket"] .name { color: #ff8f7a; }
+.support-option .state { color: #9aa3ad; }
+.support-option.ready .state { color: #9dffb5; }
+.support-foot { font-size: 11px; color: #8a929b; text-align: center; }
+.support-warn {
+  display: none; text-align: center; color: #ff5a3c;
+  animation: shipWarn 0.35s steps(2, end) infinite;
+}
+.support-hud.warn .support-warn { display: block; }
+.support-note { text-align: center; color: #ffd27a; min-height: 0; }
+.support-note:empty { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .support-warn { animation: none; }
+}
+/* Everything the player would normally have on screen steps aside for the
+   landing: it is a cutscene, and the panels would otherwise sit in the middle
+   of the cockpit window. They come back with control (spaceship.js finish). */
+body.ship-cutscene #ui-panel,
+body.ship-cutscene #fps,
+body.ship-cutscene #combo-hud,
+body.ship-cutscene #chase-hud,
+body.ship-cutscene #possess-hud,
+body.ship-cutscene .hero-hud,
+body.ship-cutscene .hero-crosshair,
+body.ship-cutscene .minimap {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 0.3s ease;
+}
+
+/* The Terminator (engine/terminator.js): the earthquake banner's shape in
+   its own red. */
+.terminator-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.terminator-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.terminator-banner .title {
+  font: 800 38px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #ffb3a6;
+  text-shadow: 0 0 22px rgba(255, 50, 30, 0.6), 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.terminator-banner .sub {
+  font: 600 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid rgba(255, 80, 60, 0.32);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* Hero Mode (engine/heroMode.js). */
+#btn-hero.active {
+  background: linear-gradient(135deg, #e0892f, #ffd35a);
+  border-color: transparent;
+  color: #1f1204;
+  box-shadow: 0 0 14px rgba(255, 190, 80, 0.4);
+}
+.hero-hud {
+  /* Below the event banners' band (top 16%), above the minimap. */
+  position: fixed; right: 16px; top: 34%; z-index: 14;
+  display: none; flex-direction: column; gap: 5px;
+  min-width: 190px; max-width: 250px; padding: 10px 14px;
+  background: var(--panel-bg);
+  border: 1px solid rgba(255, 190, 80, 0.45);
+  border-radius: 12px;
+  font: 700 12px/1.3 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: #ffe7a8;
+  pointer-events: none;
+}
+.hero-hud.visible { display: flex; }
+.hero-hud .hero-name { font-size: 15px; letter-spacing: 3px; color: #ffd35a; }
+.hero-hud .hero-row { display: flex; align-items: center; gap: 8px; }
+.hero-hud .hero-cell {
+  position: relative; display: inline-block; width: 70px; height: 7px; border-radius: 4px;
+  background: rgba(127, 214, 255, 0.18); overflow: hidden;
+}
+.hero-hud .hero-cell i {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 100%;
+  background: #7fd6ff; box-shadow: 0 0 8px rgba(80, 180, 255, 0.8);
+}
+.hero-hud .hero-cellpct { color: #7fd6ff; min-width: 3.2em; }
+.hero-hud.low .hero-cell i { background: #ff8a6a; box-shadow: 0 0 8px rgba(255, 110, 70, 0.8); }
+.hero-hud.low .hero-cellpct { color: #ff8a6a; }
+.hero-hud .hero-arrow { display: inline-block; color: #ffb627; font-size: 14px; }
+/* The energy bar (engine/player/energy.js): ten segments of 10%, each
+   filled as far as the level goes. */
+.hero-hud .hero-ebar { display: inline-flex; gap: 2px; }
+.hero-hud .hero-ebar i {
+  --fill: 0%;
+  display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+  background: linear-gradient(to right, #ffd35a var(--fill), rgba(255, 211, 90, 0.15) var(--fill));
+}
+.hero-hud .hero-epct { color: #ffd35a; min-width: 3.2em; }
+.hero-hud .hero-energy.charging .hero-ebar i { box-shadow: 0 0 8px rgba(255, 200, 80, 0.9); }
+.hero-hud .hero-energy.charging .hero-epct { color: #fff3c4; }
+.hero-hud .hero-threat { color: #ffb3a6; }
+.hero-hud .hero-blip {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #ff3b30; box-shadow: 0 0 8px #ff3b30;
+  animation: hero-blip 1s ease-in-out infinite;
+}
+.hero-hud.danger { border-color: rgba(255, 60, 40, 0.8); box-shadow: 0 0 18px rgba(255, 40, 20, 0.35); }
+.hero-hud .hero-msg { min-height: 1.3em; color: #ffffff; }
+.hero-hud .hero-keys { display: none; font-weight: 600; font-size: 10px; letter-spacing: 0.6px; color: var(--text-dim); text-transform: none; }
+.hero-hud.hint .hero-keys { display: block; }
+@keyframes hero-blip {
+  0%, 100% { opacity: 0.25; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.25); }
+}
+/* Hero Mode aim: a Counter-Strike crosshair -- four ticks round a gap that
+   opens with each shot and while walking (--gap, set per frame), and a dot --
+   green, red over something the plasma beam would hit hard. */
+.hero-crosshair {
+  --gap: 5px; --len: 10px; --thick: 2px;
+  --ink: rgba(90, 255, 140, 0.95);
+  position: fixed; left: 50%; top: 50%; z-index: 13;
+  width: 0; height: 0;
+  display: none; pointer-events: none;
+}
+.hero-crosshair.visible { display: block; }
+.hero-crosshair.on { --ink: rgba(255, 70, 55, 1); }
+.hero-crosshair i, .hero-crosshair b {
+  position: absolute; background: var(--ink);
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.9), 0 0 6px var(--ink);
+}
+.hero-crosshair i.n, .hero-crosshair i.s { width: var(--thick); height: var(--len); left: calc(var(--thick) / -2); }
+.hero-crosshair i.w, .hero-crosshair i.e { height: var(--thick); width: var(--len); top: calc(var(--thick) / -2); }
+.hero-crosshair i.n { bottom: var(--gap); }
+.hero-crosshair i.s { top: var(--gap); }
+.hero-crosshair i.w { right: var(--gap); }
+.hero-crosshair i.e { left: var(--gap); }
+.hero-crosshair b { width: 2px; height: 2px; left: -1px; top: -1px; }
+.hero-crosshair .hero-target {
+  position: absolute; left: 0; top: 30px; transform: translateX(-50%);
+  white-space: nowrap;
+  font: 700 11px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.5px; color: var(--ink);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+/* In first person the HUD steps out of the way of the view. */
+.hero-hud.aiming { opacity: 0.75; }
+.hero-banner {
+  position: fixed; left: 50%; top: 16%;
+  transform: translate(-50%, -6px);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 12;
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  text-align: center;
+}
+.hero-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+.hero-banner .title {
+  font: 800 40px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 6px; text-transform: uppercase;
+  color: #ffd35a;
+  text-shadow: 0 0 24px rgba(255, 170, 40, 0.7), 0 2px 10px rgba(0, 0, 0, 0.7);
+}
+.hero-banner .sub {
+  font: 600 13px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: #ffe7a8;
+  background: var(--panel-bg);
+  border: 1px solid rgba(255, 190, 80, 0.45);
+  border-radius: 999px; padding: 4px 12px;
+}
+@media (max-width: 640px) {
+  .hero-hud { top: auto; bottom: 16px; right: 16px; min-width: 0; }
+  #banner-stack .hero-banner .title { font-size: 24px; letter-spacing: 3px; }
+}
+
+/* Hero Mode: the EMP-charge line, and the tracker once nothing is hunting. */
+.hero-hud .hero-emp { display: none; color: #9fe4ff; text-shadow: 0 0 8px rgba(80, 200, 255, 0.8); }
+.hero-hud.charged .hero-emp { display: flex; }
+/* Hero Mode: the car prompts -- at a glowing door, and while driving. */
+.hero-hud .hero-door, .hero-hud .hero-drive { display: none; color: #ffd35a; }
+.hero-hud.door .hero-door { display: flex; animation: hero-door-pulse 0.9s ease-in-out infinite alternate; }
+.hero-hud.driving .hero-drive { display: flex; }
+@keyframes hero-door-pulse { from { opacity: 0.6; } to { opacity: 1; } }
+.hero-hud.clear .hero-blip { display: none; }
+.hero-hud.clear .hero-threat { color: #9fe4ff; }
+/* Banner looks: electric blue for the machine going down (a win), red for Roger. */
+.hero-banner.electric .title {
+  color: #d8f6ff;
+  text-shadow: 0 0 26px rgba(90, 200, 255, 0.95), 0 0 60px rgba(60, 140, 255, 0.6), 0 2px 10px rgba(0, 0, 0, 0.7);
+}
+.hero-banner.electric .sub { color: #bfeaff; border-color: rgba(120, 210, 255, 0.6); }
+.hero-banner.loss .title {
+  color: #ff5a4a;
+  text-shadow: 0 0 24px rgba(255, 40, 20, 0.7), 0 2px 10px rgba(0, 0, 0, 0.7);
+}
+.hero-banner.loss .sub { color: #ffc2b8; border-color: rgba(255, 80, 60, 0.5); }
+
+/* Hero Mode's mega beam (engine/heroMode.js): the charge bar in the HUD
+   while the trigger is held, gold once it is full; a ring round the
+   crosshair that fills with the charge, and pulses when MEGA BEAM is ready. */
+.hero-hud .hero-charge { display: none; }
+.hero-hud.charging .hero-charge { display: flex; }
+.hero-hud .hero-chargebar i { background: #b9f0ff; box-shadow: 0 0 10px rgba(120, 220, 255, 0.9); }
+.hero-hud .hero-chargepct { color: #b9f0ff; min-width: 3.2em; }
+.hero-hud.mega .hero-chargebar i { background: #ffd35a; box-shadow: 0 0 14px rgba(255, 200, 60, 1); }
+.hero-hud.mega .hero-chargepct { color: #ffd35a; }
+.hero-crosshair::before {
+  content: ''; position: absolute; left: -26px; top: -26px; width: 52px; height: 52px;
+  border-radius: 50%; display: none;
+  background: conic-gradient(rgba(140, 230, 255, 0.95) calc(var(--charge, 0) * 360deg), rgba(140, 230, 255, 0.12) 0);
+  -webkit-mask: radial-gradient(circle, transparent 22px, #000 23px);
+  mask: radial-gradient(circle, transparent 22px, #000 23px);
+}
+.hero-crosshair.charging::before { display: block; }
+.hero-crosshair.mega::before {
+  background: rgba(255, 211, 90, 1);
+  animation: hero-mega-pulse 0.35s ease-in-out infinite alternate;
+}
+@keyframes hero-mega-pulse { from { opacity: 0.55; transform: scale(1); } to { opacity: 1; transform: scale(1.12); } }
+
+/* GAME OVER (engine/heroMode.js killRoger): over the whole view, with
+   Restart and Exit. */
+.hero-over {
+  position: fixed; inset: 0; z-index: 30;
+  display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  background: radial-gradient(ellipse at center, rgba(40, 0, 0, 0.55), rgba(0, 0, 0, 0.8));
+  text-align: center;
+}
+.hero-over.visible { display: flex; animation: hero-over-in 0.5s ease-out; }
+@keyframes hero-over-in { from { opacity: 0; } to { opacity: 1; } }
+.hero-over-title {
+  font: 900 56px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 10px; color: #ff5a4a;
+  text-shadow: 0 0 30px rgba(255, 40, 20, 0.7), 0 3px 12px rgba(0, 0, 0, 0.8);
+}
+.hero-over-cause {
+  font: 600 14px/1.3 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 1.5px; text-transform: uppercase; color: #ffd0c8;
+}
+.hero-over-buttons { display: flex; gap: 12px; margin-top: 8px; }
+.hero-over-buttons button {
+  min-height: 44px; padding: 0 22px; border-radius: 10px; cursor: pointer;
+  font: 700 14px system-ui, -apple-system, 'Segoe UI', sans-serif; letter-spacing: 1px;
+  color: #fff; border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.08);
+  transition: all 0.2s ease;
+}
+.hero-over-buttons .hero-over-restart { background: linear-gradient(135deg, #2cc9b0, #7fffd4); border-color: transparent; }
+.hero-over-buttons button:hover { box-shadow: 0 0 16px rgba(120, 200, 255, 0.6); transform: translateY(-1px); }
+.hero-over-buttons button:active { transform: scale(0.95); }
+
+/* ===========================================================================
+   Panel colours, on request: aquamarine. (It was the old blue, then graphite
+   and amber -- "I got sick of the blue" -- and now aquamarine on graphite.)
+   Kept as one block at the end so it overrides the older rules above: the
+   palette variables first (every rule reading --accent follows), then each
+   kind of button in the panel.
+   =========================================================================== */
+:root {
+  --accent: #5ff5d2;
+  --accent-2: #2fc4e0;
+  --accent-soft: rgba(95, 245, 210, 0.2);
+  --panel-bg: rgba(10, 20, 22, 0.84);
+  --panel-border: rgba(127, 255, 212, 0.14);
+  --text: #eafdf8;
+  --text-dim: #8fb3ac;
+  --tile: linear-gradient(180deg, #1c2d2f 0%, #132123 100%);
+  --tile-hover: linear-gradient(180deg, #23393b 0%, #182a2c 100%);
+  --tile-edge: rgba(127, 255, 212, 0.12);
+  --aqua: linear-gradient(180deg, #8ffff0 0%, #2fd6bd 100%);
+}
+#ui-panel h1 { background: linear-gradient(90deg, #f0fffb, var(--accent) 80%); -webkit-background-clip: text; background-clip: text; }
+#ui-panel::-webkit-scrollbar-thumb { background: rgba(127, 255, 212, 0.2); }
+
+/* Every button in the panel: a flat dark-teal key with a hairline top light,
+   lifting on hover and pressing in on click. */
+.buttons button,
+.presets button,
+.event-grid .pill.event,
+.pill {
+  background: var(--tile);
+  border: 1px solid var(--tile-edge);
+  color: var(--text);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 2px 6px rgba(0, 0, 0, 0.35);
+  border-radius: 11px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+  text-shadow: none;
+}
+.buttons button:hover:not(:disabled),
+.presets button:hover:not(:disabled),
+.event-grid .pill.event:hover:not(:disabled),
+.pill:hover:not(:disabled) {
+  background: var(--tile-hover);
+  border-color: rgba(127, 255, 212, 0.45);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.07) inset, 0 4px 14px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(127, 255, 212, 0.15);
+  transform: translateY(-1px);
+  filter: none;
+}
+.buttons button:active:not(:disabled),
+.presets button:active:not(:disabled),
+.event-grid .pill.event:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5) inset;
+}
+/* The main actions: solid aquamarine keys with dark type. */
+.buttons button.primary {
+  background: var(--aqua);
+  border-color: rgba(200, 255, 240, 0.55);
+  color: #04211c;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset, 0 4px 14px rgba(47, 214, 189, 0.28);
+}
+.buttons button.primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #b0fff5 0%, #45e3cb 100%);
+  border-color: rgba(220, 255, 247, 0.75);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.55) inset, 0 6px 18px rgba(47, 214, 189, 0.45);
+}
+/* On: a lit aquamarine key. */
+.presets button.active,
+#btn-cinematic.active,
+#btn-chase.active,
+#btn-cockpit.active,
+#btn-daymode.active,
+#btn-possess.active {
+  background: linear-gradient(180deg, rgba(127, 255, 212, 0.32), rgba(47, 196, 224, 0.16));
+  border-color: rgba(127, 255, 212, 0.85);
+  color: #f0fffb;
+  box-shadow: 0 0 0 1px rgba(127, 255, 212, 0.35) inset, 0 0 16px rgba(47, 214, 189, 0.35);
+}
+.presets button.active::after { background: var(--accent); color: #04211c; box-shadow: 0 0 8px rgba(95, 245, 210, 0.8); }
+/* Disaster tiles: the dark key, the disaster's own colour kept only as a
+   thin bar down the left edge (its border colour, set per id above). */
+.event-grid .pill.event {
+  border-left-width: 3px;
+  text-align: left;
+  padding-left: 10px;
+  font-size: 11.5px;
+}
+.event-grid .pill.event.active { background: linear-gradient(180deg, rgba(127, 255, 212, 0.16), rgba(127, 255, 212, 0.05)); }
+/* Hero and Smooth Criminal: two compact pills side by side, centred. */
+.buttons.hero-row { justify-content: center; }
+.buttons #btn-hero,
+.buttons #btn-smooth {
+  /* Equal halves of the row: at their natural widths the pair ran past
+     the panel's edge and clipped Hero. */
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 4px;
+  font-size: 11px;
+  letter-spacing: 0;
+  border-radius: 999px;
+}
+.buttons #btn-hero {
+  background: linear-gradient(180deg, #3de0c6 0%, #0f9c89 100%);
+  border-color: rgba(160, 255, 235, 0.6);
+  color: #f2fffc;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset, 0 4px 12px rgba(20, 160, 140, 0.35);
+}
+.buttons #btn-smooth {
+  background: linear-gradient(180deg, #2a3f5a 0%, #1a2a40 100%);
+  border-color: rgba(127, 255, 212, 0.55);
+  color: #dffff6;
+}
+.buttons #btn-hero.active,
+.buttons #btn-smooth.active {
+  background: var(--aqua);
+  color: #04211c;
+  animation: eventPulse 1.4s ease-in-out infinite;
+}
+#btn-mute.active { background: rgba(255, 93, 93, 0.18); border-color: rgba(255, 93, 93, 0.55); color: #ffc0c0; }
+
+/* The Crowd section (engine/environment/crowd.js). */
+.crowd-group .crowd-slider { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.crowd-group .crowd-value { opacity: 0.75; font-variant-numeric: tabular-nums; }
+.crowd-group input[type="range"] { width: 100%; }
+
+/* The mission tracker (engine/missions.js), top centre. */
+.mission-hud {
+  position: fixed; left: 50%; top: 12px; transform: translate(-50%, -8px);
+  min-width: 240px; padding: 8px 14px; border-radius: 10px;
+  background: rgba(10, 18, 24, 0.78); border: 1px solid rgba(120, 230, 200, 0.35);
+  color: #dff7ef; font: 600 12px/1.35 system-ui, sans-serif; letter-spacing: 0.5px;
+  pointer-events: none; z-index: 13; opacity: 0; transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.mission-hud.visible { opacity: 1; transform: translate(-50%, 0); }
+.mission-hud .mission-head { display: flex; justify-content: space-between; gap: 12px; }
+.mission-hud .mission-title { color: #7ff0c8; letter-spacing: 2px; }
+.mission-hud .mission-time { font-variant-numeric: tabular-nums; }
+.mission-hud.late .mission-time { color: #ff8a6a; }
+.mission-hud .mission-goal { opacity: 0.8; font-weight: 500; margin: 2px 0 5px; }
+.mission-hud .mission-bar { height: 6px; border-radius: 3px; background: rgba(127, 240, 200, 0.18); overflow: hidden; }
+.mission-hud .mission-bar i { display: block; height: 100%; width: 0; background: #7ff0c8; transition: width 0.25s ease; }
+.mission-hud .mission-count { text-align: right; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.mission-hud.won { border-color: rgba(127, 240, 160, 0.8); }
+.mission-hud.won .mission-goal { color: #9bff9b; opacity: 1; }
+.mission-hud.lost { border-color: rgba(255, 138, 106, 0.8); }
+.mission-hud.lost .mission-goal { color: #ff8a6a; opacity: 1; }
+
+/* Hank Granite's scene (engine/actionHero.js): black bars and a title. */
+.cinema-bars { position: fixed; inset: 0; pointer-events: none; z-index: 14; }
+.cinema-bars i {
+  position: absolute; left: 0; right: 0; height: 0; background: #000;
+  transition: height 0.6s ease;
+}
+.cinema-bars i:first-child { top: 0; }
+.cinema-bars i:last-child { bottom: 0; }
+.cinema-bars.visible i { height: 11vh; }
+.cinema-title {
+  position: fixed; left: 50%; bottom: 14vh; transform: translateX(-50%);
+  color: #f4e9d8; font: 800 34px/1 system-ui, sans-serif; letter-spacing: 10px;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.8);
+  pointer-events: none; z-index: 15; opacity: 0; transition: opacity 0.8s ease;
+}
+.cinema-title.visible { opacity: 1; }
+/* Captain Spotless's glare (engine/cleaner.js). */
+.spotless-glare {
+  position: fixed; inset: 0; pointer-events: none; z-index: 11; opacity: 0;
+  background: radial-gradient(circle at 50% 45%, rgba(255, 255, 250, 0.95), rgba(255, 250, 225, 0.55) 55%, rgba(255, 245, 210, 0.2));
+  display: none;
+}
+.spotless-glare.visible { display: block; }

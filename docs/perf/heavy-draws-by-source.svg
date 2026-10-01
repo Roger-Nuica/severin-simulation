@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 254" width="760" height="254" role="img" aria-label="Heavy scenario: what gets drawn, after the nuclear meltdown">
+  <style>
+    .bg { fill: #fcfcfb; }
+    .t1 { fill: #0b0b0b; font: 600 15px system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    .t2 { fill: #52514e; font: 12px system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    .lab { fill: #0b0b0b; font: 12px system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    .val { fill: #52514e; font: 11px ui-monospace, Menlo, Consolas, monospace; }
+    .grid { stroke: #e4e3df; stroke-width: 1; }
+    .before { fill: #b9b8b2; }
+    .after { fill: #2a78d6; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #1a1a19; }
+      .t1, .lab { fill: #ffffff; }
+      .t2, .val { fill: #c3c2b7; }
+      .grid { stroke: #383835; }
+      .before { fill: #5c5b57; }
+      .after { fill: #3987e5; }
+    }
+  </style>
+  <rect class="bg" width="760" height="254" rx="8"/>
+  <text class="t1" x="20" y="28">Heavy scenario: what gets drawn, after the nuclear meltdown</text>
+  <text class="t2" x="20" y="48">Before: meshes drawn one by one (1,430 in all). After: draw calls per frame, shadows and post included.</text>
+  <rect class="before" x="20" y="60" width="12" height="12" rx="2"/><text class="t2" x="37" y="70">separate draws</text><rect class="after" x="160" y="60" width="12" height="12" rx="2"/><text class="t2" x="177" y="70">after</text>
+  <line class="grid" x1="230" x2="230" y1="92" y2="238"/>
+  <text class="lab" x="220" y="115" text-anchor="end">alien parts</text><rect class="before" x="230" y="100" width="268.7412587412588" height="14" rx="3"><title>alien parts — before: 915 </title></rect><text class="val" x="504.7412587412588" y="111">915</text><rect class="after" x="230" y="116" width="3.5244755244755246" height="14" rx="3"><title>alien parts — after: 12 </title></rect><text class="val" x="239.52447552447552" y="127">12 (−99%)</text><text class="lab" x="220" y="161" text-anchor="end">explosion particles</text><rect class="before" x="230" y="146" width="29.958041958041957" height="14" rx="3"><title>explosion particles — before: 102 </title></rect><text class="val" x="265.958041958042" y="157">102</text><rect class="after" x="230" y="162" width="2" height="14" rx="3"><title>explosion particles — after: 2 </title></rect><text class="val" x="238" y="173">2 (−98%)</text><text class="lab" x="220" y="207" text-anchor="end">whole frame</text><rect class="before" x="230" y="192" width="420" height="14" rx="3"><title>whole frame — before: 1,430 </title></rect><text class="val" x="656" y="203">1,430</text><rect class="after" x="230" y="208" width="74.01398601398601" height="14" rx="3"><title>whole frame — after: 252 </title></rect><text class="val" x="310.013986013986" y="219">252 (−82%)</text>
+</svg>

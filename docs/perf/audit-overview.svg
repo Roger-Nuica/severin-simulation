@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 392" width="760" height="392" role="img" aria-label="Performance audit: before and after">
+  <style>
+    .bg { fill: #fcfcfb; }
+    .t1 { fill: #0b0b0b; font: 600 15px system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    .t2 { fill: #52514e; font: 12px system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    .lab { fill: #0b0b0b; font: 12px system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    .val { fill: #52514e; font: 11px ui-monospace, Menlo, Consolas, monospace; }
+    .grid { stroke: #e4e3df; stroke-width: 1; }
+    .before { fill: #b9b8b2; }
+    .after { fill: #2a78d6; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #1a1a19; }
+      .t1, .lab { fill: #ffffff; }
+      .t2, .val { fill: #c3c2b7; }
+      .grid { stroke: #383835; }
+      .before { fill: #5c5b57; }
+      .after { fill: #3987e5; }
+    }
+  </style>
+  <rect class="bg" width="760" height="392" rx="8"/>
+  <text class="t1" x="20" y="28">Performance audit: before and after</text>
+  <text class="t2" x="20" y="48">Each row on its own scale. Headless Chromium in the cloud container; normal = tornado only.</text>
+  <rect class="before" x="20" y="60" width="12" height="12" rx="2"/><text class="t2" x="37" y="70">before audit</text><rect class="after" x="160" y="60" width="12" height="12" rx="2"/><text class="t2" x="177" y="70">after</text>
+  <line class="grid" x1="230" x2="230" y1="92" y2="376"/>
+  <text class="lab" x="220" y="115" text-anchor="end">Draw calls / frame (normal)</text><rect class="before" x="230" y="100" width="420" height="14" rx="3"><title>Draw calls / frame (normal) — before: 2,430 </title></rect><text class="val" x="656" y="111">2,430</text><rect class="after" x="230" y="116" width="66.02469135802468" height="14" rx="3"><title>Draw calls / frame (normal) — after: 382 </title></rect><text class="val" x="302.0246913580247" y="127">382 (−84%)</text><text class="lab" x="220" y="161" text-anchor="end">Draw calls / frame (heavy)</text><rect class="before" x="230" y="146" width="420" height="14" rx="3"><title>Draw calls / frame (heavy) — before: 1,430 </title></rect><text class="val" x="656" y="157">1,430</text><rect class="after" x="230" y="162" width="74.01398601398601" height="14" rx="3"><title>Draw calls / frame (heavy) — after: 252 </title></rect><text class="val" x="310.013986013986" y="173">252 (−82%)</text><text class="lab" x="220" y="207" text-anchor="end">Real point lights</text><rect class="before" x="230" y="192" width="420" height="14" rx="3"><title>Real point lights — before: 27 </title></rect><text class="val" x="656" y="203">27</text><rect class="after" x="230" y="208" width="108.88888888888889" height="14" rx="3"><title>Real point lights — after: 7 </title></rect><text class="val" x="344.8888888888889" y="219">7 (−74%)</text><text class="lab" x="220" y="253" text-anchor="end">Shadow casters</text><rect class="before" x="230" y="238" width="420" height="14" rx="3"><title>Shadow casters — before: 1,873 </title></rect><text class="val" x="656" y="249">1,873</text><rect class="after" x="230" y="254" width="155.62199679658303" height="14" rx="3"><title>Shadow casters — after: 694 </title></rect><text class="val" x="391.62199679658306" y="265">694 (−63%)</text><text class="lab" x="220" y="299" text-anchor="end">Funnel churn CPU / frame</text><rect class="before" x="230" y="284" width="420" height="14" rx="3"><title>Funnel churn CPU / frame — before: 2.56 ms</title></rect><text class="val" x="656" y="295">2.56 ms</text><rect class="after" x="230" y="300" width="2" height="14" rx="3"><title>Funnel churn CPU / frame — after: 0.01 ms</title></rect><text class="val" x="238" y="311">0.01 ms (−100%)</text><text class="lab" x="220" y="345" text-anchor="end">Physics CPU (800 objects)</text><rect class="before" x="230" y="330" width="420" height="14" rx="3"><title>Physics CPU (800 objects) — before: 1.1 ms</title></rect><text class="val" x="656" y="341">1.1 ms</text><rect class="after" x="230" y="346" width="190.9090909090909" height="14" rx="3"><title>Physics CPU (800 objects) — after: 0.5 ms</title></rect><text class="val" x="426.9090909090909" y="357">0.5 ms (−55%)</text>
+</svg>

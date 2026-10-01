@@ -1,0 +1,174 @@
+// @ts-check
+/**
+ * ===========================================================================
+ * SECTION EN — Enemies
+ * ===========================================================================
+ * One register of everything that fights the hero, whatever system owns it:
+ * the aliens (aliens.js), the Terminator squad (terminator.js), the machines
+ * sent after Roger (hero/pursuers.js), and the enemies still to come (the
+ * cyber T-Rex, the Yeti, Patient Zero). Each owner registers its kind once,
+ * in its init, with an adapter:
+ *
+ *   list()                 its enemies alive now
+ *   position(e)            where one is ({x, z}, world units)
+ *   accepts                the kinds of damage it answers to
+ *   damage(e, hit)         one hit: {type, amount?, at?, mega?}; returns
+ *                          whether it was stopped (killed, knocked down)
+ *
+ * Kinds of damage: 'plasma' (the rifle; mega for the mega beam), 'bullet'
+ * (the minigun), 'bolt' (lightning, the railgun), 'emp', 'fire', 'freeze',
+ * 'gravity' (the black hole), 'cleanse' (Mr. Proper), 'blade' (a samurai's
+ * sword, Landing Support: `amount` is the cut). A hit of a kind an
+ * enemy does not accept does nothing to it.
+ *
+ * Besides their owners' own state, enemies can be in a few states every
+ * system shares (setState): 'frozen' (for a time), 'disintegrated' and
+ * 'absorbed'. The new abilities and enemies use them; the owners read them
+ * with getState.
+ *
+ * The existing weapons keep calling their targets directly; this register
+ * is what the new area effects (engine/effects/area.js) and abilities go
+ * through, and what the entity caps count (engine/perf/caps.js).
+ */
+
+/** @typedef {'plasma'|'bullet'|'bolt'|'emp'|'fire'|'freeze'|'gravity'|'cleanse'|'blade'} DamageType */
+/** @typedef {{type: DamageType, amount?: number, at?: {x: number, y?: number, z: number}, mega?: boolean}} Hit */
+/** @typedef {'frozen'|'disintegrated'|'absorbed'} EnemyState */
+
+/**
+ * @typedef {Object} EnemyKind
+ * @property {string} kind
+ * @property {() => any[]} list
+ * @property {(e: any) => {x: number, z: number}} position
+ * @property {DamageType[]} accepts
+ * @property {(e: any, hit: Hit) => boolean} damage
+ * @property {(e: any) => {x: number, z: number, radius: number, top: number}} [hitbox]
+ *   a kind with one can be aimed at and hit by Roger's rifle and minigun
+ *   (hero/plasma.js traceAim), as a standing cylinder
+ * @property {(e: any) => void} [consume] taken by the black hole: the owner
+ *   takes it out of play quietly, with no death of its own
+ *   (engine/effects/consumables.js; without one it is frozen and hidden)
+ * @property {(e: any) => import('three').Object3D|null} [object] what to
+ *   move or dissolve, when it is not e.root / e.rig.root
+ * @property {(e: any) => number} [size] metres across
+ */
+
+/**
+ * @param {Object} ctx
+ * @returns {{
+ *   registerKind: (kind: EnemyKind) => void,
+ *   kinds: () => EnemyKind[],
+ *   each: (visit: (e: any, kind: EnemyKind) => void) => void,
+ *   count: (kind?: string) => number,
+ *   hit: (e: any, kind: EnemyKind, hit: Hit) => boolean,
+ *   setState: (e: any, state: EnemyState, seconds?: number) => void,
+ *   getState: (e: any, state: EnemyState) => boolean,
+ *   updateEnemies: (dt: number) => void,
+ *   resetEnemies: () => void
+ * }}
+ */
+export function createEnemyRegistry(ctx) {
+  void ctx;
+  /** @type {Map<string, EnemyKind>} */
+  const registered = new Map();
+  /** @type {Map<any, {frozen: number, disintegrated: boolean, absorbed: boolean}>} */
+  let states = new Map();
+
+  /**
+   * @param {EnemyKind} kind
+   * @returns {void}
+   */
+  function registerKind(kind) {
+    registered.set(kind.kind, kind);
+  }
+
+  /** @returns {EnemyKind[]} */
+  function kinds() {
+    return [...registered.values()];
+  }
+
+  /**
+   * Every enemy alive now, of every kind.
+   * @param {(e: any, kind: EnemyKind) => void} visit
+   * @returns {void}
+   */
+  function each(visit) {
+    for (const kind of registered.values()) {
+      for (const e of kind.list()) visit(e, kind);
+    }
+  }
+
+  /**
+   * @param {string} [kind] one kind, or all
+   * @returns {number}
+   */
+  function count(kind) {
+    if (kind) {
+      const k = registered.get(kind);
+      return k ? k.list().length : 0;
+    }
+    let n = 0;
+    for (const k of registered.values()) n += k.list().length;
+    return n;
+  }
+
+  /**
+   * One hit on one enemy, if it answers to that kind of damage.
+   * @param {any} e
+   * @param {EnemyKind} kind
+   * @param {Hit} h
+   * @returns {boolean} whether it was stopped
+   */
+  function hit(e, kind, h) {
+    if (!kind.accepts.includes(h.type)) return false;
+    return kind.damage(e, h);
+  }
+
+  /**
+   * @param {any} e
+   * @param {EnemyState} state
+   * @param {number} [seconds] how long, for 'frozen'
+   * @returns {void}
+   */
+  function setState(e, state, seconds = 0) {
+    let s = states.get(e);
+    if (!s) {
+      s = { frozen: 0, disintegrated: false, absorbed: false };
+      states.set(e, s);
+    }
+    if (state === 'frozen') s.frozen = Math.max(s.frozen, seconds);
+    else s[state] = true;
+  }
+
+  /**
+   * @param {any} e
+   * @param {EnemyState} state
+   * @returns {boolean}
+   */
+  function getState(e, state) {
+    const s = states.get(e);
+    if (!s) return false;
+    return state === 'frozen' ? s.frozen > 0 : s[state];
+  }
+
+  /**
+   * The frozen enemies thawing, on the world's time; and the states of
+   * enemies that are no longer anywhere forgotten.
+   * @param {number} dt
+   * @returns {void}
+   */
+  function updateEnemies(dt) {
+    if (!states.size) return;
+    for (const [e, s] of states) {
+      if (s.frozen > 0) s.frozen = Math.max(0, s.frozen - dt);
+      if (s.frozen <= 0 && !s.disintegrated && !s.absorbed) states.delete(e);
+    }
+  }
+
+  /** @returns {void} */
+  function resetEnemies() {
+    states = new Map();
+  }
+
+  return { registerKind, kinds, each, count, hit, setState, getState, updateEnemies, resetEnemies };
+}

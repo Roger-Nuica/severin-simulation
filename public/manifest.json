@@ -1,0 +1,42 @@
+{
+  "name": "Tornado Simulator",
+  "short_name": "Tornado",
+  "description": "Interactive 3D tornado simulator with customizable intensity, wind speed, and destruction mechanics",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1a1a2e",
+  "theme_color": "#4A9EFF",
+  "categories": [
+    "games",
+    "simulation"
+  ],
+  "icons": [
+    {
+      "src": "/tornado-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/tornado-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/tornado-icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/tornado-icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "id": "/"
+}
