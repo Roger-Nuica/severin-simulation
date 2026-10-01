@@ -20,6 +20,7 @@ import { createNuclearSystem } from './engine/nuclear.js';
 import { createSmoothCriminalSystem } from './engine/smoothCriminal.js';
 import { createHeroModeSystem } from './engine/heroMode.js';
 import { createHeroSoundSystem } from './engine/sound/hero.js';
+import { createBlackHoleSoundSystem } from './engine/sound/blackHole.js';
 import { createEmpChargeSystem } from './engine/empCharge.js';
 import { createEmpHumSoundSystem } from './engine/sound/empHum.js';
 import { createCreatureSoundSystem } from './engine/sound/creatures.js';
@@ -538,6 +539,10 @@ export function createSimulation(container) {
   // The two giants' stalemate (engine/giants/clash.js).
   register('giantClash', createGiantClashSystem(ctx), { auto: true });
   register('blizzard', createBlizzardSystem(ctx), { auto: true });
+  // The Black Hole Gun's own voice (sound/blackHole.js), driven by the hole's
+  // size each frame rather than its own lifecycle -- see sound/empHum.js for
+  // the same level-driven pattern.
+  register('holeSound', createBlackHoleSoundSystem(ctx));
   // The Black Hole Gun's hole (a weapon, heroWeapons.js) and Patient Zero.
   register('blackHole', createBlackHoleSystem(ctx), { auto: true });
   register('patientZero', createPatientZeroSystem(ctx), { auto: true });

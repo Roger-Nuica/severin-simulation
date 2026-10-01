@@ -28,7 +28,7 @@ import { MOTHERSHIP_CRASH_BLAST } from './explosions/megaBlast.js';
  * the first runs straight at the nearest one, and the beam sets it off.
  *
  * Only Roger can stop it (engine/heroMode.js): every plasma shot holes its
- * hull -- a normal shot one point, a mega beam (the rifle's three-second
+ * hull -- a normal shot one point, a mega beam (the rifle's two-second
  * charge) five (heroMode.js SHIP_DAMAGE) -- and MOTHER.hull points bring it
  * down -- it burns, lists and falls out of the sky onto the town,
  * and goes up where it lands: the biggest explosion in the game after a

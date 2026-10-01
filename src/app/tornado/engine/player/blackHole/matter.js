@@ -1,15 +1,18 @@
 // @ts-check
 import * as THREE from 'three';
-import { createSoftDotTexture } from '../../../utils/textures.js';
-import { createParticlePool, pointScaleFor, markPoolDirty, disposeParticlePool } from '../../particlePool.js';
 import { LOOK } from './look.js';
 
 /**
  * ===========================================================================
  * SECTION PB.2 — Matter falling in
  * ===========================================================================
- * The particles round the black hole, all on the spiral the swirl's shader
- * draws (look.js), so they read as the arms themselves carrying things in:
+ * Small, sharp, bright shards riding the spiral the swirl's shader draws
+ * (look.js), so they read as the arms themselves carrying things in --
+ * stretched boxes, oriented to their own direction of travel every frame
+ * (the same InstancedMesh technique dissolve.js already uses for its
+ * fragments, and wind.js for its streaks -- not the shared round-sprite
+ * particlePool.js, which can only face the camera and cannot be oriented or
+ * stretched, which is why the old version read as soft round "bubbles"):
  *
  *  - Dust and grit are torn up off the ground all the way out to the edge
  *    of the pull (100 m) and blown in, greyish brown, turning violet as they
@@ -21,14 +24,19 @@ import { LOOK } from './look.js';
  *  - Whatever the hole is tearing apart sheds bits from where it is, and
  *    they join the same flow.
  *
- * Each particle keeps its radius and angle round the hole (in the pool's
- * velocity slots) rather than a velocity: it turns with the swirl's own
- * differential rotation and moves along the logarithmic arm as it falls,
- * so it stays on an arm instead of cutting across them. Positions follow
- * the hole as it drifts.
+ * Each shard keeps its radius and angle round the hole (not a velocity): it
+ * turns with the swirl's own differential rotation and moves along the
+ * logarithmic arm as it falls, so it stays on an arm instead of cutting
+ * across them. Positions follow the hole as it drifts. Stretched along its
+ * own instantaneous direction of travel and shrunk as it nears the horizon,
+ * same as dissolve.js's fragments -- so the trail itself reads as curved,
+ * not a straight streak, because the direction it is stretched along keeps
+ * turning every frame.
  *
- * One additive pool on the shared particle budget (caps.particleRoom before
- * every emission, trackPool at start-up).
+ * A fixed cap (MATTER.max, same figure the old point-pool used) rather than
+ * the shared points-only particle budget (perf/caps.js's particleRoom(),
+ * which only tracks THREE.Points pools) -- the same self-contained-cap
+ * pattern dissolve.js's fragments and wind.js's streaks already use.
  */
 
 export const MATTER = {
@@ -36,7 +44,8 @@ export const MATTER = {
   ambientRate: 420,        // particles a second while the hole is open
   infall: [4, 34],         // m/s inward: at the line, and at the horizon
   life: 14,                // seconds, a backstop only: they end at the horizon
-  size: [0.5, 1.5]
+  size: [0.35, 1.1],       // shard length at full size (world units)
+  stretch: 2.2              // how long a shard is drawn at the horizon, x its size
 };
 
 /**
@@ -52,10 +61,38 @@ export const MATTER = {
  */
 export function createHoleMatter(ctx, hole) {
   const { Sim } = ctx;
-  const texture = createSoftDotTexture();
-  const pool = createParticlePool(Sim.three.scene, MATTER.max, texture, THREE.AdditiveBlending, 'black_hole_matter');
-  ctx.systems.caps.trackPool(pool);
+  const N = MATTER.max;
+  const geometry = new THREE.BoxGeometry(0.12, 0.12, 1);
+  const material = new THREE.MeshBasicMaterial({
+    color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+  });
+  const mesh = new THREE.InstancedMesh(geometry, material, N);
+  mesh.name = 'black_hole_matter';
+  mesh.frustumCulled = false;
+  mesh.count = 0;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.setColorAt(0, new THREE.Color(0, 0, 0));
+  Sim.three.scene.add(mesh);
+
+  // Per shard: radius and angle round the hole, height, the seed its size
+  // and colour variance are drawn from, and how long it has left.
+  const radius = new Float32Array(N);
+  const angle = new Float32Array(N);
+  const height = new Float32Array(N);
+  const seed = new Float32Array(N);
+  const life = new Float32Array(N);
+  let next = 0;
   let alive = false;
+
+  const m4 = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const p = new THREE.Vector3();
+  const s = new THREE.Vector3();
+  const fwd = new THREE.Vector3();
+  const colour = new THREE.Color();
+  const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+  const Z = new THREE.Vector3(0, 0, 1);
+
   let owed = 0;
   const inner = LOOK.coreRadius * 0.95;
 
@@ -101,23 +138,18 @@ export function createHoleMatter(ctx, hole) {
 
   /**
    * @param {number} r
-   * @param {number} angle
+   * @param {number} ang
    * @param {number} y
-   * @param {{x: number, y: number, z: number}} at
    * @returns {void}
    */
-  function spawn(r, angle, y, at) {
-    const i = pool.next;
-    pool.next = (pool.next + 1) % MATTER.max;
-    pool.life[i] = MATTER.life;
-    pool.maxLife[i] = MATTER.life;
-    pool.seed[i] = Math.random();
-    pool.velocities[i * 3] = r;
-    pool.velocities[i * 3 + 1] = angle;
-    pool.velocities[i * 3 + 2] = y;
-    pool.positions[i * 3] = at.x + Math.cos(angle) * r;
-    pool.positions[i * 3 + 1] = y;
-    pool.positions[i * 3 + 2] = at.z + Math.sin(angle) * r;
+  function spawn(r, ang, y) {
+    const i = next;
+    next = (next + 1) % N;
+    radius[i] = r;
+    angle[i] = ang;
+    height[i] = y;
+    seed[i] = Math.random();
+    life[i] = MATTER.life;
     alive = true;
   }
 
@@ -129,8 +161,12 @@ export function createHoleMatter(ctx, hole) {
    * @returns {void}
    */
   function ambient(dt, at, t) {
-    owed += MATTER.ambientRate * dt;
-    const n = Math.min(Math.floor(owed), ctx.systems.caps.particleRoom());
+    // The same adaptive quality ladder engine/post.js's lensing reads
+    // (engine/quality.js) rather than a separate watcher: fewer shards a
+    // second once the machine is visibly struggling.
+    const step = ctx.systems.quality ? ctx.systems.quality.qualityStep() : 0;
+    owed += MATTER.ambientRate * (1 - step * 0.18) * dt;
+    const n = Math.min(Math.floor(owed), N);
     owed -= Math.floor(owed);
     for (let k = 0; k < n; k++) {
       // Dust from all the way out, most from out at the line, some from
@@ -142,8 +178,8 @@ export function createHoleMatter(ctx, hole) {
           ? hole.escape * (0.85 + Math.random() * 0.2)
           : LOOK.swirlRadius * (0.4 + Math.random() * 0.6);
       const arm = Math.floor(Math.random() * LOOK.arms);
-      const angle = armAngle(r, t, arm) + (Math.random() - 0.5) * 0.35;
-      spawn(r, angle, heightAt(r, at.y) + (Math.random() - 0.5) * 0.8, at);
+      const ang = armAngle(r, t, arm) + (Math.random() - 0.5) * 0.35;
+      spawn(r, ang, heightAt(r, at.y) + (Math.random() - 0.5) * 0.8);
     }
   }
 
@@ -155,16 +191,16 @@ export function createHoleMatter(ctx, hole) {
    * @returns {void}
    */
   function shed(from, at, n) {
-    const count = Math.min(n, ctx.systems.caps.particleRoom());
-    for (let k = 0; k < count; k++) {
+    for (let k = 0; k < n; k++) {
       const dx = from.x - at.x + (Math.random() - 0.5) * 1.5;
       const dz = from.z - at.z + (Math.random() - 0.5) * 1.5;
-      spawn(Math.max(hole.horizon, Math.hypot(dx, dz)), Math.atan2(dz, dx), Math.max(0.3, from.y) + Math.random() * 1.5, at);
+      spawn(Math.max(hole.horizon, Math.hypot(dx, dz)), Math.atan2(dz, dx), Math.max(0.3, from.y) + Math.random() * 1.5);
     }
   }
 
   /**
-   * Every particle a step further round and in.
+   * Every shard a step further round and in, oriented and stretched along
+   * its own direction of travel (dissolve.js's technique).
    * @param {number} dt
    * @param {{x: number, y: number, z: number}|null} at the hole, or null once it has closed
    * @param {number} t
@@ -173,83 +209,88 @@ export function createHoleMatter(ctx, hole) {
   function step(dt, at, t) {
     void t;
     if (!alive) return;
-    pool.points.material.uniforms.uScale.value = pointScaleFor(Sim.three.renderer, Sim.three.camera);
     let any = false;
     const [v0, v1] = MATTER.infall;
     const [s0, s1] = MATTER.size;
-    for (let i = 0; i < MATTER.max; i++) {
-      if (pool.life[i] <= 0) {
-        if (pool.sizes[i] !== 0) { pool.colours[i * 4 + 3] = 0; pool.sizes[i] = 0; }
-        continue;
-      }
-      // The hole gone: what is still in flight fades out where it is.
+    for (let i = 0; i < N; i++) {
+      if (life[i] <= 0) continue;
       if (!at) {
-        pool.life[i] = Math.min(pool.life[i], 0.4) - dt;
-        pool.colours[i * 4 + 3] *= 0.85;
-        any = true;
+        // The hole gone: what is still in flight is hidden with it, the
+        // same as dissolve.js's fragments on the same event.
+        life[i] = 0;
+        mesh.setMatrixAt(i, hidden);
         continue;
       }
-      pool.life[i] -= dt;
-      const v = i * 3;
-      let r = pool.velocities[v];
-      let angle = pool.velocities[v + 1];
+      life[i] -= dt;
+      let r = radius[i];
       const closeness = 1 - Math.min(1, (r - hole.horizon) / (hole.escape - hole.horizon));
       const outside = r > hole.escape;
       // Faster the nearer it is: blown in from out there, a gentle drift at
       // the line, a plunge at the end.
       const dr = (outside ? v0 * Math.pow(hole.escape / r, 1.3) * 2.2 : v0 + (v1 - v0) * closeness * closeness) * dt;
-      const r1 = Math.max(0, r - dr);
-      // Round with the swirl, and along the arm as it falls (the arm's angle
-      // changes with radius by the twist), so it stays on it.
-      angle -= spinAt(r) * dt + LOOK.twist * (dr / Math.max(r, 0.5));
-      r = r1;
-      pool.velocities[v] = r;
-      pool.velocities[v + 1] = angle;
-      // Its height eases onto the flow's.
-      const y = pool.velocities[v + 2];
+      const spin = spinAt(r);
+      angle[i] -= spin * dt + LOOK.twist * (dr / Math.max(r, 0.5));
+      r = Math.max(0, r - dr);
+      radius[i] = r;
+      if (r <= hole.horizon) {
+        life[i] = 0;
+        mesh.setMatrixAt(i, hidden);
+        continue;
+      }
+      const y = height[i];
       const yy = y + (heightAt(r, at.y) - y) * Math.min(1, dt * 2.5);
-      pool.velocities[v + 2] = yy;
-      pool.positions[v] = at.x + Math.cos(angle) * r;
-      pool.positions[v + 1] = yy;
-      pool.positions[v + 2] = at.z + Math.sin(angle) * r;
-      // Dust out beyond the line; deep purple at it, violet, then white-hot
-      // going in.
+      height[i] = yy;
+      const a = angle[i];
+      p.set(at.x + Math.cos(a) * r, yy, at.z + Math.sin(a) * r);
+      // Its own direction of travel right now: round with the spin, and
+      // inward by dr -- the same forward-vector dissolve.js's fragments use,
+      // so the shard's long axis follows the curve instead of a fixed line.
+      const angSpeed = spin;
+      fwd.set(Math.sin(a) * angSpeed * r - Math.cos(a) * dr / dt, 0, -Math.cos(a) * angSpeed * r - Math.sin(a) * dr / dt);
+      if (fwd.lengthSq() < 1e-6) fwd.set(Math.cos(a), 0, Math.sin(a));
+      fwd.normalize();
+      q.setFromUnitVectors(Z, fwd);
       const c = closeness;
+      const sz = (s0 + (s1 - s0) * seed[i]) * (1 - 0.35 * c);
+      const long = 1 + (MATTER.stretch - 1) * c * c;
+      s.set(sz / Math.sqrt(long), sz / Math.sqrt(long), sz * long);
+      m4.compose(p, q, s);
+      mesh.setMatrixAt(i, m4);
+      // Dust out beyond the line; deep purple at it, violet, then white-hot
+      // going in -- same palette as before, just carried on a shard now.
       const hot = c * c;
       if (outside) {
         const far = (r - hole.escape) / (hole.influence - hole.escape);
-        pool.colours[i * 4] = 0.42;
-        pool.colours[i * 4 + 1] = 0.36;
-        pool.colours[i * 4 + 2] = 0.34 + 0.3 * (1 - far);
-        pool.colours[i * 4 + 3] = 0.3 * (1 - far);
+        colour.setRGB(0.42, 0.36, 0.34 + 0.3 * (1 - far)).multiplyScalar(0.3 * (1 - far));
       } else {
-        pool.colours[i * 4] = 0.55 + 0.9 * c + 0.6 * hot;
-        pool.colours[i * 4 + 1] = 0.18 + 0.25 * c + 1.1 * hot;
-        pool.colours[i * 4 + 2] = 1.2 + 0.8 * c;
-        pool.colours[i * 4 + 3] = Math.min(1, (1 - c) * 6) * (0.35 + 0.65 * c);
+        colour.setRGB(0.55 + 0.9 * c + 0.6 * hot, 0.18 + 0.25 * c + 1.1 * hot, 1.2 + 0.8 * c)
+          .multiplyScalar(Math.min(1, (1 - c) * 6) * (0.35 + 0.65 * c));
       }
-      pool.sizes[i] = s0 + (s1 - s0) * pool.seed[i] * (1 - 0.5 * c);
-      if (r <= hole.horizon) pool.life[i] = 0;
+      mesh.setColorAt(i, colour);
       any = true;
     }
-    markPoolDirty(pool);
+    mesh.count = N;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     alive = any;
   }
 
   /** @returns {void} */
   function clear() {
-    pool.life.fill(0);
-    pool.colours.fill(0);
-    pool.sizes.fill(0);
-    markPoolDirty(pool);
+    life.fill(0);
+    for (let i = 0; i < N; i++) mesh.setMatrixAt(i, hidden);
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.count = 0;
     alive = false;
     owed = 0;
   }
 
   /** @returns {void} */
   function dispose() {
-    disposeParticlePool(Sim.three.scene, pool);
-    texture.dispose();
+    Sim.three.scene.remove(mesh);
+    geometry.dispose();
+    material.dispose();
+    mesh.dispose();
   }
 
   return { ambient, shed, step, clear, dispose };

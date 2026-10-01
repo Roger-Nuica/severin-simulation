@@ -87,6 +87,20 @@ const AO_DISTANCE_EXPONENT = 1.4;
 const AO_POWER = 2.1;
 const AO_STRENGTH = 0.9;
 
+// --- Gravitational lensing (engine/player/blackHole.js) ------------------
+// Folded into the composite shader rather than a separate render target: it
+// already samples tScene/tBloom once per pixel every frame, so warping that
+// one sample instead of adding a new pass costs nothing extra outside the
+// hole's own screen-space reach (uLensStrength is 0 -- set from JS, not a
+// shader branch alone -- whenever the hole is shut, off-screen or far
+// enough that its apparent radius would round to nothing). AO and depth are
+// sampled at the *un*warped vUv: they describe this pixel's own real
+// geometry, and threading the warp through the AO pass too would need a
+// second GTAO run for a difference too small to read.
+const LENS_PULL = 0.34;        // peak fraction the sample is pulled toward the centre
+const LENS_SWIRL = 1.05;       // radians of peak rotation round the centre
+const LENS_CHROMA = 0.045;     // extra per-channel pull split, near the inner ring
+
 // --- Exposure ------------------------------------------------------------
 // One overall brightness knob, applied to the scene colour in the composite
 // (after AO, before bloom and the grade). Scaling here rather than raising
@@ -137,6 +151,8 @@ export function createPostSystem(ctx) {
   const { Sim } = ctx;
   // Scratch, reused every frame rather than allocated (performance pass).
   const clearScratch = new THREE.Color();
+  const lensScratch = new THREE.Vector3();
+  const lensViewScratch = new THREE.Vector3();
 
   const Post = {
     sceneTarget: /** @type {THREE.WebGLRenderTarget|null} */ (null),
@@ -255,11 +271,17 @@ export function createPostSystem(ctx) {
         uToeLift: { value: GRADE_TOE_LIFT.clone() },
         uVignette: { value: GRADE_VIGNETTE },
         uAspect: { value: 1 },
-        uDebugView: { value: 0 }
+        uDebugView: { value: 0 },
+        uLensCenter: { value: new THREE.Vector2() },
+        uLensRadius: { value: 0 },
+        uLensStrength: { value: 0 }
       },
       defines: {
         GRADE_PIVOT: GRADE_PIVOT.toFixed(4),
-        HIGHLIGHT_KNEE: HIGHLIGHT_KNEE.toFixed(4)
+        HIGHLIGHT_KNEE: HIGHLIGHT_KNEE.toFixed(4),
+        LENS_PULL: LENS_PULL.toFixed(4),
+        LENS_SWIRL: LENS_SWIRL.toFixed(4),
+        LENS_CHROMA: LENS_CHROMA.toFixed(4)
       },
       vertexShader: FULLSCREEN_VERTEX,
       fragmentShader: `
@@ -283,9 +305,30 @@ export function createPostSystem(ctx) {
         uniform float uVignette;
         uniform float uAspect;
         uniform int uDebugView;
+        uniform vec2 uLensCenter;
+        uniform float uLensRadius;
+        uniform float uLensStrength;
         varying vec2 vUv;
 
         const vec3 LUMA = vec3( 0.2126, 0.7152, 0.0722 );
+
+        // Where to actually sample tScene/tBloom for this pixel: pulled and
+        // swirled toward the hole's screen centre, strongest just outside
+        // the core and fading to nothing at uLensRadius, so the background
+        // visibly bends round it. chroma splits the pull slightly per
+        // channel, for the thin colour fringe right at the inner ring.
+        vec2 lensSample( vec2 uv, float chroma ) {
+          vec2 d = ( uv - uLensCenter ) * vec2( uAspect, 1.0 );
+          float r = length( d );
+          float u = clamp( r / max( uLensRadius, 1e-4 ), 0.0, 1.0 );
+          float profile = smoothstep( 0.0, 0.18, u ) * smoothstep( 1.0, 0.3, u );
+          float amount = uLensStrength * profile * ( LENS_PULL + chroma );
+          float angle = uLensStrength * profile * LENS_SWIRL;
+          float s = sin( angle ), c = cos( angle );
+          vec2 rotated = mat2( c, -s, s, c ) * d;
+          vec2 pulled = rotated * ( 1.0 - amount );
+          return uLensCenter + pulled / vec2( uAspect, 1.0 );
+        }
 
         // Hue-preserving shoulder: scales the whole colour by how far its
         // brightest channel is compressed, so a 2x-overbright window stays
@@ -315,7 +358,22 @@ export function createPostSystem(ctx) {
         }
 
         void main() {
-          vec3 scene = finite( texture2D( tScene, vUv ).rgb );
+          vec3 scene;
+          vec2 bloomUv = vUv;
+          if ( uLensStrength > 0.001 ) {
+            // Three samples, one per channel, each pulled a slightly
+            // different amount -- the fringe only shows up where the pull
+            // itself is strong, i.e. right at the inner ring.
+            scene = vec3(
+              texture2D( tScene, lensSample( vUv, LENS_CHROMA ) ).r,
+              texture2D( tScene, lensSample( vUv, 0.0 ) ).g,
+              texture2D( tScene, lensSample( vUv, -LENS_CHROMA ) ).b
+            );
+            bloomUv = lensSample( vUv, 0.0 );
+          } else {
+            scene = texture2D( tScene, vUv ).rgb;
+          }
+          scene = finite( scene );
 
           // --- Ambient occlusion -------------------------------------------
           // Faded by the same FogExp2 term the scene materials use (three's
@@ -333,7 +391,7 @@ export function createPostSystem(ctx) {
           scene *= mix( 1.0, ao, uAOStrength * fogVisibility * ( 1.0 - emissive ) );
           scene *= uExposure;
 
-          vec3 colour = scene + finite( texture2D( tBloom, vUv ).rgb ) * uBloomStrength;
+          vec3 colour = scene + finite( texture2D( tBloom, bloomUv ).rgb ) * uBloomStrength;
           colour = highlightShoulder( max( colour, vec3( 0.0 ) ) );
 
           // --- Grade, in approximate perceptual space ----------------------
@@ -551,6 +609,56 @@ export function createPostSystem(ctx) {
   }
 
   /**
+   * The lensing uniforms for this frame: where the hole sits on screen, how
+   * big its reach looks from here, and how strongly to warp -- 0 whenever
+   * there is no open hole, it is behind the camera, or it would round to an
+   * imperceptible radius, so the shader's own branch (lensSample) skips the
+   * extra sampling entirely in every one of those cases.
+   * @param {THREE.PerspectiveCamera} camera
+   * @returns {void}
+   */
+  function updateLens(camera) {
+    const u = Post.compositeMaterial.uniforms;
+    // The adaptive quality ladder (engine/quality.js), already the one place
+    // that steps the whole game down on a weak machine: past its AO/MSAA
+    // steps, the lensing's reach is shrunk too, and it is dropped
+    // altogether once the machine is visibly struggling, rather than this
+    // effect running its own separate FPS watch.
+    const step = ctx.systems.quality ? ctx.systems.quality.qualityStep() : 0;
+    if (step >= 3) {
+      u.uLensStrength.value = 0;
+      return;
+    }
+    const info = ctx.systems.blackHole && ctx.systems.blackHole.lensInfo();
+    if (!info) {
+      u.uLensStrength.value = 0;
+      return;
+    }
+    lensScratch.set(info.x, info.y, info.z);
+    // Behind the camera: project() would still return a (wrong-reading)
+    // in-range NDC point for it, so the view-space depth is checked first.
+    const viewZ = lensViewScratch.copy(lensScratch).applyMatrix4(camera.matrixWorldInverse).z;
+    if (viewZ > -0.5) {
+      u.uLensStrength.value = 0;
+      return;
+    }
+    const dist = camera.position.distanceTo(lensScratch);
+    lensScratch.project(camera);
+    const uvX = lensScratch.x * 0.5 + 0.5;
+    const uvY = lensScratch.y * 0.5 + 0.5;
+    const fovRad = THREE.MathUtils.degToRad(camera.fov);
+    const reach = info.reach * (1 - step * 0.22);
+    const radius = 0.5 * reach / (Math.max(1, dist) * Math.tan(fovRad / 2));
+    if (radius < 0.01 || uvX + radius < 0 || uvX - radius > 1 || uvY + radius < 0 || uvY - radius > 1) {
+      u.uLensStrength.value = 0;
+      return;
+    }
+    u.uLensCenter.value.set(uvX, uvY);
+    u.uLensRadius.value = radius;
+    u.uLensStrength.value = info.strength;
+  }
+
+  /**
    * Draws one frame through the whole pipeline, replacing the loop's old
    * direct renderer.render() call.
    * @returns {void}
@@ -588,6 +696,7 @@ export function createPostSystem(ctx) {
     u.uSplit.value = GRADE_SPLIT_BASE + intensity * GRADE_SPLIT_INTENSITY;
     u.uDebugView.value = Post.debugView;
     u.uExposure.value = Post.exposure * Post.exposureScale * Post.brightness;
+    updateLens(camera);
     drawQuad(renderer, Post.compositeMaterial, null, null);
 
     renderer.autoClear = prevAutoClear;

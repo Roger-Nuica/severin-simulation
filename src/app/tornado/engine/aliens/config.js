@@ -9,7 +9,8 @@ import { CHARACTERS } from '../scale.js';
  * ===========================================================================
  * Every number the aliens are tuned by, in one place: the landing ship, the
  * crew, the rays, the second wave, the hunters, the mutation. The behaviour
- * they drive is described in aliens.js and GAME_RULES.md; change it here.
+ * they drive is described in aliens.js and GAME_DESIGN.md; numeric contracts
+ * are indexed in .claude/rules.md.
  */
 
 // The faint green glow of an ordinary alien's skin (its emissive). The

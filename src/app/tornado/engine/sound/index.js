@@ -22,11 +22,13 @@ const AMBIENT_SYNTH = false;
  *   resumeSoundSystem: () => void,
  *   updateSoundSystem: (dt: number) => void,
  *   detachAudioGestureListeners: () => void,
- *   setMuffle: (amount: number) => void
+ *   setMuffle: (amount: number, key?: string) => void
  * }}
  */
 export function createSoundSystem(engineCtx) {
   const { Sim } = engineCtx;
+  /** @type {Map<string, number>} every current contributor to the master muffle, combined by the loudest */
+  const muffleSources = new Map();
 
   const SoundSystem = {
     listener: /** @type {THREE.AudioListener|null} */ (null),
@@ -619,14 +621,22 @@ export function createSoundSystem(engineCtx) {
   }
 
   /**
-   * Bullet Time's muffling: everything heard through a closing lowpass.
+   * Everything heard through a closing lowpass -- Bullet Time's full muffle
+   * and the Black Hole Gun's gentle one are two independent contributors to
+   * the same single filter, combined by whichever wants it muffled most
+   * (`key` defaults to Bullet Time's own, so its existing call sites are
+   * unchanged) rather than the last caller overwriting the other's amount.
    * @param {number} amount 0 (open) .. 1 (muffled)
+   * @param {string} [key]
    * @returns {void}
    */
-  function setMuffle(amount) {
+  function setMuffle(amount, key = 'bulletTime') {
     const f = SoundSystem.muffle;
     if (!f || !SoundSystem.context) return;
-    f.frequency.setTargetAtTime(amount > 0 ? 20000 * Math.pow(600 / 20000, amount) : 20000, SoundSystem.context.currentTime, 0.18);
+    if (amount > 0) muffleSources.set(key, amount); else muffleSources.delete(key);
+    let combined = 0;
+    for (const v of muffleSources.values()) combined = Math.max(combined, v);
+    f.frequency.setTargetAtTime(combined > 0 ? 20000 * Math.pow(600 / 20000, combined) : 20000, SoundSystem.context.currentTime, 0.18);
   }
 
   return {

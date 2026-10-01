@@ -3,9 +3,9 @@
 A running record kept with Roger, so each working session starts from the
 same understanding. **Agreed behaviour** is what the game is meant to do
 now: read it before changing anything it touches, and update it when a
-request changes it. **Ideas for later** are not built yet. The full rules as
-the player sees them are in `GAME_RULES.md`; this file is the why and the
-what-next.
+request changes it. **Ideas for later** are not built yet. The gameplay
+narrative is in `GAME_DESIGN.md` and implementation contracts are in
+`.claude/rules.md`; this file is the why and the what-next.
 
 ## Agreed behaviour
 
@@ -82,7 +82,7 @@ what-next.
 
 ### Creature sounds (`engine/sound/creatures.js`) — 2026-10-01
 - On request: every character that was silent has spawn, movement, attack,
-  hurt and death sounds where they make sense (table in GAME_RULES.md),
+  hurt and death sounds where they make sense (design guide in GAME_DESIGN.md),
   positional (PannerNode, inverse distance), bigger = lower and heard
   farther. Pooled voices (18), quietest cut first, a minimum gap per kind
   so swarms share voices, nothing played out of hearing. One graph per
@@ -338,7 +338,7 @@ the wheel now, see "Scripted events and the black hole" below.)
 - Target **60 fps**. Entity caps and a shared particle budget apply to every
   new effect (`engine/perf/caps.js`).
 - Every feature gets a **test button** in the Disasters panel.
-- `GAME_RULES.md` is updated in every PR.
+- `GAME_DESIGN.md` and `.claude/rules.md` are updated when gameplay experience or implementation contracts change.
 - Player input (keys, mouse) stays separate from simulation state
   (`engine/player/input.js`).
 

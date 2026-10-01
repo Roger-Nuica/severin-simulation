@@ -69,7 +69,7 @@ export { ALIEN_SKIN_GLOW } from './aliens/config.js';
  * its foot starts off to one side and crawls after him slower than he can
  * run, and it kills him, car or no car, if it catches him. His plasma rifle
  * kills any of the crew with one shot. Every shot holes a ship: a normal
- * shot takes one point off its hull, a mega beam (the rifle's three-second
+ * shot takes one point off its hull, a mega beam (the rifle's two-second
  * charge) five (heroMode.js SHIP_DAMAGE), and ALIENS.shipHull / hunterHull
  * points bring one down -- it falls burning and blows up where it lands.
  * (Ships used to shrug off anything but a mega beam, which read as the

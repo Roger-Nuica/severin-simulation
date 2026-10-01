@@ -12,9 +12,14 @@ import * as THREE from 'three';
  *  - windAt(): the wind's velocity at a distance from the hole, for
  *    whatever it is dragging (blackHole.js): inflow WIND.inflow x
  *    (escape / d)^WIND.falloff, and WIND.swirl times that again round it.
- *  - The streaks: pale lines of blown dust flying along the same spiral,
- *    out to the edge of its reach, so the wind shows where it is going. One
- *    InstancedMesh of stretched boxes, additive (WIND.streaks of them).
+ *  - The streaks: short, violet-white lines of blown dust flying along the
+ *    same spiral, out to the edge of its reach, so the wind shows where it
+ *    is going. Re-oriented to the wind's own direction every frame
+ *    (windAt's inward+round) and kept short rather than long rods, so a
+ *    curving path is read from many short, correctly-turned segments
+ *    instead of one straight one -- the same principle as a motion-trail
+ *    particle. One InstancedMesh of stretched boxes, additive (WIND.streaks
+ *    of them).
  */
 
 export const WIND = {
@@ -23,8 +28,8 @@ export const WIND = {
   maxInflow: 40,
   swirl: 0.9,               // round it, as a share of the inflow
   streaks: 320,
-  streakLength: [3, 9],
-  streakLife: [1.2, 2.6]
+  streakLength: [1.1, 3.2],  // shorter: each segment hugs its own local curve
+  streakLife: [1.0, 2.2]
 };
 
 /**
@@ -73,8 +78,11 @@ export function createHoleWind(ctx) {
   const dir = new THREE.Vector3();
   const Z = new THREE.Vector3(0, 0, 1);
   const colour = new THREE.Color();
-  const dust = new THREE.Color(0.75, 0.68, 0.6);
-  const violet = new THREE.Color(0.8, 0.45, 1.4);
+  // Pale cool violet-grey out at the line, through violet, to white-hot
+  // right at the horizon -- purple/violet/white only, nothing warm.
+  const far = new THREE.Color(0.5, 0.46, 0.6);
+  const violet = new THREE.Color(0.85, 0.5, 1.5);
+  const hot = new THREE.Color(2.2, 2.0, 2.6);
 
   /**
    * @param {number} i
@@ -122,7 +130,7 @@ export function createHoleWind(ctx) {
       mesh.setMatrixAt(i, m4);
       const u = 1 - life[i] / maxLife[i];
       const fade = Math.min(1, u * 5) * Math.min(1, (1 - u) * 3) * size * (0.25 + 0.75 * close);
-      colour.copy(dust).lerp(violet, close * close).multiplyScalar(fade);
+      colour.copy(far).lerp(violet, Math.min(1, close * 1.6)).lerp(hot, close * close * close).multiplyScalar(fade);
       mesh.setColorAt(i, colour);
     }
     mesh.instanceMatrix.needsUpdate = true;

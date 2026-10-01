@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$CLAUDE_FILE_PATH\"; case \"$f\" in *.js|*.jsx|*.ts|*.tsx) cd \"$PWD\" && npx eslint --fix \"$f\" ;; esac"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "TerminalCommand",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_COMMAND\" | grep -Eiq \"rm -rf|git push --force|git reset --hard|sudo\"; then echo 'Blocked: dangerous command detected'; exit 1; fi"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "AgentFinished",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$PWD\" && (npx eslint . --max-warnings=0 || true) && (npx next build || true)"
+          }
+        ]
+      }
+    ]
+  }
+}

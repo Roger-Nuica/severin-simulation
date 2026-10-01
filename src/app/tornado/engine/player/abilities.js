@@ -11,7 +11,7 @@
  * energy is spent and it starts. Its clock is the player's (real time, held
  * while the game is paused), so slowing the world does not stretch it.
  *
- * The slots (GAME_RULES.md "Hero Mode"):
+ * The slots (GAME_DESIGN.md "Hero Mode"); exact values are in .claude/rules.md:
  *   Q  Time Slow            the world at 30% for 7 s, Roger at full speed.
  *                           20%, 6 s cooldown. With the minigun in hand it
  *                           is **Bullet Time** instead: the world at 3%,
