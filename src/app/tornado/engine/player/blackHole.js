@@ -134,6 +134,7 @@ export function createBlackHoleSystem(ctx) {
     look.update(0, 0.01);
     ctx.systems.lightning.flashScreen(scratch.set(x, HOLE.height, z), 0.35, '#b38cff');
     if (ctx.systems.shockwaveSound) ctx.systems.shockwaveSound.playShockwave();
+    if (ctx.systems.holeSound) ctx.systems.holeSound.playOpen();
     return true;
   }
 
@@ -334,6 +335,7 @@ export function createBlackHoleSystem(ctx) {
     if (wind) wind.clear();
     // The last of it: a flash as it winks out.
     if (at) ctx.systems.lightning.flashScreen(at, 0.5, '#d9c2ff');
+    if (ctx.systems.holeSound) { ctx.systems.holeSound.playClose(); ctx.systems.holeSound.updateHum(0); }
     if (pending) {
       const next = pending;
       pending = null;
@@ -368,6 +370,7 @@ export function createBlackHoleSystem(ctx) {
     if (dt <= 0) return;
     if (!hole || !look) {
       if (matter) matter.step(dt, null, 0);
+      if (ctx.systems.holeSound) ctx.systems.holeSound.updateHum(0);
       return;
     }
     hole.t += dt;
@@ -393,6 +396,7 @@ export function createBlackHoleSystem(ctx) {
       matter.step(dt, hole, hole.t);
     }
     if (wind) wind.step(dt, hole, hole.size);
+    if (ctx.systems.holeSound) ctx.systems.holeSound.updateHum(hole.size);
     if (hole.closing < 0) reach(dt);
     drawIn(dt);
     if (dissolve) {
@@ -417,6 +421,7 @@ export function createBlackHoleSystem(ctx) {
     if (matter) matter.clear();
     if (dissolve) dissolve.clear();
     if (wind) wind.clear();
+    if (ctx.systems.holeSound) ctx.systems.holeSound.updateHum(0);
   }
 
   /** @returns {void} */
@@ -430,6 +435,7 @@ export function createBlackHoleSystem(ctx) {
     dissolve = null;
     if (wind) wind.dispose();
     wind = null;
+    if (ctx.systems.holeSound) ctx.systems.holeSound.disposeBlackHoleSound();
   }
 
   return { fire, isOpen: () => !!hole, caughtCount: () => caught.length, initBlackHole, updateBlackHole, resetBlackHole, disposeBlackHole };

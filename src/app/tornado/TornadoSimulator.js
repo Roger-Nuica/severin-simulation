@@ -28,8 +28,7 @@ const SLIDER_DEFS = [
  * container div. All interactivity (slider input, start/pause/reset, stat
  * updates) is handled imperatively inside tornadoEngine.js via
  * document.getElementById — this component's only React-specific
- * responsibilities are mounting/unmounting the engine and the one-time
- * Luigi shell integration below.
+ * responsibility is mounting/unmounting the engine.
  * @returns {JSX.Element}
  */
 export default function TornadoSimulator() {
@@ -86,45 +85,6 @@ export default function TornadoSimulator() {
     // down) — without it the requestAnimationFrame loop would keep running
     // forever against a detached canvas.
     return () => simulation.dispose();
-  }, []);
-
-  useEffect(() => {
-    // '@luigi-project/client' touches `window` as soon as it's imported
-    // (it registers a postMessage listener at module load time), so it
-    // cannot be a static top-level import in a component that Next.js
-    // server-renders — that would crash during the server render pass,
-    // where there is no `window`. A dynamic import() inside useEffect only
-    // ever runs in the browser, after mount, which is exactly when we need
-    // it: this whole effect is a no-op unless the page is actually running
-    // inside a Luigi iframe.
-    let cancelled = false;
-    import('@luigi-project/client').then(({ default: LuigiClient }) => {
-      if (cancelled) return;
-      // Note: there is no "set document title" method on Luigi Client's
-      // uxManager() (Luigi Core 2.x / Client 2.x) — the shell's
-      // title/breadcrumb for this node comes from the node's own `label`
-      // in luigi-shell/src/navigation.js ("Simulator Tornadă"), which Luigi
-      // already knows without this app telling it anything.
-      //
-      // addInitListener defers this callback until Luigi has finished the
-      // handshake with this micro-frontend, so uxManager() is guaranteed to
-      // be usable. showLoadingIndicator()/hideLoadingIndicator() are real
-      // uxManager() methods that add/remove a backdrop+spinner over this
-      // app's iframe area in the shell chrome, while the Three.js scene,
-      // vortex, environment and debris pool are constructed.
-      LuigiClient.addInitListener(() => {
-        LuigiClient.uxManager().showLoadingIndicator();
-        LuigiClient.uxManager().hideLoadingIndicator();
-      });
-      // LuigiClient.linkManager() is deliberately not used anywhere in this
-      // app: it exists for *programmatic cross-node navigation* (jumping
-      // from inside one micro-frontend to another Luigi node), and this
-      // simulator is a single self-contained view with no internal routes
-      // to navigate to or from.
-    });
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   return (
