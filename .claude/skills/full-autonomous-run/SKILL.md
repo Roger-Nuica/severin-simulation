@@ -31,6 +31,13 @@ Orchestrate a new or complex feature from planning through implementation and ve
 
 ### Faza 3: Verificare
 
+Această fază rulează DOAR dacă userul specifică explicit "cu verificare" 
+sau "run full" la invocarea skill-ului. Dacă userul invocă skill-ul fără 
+această mențiune, Faza 3 este SĂRITĂ, iar skill-ul se consideră complet 
+după Faza 2, cu mențiunea explicită în rezumatul final: 
+"Faza 3 (Verificare) a fost omisă la cererea userului — rezultatele 
+NU au fost validate independent."
+
 1. Use the independent validation role defined in `.claude/agents/verifier.md`; do not rely only on the Coder's self-report.
 2. Check every original task acceptance criterion point by point, including manual visual criteria where applicable.
 3. Run the repository checks: `npm run lint` and `npm run build`. Report command results and any pre-existing or unrelated failure distinctly.

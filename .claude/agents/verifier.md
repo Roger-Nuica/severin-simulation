@@ -1,7 +1,7 @@
 ---
 name: verifier
 description: Use this agent to independently validate whether a task meets the acceptance criteria after implementation, without participating in the code change.
-model: sonnet
+model: haiku
 ---
 
 # Independent QA Verifier

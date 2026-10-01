@@ -1,6 +1,6 @@
 // @ts-check
 import * as THREE from 'three';
-import { createBlackHoleLook } from './blackHole/look.js';
+import { createBlackHoleLook, LOOK } from './blackHole/look.js';
 import { createHoleMatter } from './blackHole/matter.js';
 import { createDissolve } from './blackHole/dissolve.js';
 import { createHoleWind, windAt } from './blackHole/wind.js';
@@ -84,6 +84,7 @@ export const HOLE = {
  *   fire: (x: number, z: number) => 'opened'|'queued'|false,
  *   isOpen: () => boolean,
  *   caughtCount: () => number,
+ *   lensInfo: () => {x: number, y: number, z: number, reach: number, strength: number}|null,
  *   initBlackHole: () => void,
  *   updateBlackHole: (dt: number) => void,
  *   resetBlackHole: () => void,
@@ -131,10 +132,10 @@ export function createBlackHoleSystem(ctx) {
     };
     look.group.position.set(x, HOLE.height, z);
     look.group.visible = true;
-    look.update(0, 0.01);
+    look.update(0, 0.01, Sim.three.camera);
     ctx.systems.lightning.flashScreen(scratch.set(x, HOLE.height, z), 0.35, '#b38cff');
     if (ctx.systems.shockwaveSound) ctx.systems.shockwaveSound.playShockwave();
-    if (ctx.systems.holeSound) ctx.systems.holeSound.playOpen();
+    if (ctx.systems.holeSound) ctx.systems.holeSound.playOpen(x, HOLE.height, z);
     return true;
   }
 
@@ -201,7 +202,9 @@ export function createBlackHoleSystem(ctx) {
   function swallow(entry, show = true) {
     held.delete(entry.target);
     entry.consume();
+    if (ctx.systems.holeSound) ctx.systems.holeSound.releaseWhine(entry.target);
     if (show && hole && matter) matter.shed(scratch.set(entry.pos.x, entry.pos.y || 0, entry.pos.z), hole, 10);
+    if (show && ctx.systems.holeSound) ctx.systems.holeSound.playSwallow(entry.pos.x, entry.pos.y || 0, entry.pos.z);
   }
 
   /**
@@ -278,6 +281,7 @@ export function createBlackHoleSystem(ctx) {
       p.z = hole.z + Math.cos(c.angle) * c.radius;
       // Up off the ground towards the core's height.
       p.y = c.y0 + (hole.y - 3 - c.y0) * through * through;
+      if (ctx.systems.holeSound) ctx.systems.holeSound.updateWhine(c.entry.target, through, p.x, p.y, p.z);
       const mesh = c.entry.object;
       if (mesh) {
         // Spaghettified: thinner, drawn out along the way in, shrinking,
@@ -333,9 +337,21 @@ export function createBlackHoleSystem(ctx) {
     hole = null;
     if (look) look.group.visible = false;
     if (wind) wind.clear();
-    // The last of it: a flash as it winks out.
-    if (at) ctx.systems.lightning.flashScreen(at, 0.5, '#d9c2ff');
-    if (ctx.systems.holeSound) { ctx.systems.holeSound.playClose(); ctx.systems.holeSound.updateHum(0); }
+    // The last of it: a flash and a faint shockwave ring as it winks out.
+    if (at) {
+      ctx.systems.lightning.flashScreen(at, 0.5, '#d9c2ff');
+      if (look) look.pulse(at.x, at.y, at.z);
+    }
+    if (ctx.systems.holeSound && at) {
+      ctx.systems.holeSound.playClose(at.x, at.y, at.z);
+      ctx.systems.holeSound.updateHum(0, 0, at.x, at.y, at.z);
+      // Defensive backstop: every entry above was already swallow()ed (each
+      // of which releases its own whine), this just guarantees none is left
+      // sounding if some future entry type ever skips that path.
+      ctx.systems.holeSound.clearWhines();
+    }
+    // A gentle duck on the rest of the world's sound while it pulled, let go.
+    if (ctx.systems.sound) ctx.systems.sound.setMuffle(0, 'blackHole');
     if (pending) {
       const next = pending;
       pending = null;
@@ -370,7 +386,8 @@ export function createBlackHoleSystem(ctx) {
     if (dt <= 0) return;
     if (!hole || !look) {
       if (matter) matter.step(dt, null, 0);
-      if (ctx.systems.holeSound) ctx.systems.holeSound.updateHum(0);
+      if (ctx.systems.holeSound) ctx.systems.holeSound.updateHum(0, 0, 0, 0, 0);
+      if (look) look.updateShockwave(dt);
       return;
     }
     hole.t += dt;
@@ -390,13 +407,20 @@ export function createBlackHoleSystem(ctx) {
     }
     hole.size = Math.min(1, size);
     look.group.position.set(hole.x, hole.y, hole.z);
-    look.update(hole.t, size);
+    look.update(hole.t, size, Sim.three.camera);
+    look.updateShockwave(dt);
     if (matter) {
       if (hole.closing < 0) matter.ambient(dt, hole, hole.t);
       matter.step(dt, hole, hole.t);
     }
     if (wind) wind.step(dt, hole, hole.size);
-    if (ctx.systems.holeSound) ctx.systems.holeSound.updateHum(hole.size);
+    if (ctx.systems.holeSound) {
+      ctx.systems.holeSound.updateHum(hole.size, caught.length / HOLE.maxCaught, hole.x, hole.y, hole.z);
+    }
+    // A gentle duck on the rest of the world's sound while it pulls --
+    // "everything nearby sounds pulled", not Bullet Time's full muffle, and
+    // combined with it (sound/index.js setMuffle) rather than overwriting it.
+    if (ctx.systems.sound) ctx.systems.sound.setMuffle(0.3 * hole.size, 'blackHole');
     if (hole.closing < 0) reach(dt);
     drawIn(dt);
     if (dissolve) {
@@ -421,7 +445,11 @@ export function createBlackHoleSystem(ctx) {
     if (matter) matter.clear();
     if (dissolve) dissolve.clear();
     if (wind) wind.clear();
-    if (ctx.systems.holeSound) ctx.systems.holeSound.updateHum(0);
+    if (ctx.systems.holeSound) {
+      ctx.systems.holeSound.updateHum(0, 0, 0, 0, 0);
+      ctx.systems.holeSound.clearWhines();
+    }
+    if (ctx.systems.sound) ctx.systems.sound.setMuffle(0, 'blackHole');
   }
 
   /** @returns {void} */
@@ -438,5 +466,18 @@ export function createBlackHoleSystem(ctx) {
     if (ctx.systems.holeSound) ctx.systems.holeSound.disposeBlackHoleSound();
   }
 
-  return { fire, isOpen: () => !!hole, caughtCount: () => caught.length, initBlackHole, updateBlackHole, resetBlackHole, disposeBlackHole };
+  /**
+   * Where the lensing pass (engine/post.js) should warp the screen: the
+   * hole's world position, how far out its pull on the *view* reaches (a
+   * little past the visible swirl, LOOK.swirlRadius), and how strongly --
+   * the same 0..1 opening/closing curve the look and matter use, so the
+   * lens swells and fades with everything else rather than snapping.
+   * @returns {{x: number, y: number, z: number, reach: number, strength: number}|null}
+   */
+  function lensInfo() {
+    if (!hole) return null;
+    return { x: hole.x, y: hole.y, z: hole.z, reach: LOOK.swirlRadius * 1.4, strength: hole.size };
+  }
+
+  return { fire, isOpen: () => !!hole, caughtCount: () => caught.length, lensInfo, initBlackHole, updateBlackHole, resetBlackHole, disposeBlackHole };
 }

@@ -8,23 +8,37 @@ import * as THREE from 'three';
  * It used to be a black ball inside two flat yellow rings: Saturn, not a
  * hole in space. Now it is a living vortex:
  *
- *  - The core: a perfectly black sphere, unlit -- the event horizon.
+ *  - The core: a black sphere with volume, not a flat disc -- a thin
+ *    fresnel rim (the "rim" mesh) lights its silhouette edge from every
+ *    angle, white through violet, which doubles as the photon ring: light
+ *    grazing the horizon, the brightest single line in the whole effect.
  *  - The swirl: one mesh, a ring shaped into a shallow funnel (deepest at
  *    the core, a gravity well), drawn entirely by its shader in polar
- *    coordinates. Spiral arms wound by a logarithmic twist and turning
- *    with differential rotation -- the inside spins much faster than the
- *    outside, so the arms visibly wind inwards and never repeat -- white-hot
- *    at the inner edge, through violet and indigo to a deep purple that
- *    fades to nothing at the rim. Faint specks, like stars caught in the
- *    swirl, ride round with it. Additive, no depth write.
+ *    coordinates -- the accretion disk. Spiral arms wound by a logarithmic
+ *    twist and turning with differential rotation -- the inside spins much
+ *    faster than the outside, so the arms visibly wind inwards and never
+ *    repeat -- white-hot at the inner edge, through violet and indigo to a
+ *    deep purple that fades to nothing at the rim. Doppler beaming shades
+ *    one side brighter than the other as it turns (uViewLocal, the camera's
+ *    direction in the disk's own tilted local space, recomputed every
+ *    frame). Faint specks, like stars caught in the swirl, ride round with
+ *    it. Additive, no depth write.
  *  - The glow: a soft purple halo round the core that breathes, tinted and
  *    kept faint enough that the bloom never whites out the screen.
+ *  - The dark halo: a soft, normal-blended (not additive) dark sprite a
+ *    little wider than the swirl, drawn first so everything else layers on
+ *    top of it -- the one place in this additive scene something can
+ *    actually dim the background behind it rather than only add light.
  *  - Motion: besides the spin, the whole thing slowly tilts and precesses,
  *    so from any camera angle it reads as a body in space rather than a
- *    disc turned to face the lens; the core wobbles slightly.
+ *    disc turned to face the lens, and so the disk is seen edge-on enough
+ *    for the screen-space lensing pass (engine/post.js) to visibly bend it
+ *    over the top and under the bottom of the core, Interstellar-style; the
+ *    core wobbles slightly.
  *
- * No lens distortion: it would need a screen-space pass of its own, and the
- * funnel's depth already does the job of "space bending into it".
+ * The screen-space bend itself is engine/post.js's job (lensSample(),
+ * driven by blackHole.js's lensInfo()) -- this file only has to put a
+ * tilted, volumetric body in the world for that pass to bend.
  *
  * Built once (initBlackHole) and shown when a hole opens; dispose() frees
  * every geometry, material and texture.
@@ -41,7 +55,12 @@ export const LOOK = {
   tilt: 0.32,              // radians of the slow precession
   precession: 0.21,        // radians a second round it
   glowSize: 13,
-  glowPulse: [1.9, 0.12]   // rate, depth
+  glowPulse: [1.9, 0.12],  // rate, depth
+  rimPower: 2.4,           // fresnel falloff: higher keeps the ring thinner
+  rimSize: 1.1,            // x coreRadius
+  doppler: 0.6,            // peak brightness swing between the disk's two sides
+  haloSize: 34,            // metres across, the dark halo sprite
+  haloDarken: 0.35         // its peak darkening (opacity, normal-blended)
 };
 
 const SWIRL_VERTEX = /* glsl */`
@@ -67,6 +86,8 @@ const SWIRL_FRAGMENT = /* glsl */`
   uniform float uSpinIn;
   uniform float uSpinOut;
   uniform float uFade;
+  uniform vec2 uViewLocal;
+  uniform float uDoppler;
   varying vec2 vPlane;
 
   float hash(vec2 p) {
@@ -116,8 +137,43 @@ const SWIRL_FRAGMENT = /* glsl */`
     float d = length(fract(cell) - 0.5);
     float speck = star * smoothstep(0.22, 0.0, d) * (1.0 - u) * 1.6;
 
-    vec3 outColour = colour * alpha + vec3(1.6, 1.4, 2.0) * speck;
+    // Doppler beaming: the side turning towards the camera (its tangent
+    // pointing the same way as the camera, in the disk's own tilted local
+    // space) reads brighter, the receding side dimmer -- what sells the
+    // rotation from a still frame.
+    vec2 tangent = r > 0.001 ? vec2(-vPlane.y, vPlane.x) / r : vec2(0.0);
+    float doppler = dot(tangent, uViewLocal);
+    float beam = clamp(1.0 + uDoppler * doppler, 0.25, 1.0 + uDoppler);
+
+    vec3 outColour = (colour * alpha + vec3(1.6, 1.4, 2.0) * speck) * beam;
     gl_FragColor = vec4(outColour * uFade, 1.0);
+  }
+`;
+
+const RIM_VERTEX = /* glsl */`
+  varying vec3 vNormal;
+  varying vec3 vViewPosition;
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vViewPosition = -mvPosition.xyz;
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+// The photon ring and the core's rim light are the same thing here: a thin
+// fresnel glow at the sphere's silhouette, brightest exactly at the grazing
+// edge and gone dead centre, so it reads as a bright line hugging the dark
+// core from any angle rather than a lit hemisphere.
+const RIM_FRAGMENT = /* glsl */`
+  uniform float uPower;
+  uniform vec3 uColour;
+  uniform float uFade;
+  varying vec3 vNormal;
+  varying vec3 vViewPosition;
+  void main() {
+    float fresnel = pow(1.0 - clamp(dot(normalize(vNormal), normalize(vViewPosition)), 0.0, 1.0), uPower);
+    gl_FragColor = vec4(uColour * fresnel * uFade, fresnel * uFade);
   }
 `;
 
@@ -144,10 +200,36 @@ function glowTexture() {
 }
 
 /**
+ * A soft dark radial gradient, opaque-ish at the centre fading to fully
+ * transparent -- normal-blended rather than additive, the one piece of this
+ * body that can actually dim what is behind it instead of only adding light.
+ * @returns {THREE.CanvasTexture}
+ */
+function darkHaloTexture() {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const g = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
+  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, 'rgba(10,4,18,0.9)');
+  grad.addColorStop(0.4, 'rgba(14,6,24,0.55)');
+  grad.addColorStop(0.75, 'rgba(14,6,24,0.18)');
+  grad.addColorStop(1, 'rgba(14,6,24,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/**
  * @param {THREE.Scene} scene
  * @returns {{
  *   group: THREE.Group,
- *   update: (t: number, size: number) => void,
+ *   update: (t: number, size: number, camera?: THREE.Camera) => void,
+ *   pulse: (x: number, y: number, z: number) => void,
+ *   updateShockwave: (dt: number) => void,
  *   dispose: () => void
  * }}
  */
@@ -171,13 +253,29 @@ export function createBlackHoleLook(scene) {
       uSpinIn: { value: LOOK.spinInner },
       uSpinOut: { value: LOOK.spinOuter },
       uDepth: { value: LOOK.funnelDepth },
-      uFade: { value: 1 }
+      uFade: { value: 1 },
+      uViewLocal: { value: new THREE.Vector2(1, 0) },
+      uDoppler: { value: LOOK.doppler }
     },
     transparent: true,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     side: THREE.DoubleSide
   });
+  // The dark halo: normal-blended, drawn first (lowest renderOrder) so every
+  // additive thing after it (the swirl, the glow, the specks) layers on top
+  // of an already-dimmed patch of background rather than the other way
+  // round, which would have nothing left to darken.
+  const darkMap = darkHaloTexture();
+  const darkMat = new THREE.SpriteMaterial({
+    map: darkMap, color: 0xffffff, transparent: true, depthWrite: false, opacity: LOOK.haloDarken
+  });
+  const darkHalo = new THREE.Sprite(darkMat);
+  darkHalo.name = 'black_hole_dark_halo';
+  darkHalo.renderOrder = 0;
+  darkHalo.scale.setScalar(LOOK.haloSize);
+  body.add(darkHalo);
+
   const swirl = new THREE.Mesh(new THREE.RingGeometry(LOOK.coreRadius * 0.95, LOOK.swirlRadius, 128, 24), swirlMat);
   swirl.name = 'black_hole_swirl';
   swirl.frustumCulled = false;
@@ -195,6 +293,27 @@ export function createBlackHoleLook(scene) {
   core.position.z = -LOOK.funnelDepth * 0.82;
   body.add(core);
 
+  // The rim: a fresnel shell a touch bigger than the core, drawn last so it
+  // sits over the core's silhouette -- the photon ring and the core's own
+  // rim light in one mesh (see the header).
+  const rimMat = new THREE.ShaderMaterial({
+    vertexShader: RIM_VERTEX,
+    fragmentShader: RIM_FRAGMENT,
+    uniforms: {
+      uPower: { value: LOOK.rimPower },
+      uColour: { value: new THREE.Color(2.2, 1.7, 3.2) },
+      uFade: { value: 1 }
+    },
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.FrontSide
+  });
+  const rim = new THREE.Mesh(new THREE.SphereGeometry(LOOK.coreRadius * LOOK.rimSize, 32, 20), rimMat);
+  rim.name = 'black_hole_rim';
+  rim.renderOrder = 4;
+  body.add(rim);
+
   // The halo, round the core.
   const glowMap = glowTexture();
   const glowMat = new THREE.SpriteMaterial({
@@ -206,15 +325,33 @@ export function createBlackHoleLook(scene) {
   glow.renderOrder = 2;
   body.add(glow);
   glow.position.copy(core.position);
+  const viewScratch = new THREE.Vector3();
+
+  // The collapse's shockwave ring: a sibling of the body rather than one of
+  // its children, so it can keep expanding and fading for its own short
+  // while right after finish() has already hidden the rest. One mesh,
+  // reused every time rather than made and thrown away.
+  const waveMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(1.6, 1.3, 2.2), transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+  });
+  const wave = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 64), waveMat);
+  wave.name = 'black_hole_wave';
+  wave.visible = false;
+  wave.rotation.x = -Math.PI / 2;
+  wave.frustumCulled = false;
+  scene.add(wave);
+  const waveState = { active: false, t: 0, duration: 0.9, from: LOOK.coreRadius * 1.3, to: LOOK.swirlRadius * 1.5 };
 
   scene.add(group);
 
   /**
    * @param {number} t seconds since it opened
    * @param {number} size 0..1 opening / closing
+   * @param {THREE.Camera} [camera] for the Doppler shading's view direction
    * @returns {void}
    */
-  function update(t, size) {
+  function update(t, size, camera) {
     swirlMat.uniforms.uTime.value = t;
     swirlMat.uniforms.uFade.value = size;
     // Lying roughly flat (the disc's plane is the group's xy, turned down),
@@ -229,19 +366,82 @@ export function createBlackHoleLook(scene) {
     glow.position.copy(core.position);
     glow.scale.setScalar(LOOK.glowSize * pulse * size);
     glowMat.opacity = 0.55 + 0.15 * Math.sin(t * rate);
+    rim.position.copy(core.position);
+    rimMat.uniforms.uFade.value = size;
+    darkHalo.position.copy(core.position);
+    darkMat.opacity = LOOK.haloDarken * size;
+    // The spawn's quick implosion: the horizon and its rim snap in from
+    // oversized rather than simply growing with the rest of the body, read
+    // as space itself pulled sharply inward right as it opens.
+    const snap = t < 0.3 ? 1 + 2.4 * Math.pow(1 - t / 0.3, 2.5) : 1;
+    core.scale.setScalar(snap);
+    rim.scale.setScalar(snap);
     group.scale.setScalar(Math.max(0.01, size));
+    if (camera) {
+      // The disk's own tilt/precession just changed above, so its world
+      // matrix is forced current here rather than waiting for the
+      // renderer's own pass later this frame -- a small, local subtree,
+      // not a scene-wide traversal.
+      group.updateMatrixWorld(true);
+      viewScratch.copy(camera.position);
+      body.worldToLocal(viewScratch);
+      const len = Math.hypot(viewScratch.x, viewScratch.y);
+      if (len > 1e-4) swirlMat.uniforms.uViewLocal.value.set(viewScratch.x / len, viewScratch.y / len);
+    }
+  }
+
+  /**
+   * The collapse's shockwave: call once, from finish() (engine/player/
+   * blackHole.js), as the hole winks out.
+   * @param {number} x
+   * @param {number} y
+   * @param {number} z
+   * @returns {void}
+   */
+  function pulse(x, y, z) {
+    wave.position.set(x, y, z);
+    wave.visible = true;
+    waveState.active = true;
+    waveState.t = 0;
+  }
+
+  /**
+   * The shockwave ring's own short animation -- kept separate from update()
+   * so it keeps running for its `duration` even once the hole itself (and
+   * update()'s own per-frame calls) have stopped.
+   * @param {number} dt
+   * @returns {void}
+   */
+  function updateShockwave(dt) {
+    if (!waveState.active) return;
+    waveState.t += dt;
+    const u = Math.min(1, waveState.t / waveState.duration);
+    const r = waveState.from + (waveState.to - waveState.from) * (1 - Math.pow(1 - u, 2));
+    wave.scale.set(r, r, 1);
+    waveMat.opacity = 0.4 * (1 - u) * (1 - u);
+    if (u >= 1) {
+      waveState.active = false;
+      wave.visible = false;
+    }
   }
 
   /** @returns {void} */
   function dispose() {
     scene.remove(group);
+    scene.remove(wave);
     swirl.geometry.dispose();
     swirlMat.dispose();
     core.geometry.dispose();
     coreMat.dispose();
+    rim.geometry.dispose();
+    rimMat.dispose();
     glowMat.dispose();
     glowMap.dispose();
+    darkMat.dispose();
+    darkMap.dispose();
+    wave.geometry.dispose();
+    waveMat.dispose();
   }
 
-  return { group, update, dispose };
+  return { group, update, pulse, updateShockwave, dispose };
 }
