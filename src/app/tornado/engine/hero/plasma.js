@@ -376,7 +376,7 @@ export function createHeroPlasma(ctx, S, api) {
     };
     S.beam.userData.layers = [
       layer(0.3, new THREE.Color(3, 4.5, 7)),       // white-hot core
-      layer(0.9, new THREE.Color(0.6, 1.8, 5)),     // blue sheath
+      layer(0.9, new THREE.Color(0.45, 1.35, 3.75)), // blue sheath (darker)
       layer(2, new THREE.Color(0.2, 0.55, 2))       // halo
     ];
     S.beam.visible = false;

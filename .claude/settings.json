@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$PWD\" && npx eslint --fix \"$CLAUDE_FILE_PATH\""
+            "command": "f=\"$CLAUDE_FILE_PATH\"; case \"$f\" in *.js|*.jsx|*.ts|*.tsx) cd \"$PWD\" && npx eslint --fix \"$f\" ;; esac"
           }
         ]
       }
