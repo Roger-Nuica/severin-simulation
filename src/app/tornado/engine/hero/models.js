@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { createSpinningStarsTexture } from '../../utils/textures.js';
 import { HERO } from './config.js';
 import { createKatanaRig } from './katana/model.js';
+import { dressAsRoger } from './rogerLook.js';
 
 /**
  * ===========================================================================
@@ -222,78 +223,8 @@ export function createHeroModels(ctx, S, api) {
     const obj = ctx.systems.people.createPerson(x, z, 90000);
     obj.mesh.name = 'hero_roger';
     const name = obj.mesh.name;
-    const leather = keepMat(new THREE.MeshStandardMaterial({ color: 0x15130f, roughness: 0.32, metalness: 0.25 }));
-    const jeans = keepMat(new THREE.MeshStandardMaterial({ color: 0x1d2a44, roughness: 0.85 }));
-    const tee = keepMat(new THREE.MeshStandardMaterial({ color: 0xf1efe8, roughness: 0.8 }));
-    const hair = keepMat(new THREE.MeshStandardMaterial({ color: 0x0b0a0d, roughness: 0.25, metalness: 0.35 }));
-    const shades = keepMat(new THREE.MeshStandardMaterial({ color: 0x050506, roughness: 0.05, metalness: 0.9 }));
-    const boot = keepMat(new THREE.MeshStandardMaterial({ color: 0x0c0b0a, roughness: 0.4, metalness: 0.2 }));
-    let skin = null;
-    const replaced = new Set();
-    obj.mesh.traverse((/** @type {any} */ child) => {
-      if (!child.material) return;
-      if (/_head/.test(child.name)) {
-        skin = child.material;
-        return;
-      }
-      replaced.add(child.material);
-      child.material = /_leg/.test(child.name) ? jeans : leather;
-    });
-    for (const material of replaced) material.dispose();
-    /**
-     * @param {THREE.Object3D} parent
-     * @param {THREE.BufferGeometry} geometry
-     * @param {THREE.Material} material
-     * @param {number} px
-     * @param {number} py
-     * @param {number} pz
-     * @returns {THREE.Mesh}
-     */
-    const add = (parent, geometry, material, px, py, pz) => {
-      const mesh = new THREE.Mesh(keepGeo(geometry), material);
-      mesh.position.set(px, py, pz);
-      mesh.castShadow = true;
-      parent.add(mesh);
-      return mesh;
-    };
-    const part = (/** @type {string} */ suffix) => obj.mesh.children.find(c => c.name.endsWith(suffix));
-    // The build: a broad, deep chest, the arms further out to clear it.
-    const torso = part('_torso');
-    torso.scale.set(1.38, 1.05, 1.18);
-    // The T-shirt showing where the jacket is open, and the collar up.
-    add(torso, new THREE.BoxGeometry(0.14, 0.44, 0.05), tee, 0, 0.02, 0.205);
-    for (const side of [-1, 1]) {
-      const lapel = add(torso, new THREE.BoxGeometry(0.07, 0.4, 0.04), leather, side * 0.1, 0.02, 0.215);
-      lapel.rotation.z = side * 0.12;
-      const collar = add(torso, new THREE.BoxGeometry(0.14, 0.12, 0.04), leather, side * 0.12, 0.33, 0.12);
-      collar.rotation.set(-0.35, side * 0.5, side * 0.35);
-    }
-    for (const side of [-1, 1]) {
-      const arm = part(side < 0 ? '_armL' : '_armR');
-      arm.position.x = side * 0.36;
-      // Shoulders, biceps and forearms in the jacket; a fist at the end.
-      // (Built up round the arm rather than scaling it, which would shear
-      // the rifle in his hand.)
-      add(arm, new THREE.SphereGeometry(0.125, 10, 8), leather, 0, 0, 0).scale.set(1.1, 0.9, 1.1);
-      add(arm, new THREE.SphereGeometry(0.095, 10, 8), leather, 0, -0.16, 0.01).scale.set(1, 1.45, 1.05);
-      add(arm, new THREE.SphereGeometry(0.075, 8, 6), leather, 0, -0.36, 0.005).scale.set(1, 1.6, 1);
-      add(arm, new THREE.SphereGeometry(0.06, 8, 6), skin, 0, -0.52, 0);
-      const leg = part(side < 0 ? '_legL' : '_legR');
-      leg.scale.set(1.25, 1, 1.25);
-      add(leg, new THREE.BoxGeometry(0.13, 0.1, 0.22), boot, 0, -0.66, 0.04);
-    }
-    // The head: the pompadour -- a big glossy quiff swept up and forward,
-    // the sides slicked back -- sideburns, and dark glasses.
-    const head = part('_head');
-    const quiff = add(head, new THREE.SphereGeometry(0.14, 14, 10), hair, 0, 0.13, 0.05);
-    quiff.scale.set(0.95, 0.75, 1.25);
-    quiff.rotation.x = -0.35;
-    add(head, new THREE.SphereGeometry(0.165, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), hair, 0, 0.01, -0.012).scale.set(1.02, 1, 1.05);
-    for (const side of [-1, 1]) {
-      add(head, new THREE.BoxGeometry(0.03, 0.1, 0.05), hair, side * 0.155, -0.03, 0.03);
-      add(head, new THREE.BoxGeometry(0.1, 0.045, 0.02), shades, side * 0.055, 0.01, 0.162);
-    }
-    add(head, new THREE.BoxGeometry(0.2, 0.012, 0.012), shades, 0, 0.02, 0.168);
+    const dressed = dressAsRoger(obj.mesh, { geo: keepGeo, mat: keepMat });
+    const { quiff, torso } = dressed;
     obj.quiff = quiff;
     obj.torso = torso;
     // createPerson names its parts after the root it was built with.

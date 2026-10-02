@@ -179,6 +179,8 @@ export function createHeroModeSystem(ctx) {
   // reads and writes it as S.
   const S = {
     Hero: { active: false },
+    /** Runs started so far; the co-op layer reads it to spot a Restart (new run, same frame). */
+    runs: 0,
 
     state: {
       /** @type {'running'|'aiming'|'driving'|'dazed'|'won'|'dying'} */
@@ -506,13 +508,14 @@ export function createHeroModeSystem(ctx) {
       cell: 100, plasmaTimer: 0, beamTimer: 0, recoil: 0, spread: 0,
       neutralised: false, dazeImmunity: 0, spawnShield: HERO.spawnShieldSeconds,
       burstTimer: 0, aimBlend: 0, threat: Infinity,
-      stepTimer: 0.5, hintTimer: HERO.hintSeconds, msgTimer: 0, aimKind: 'sky', frozen: 0
+      stepTimer: 0.5, hintTimer: HERO.hintSeconds, msgTimer: 0, aimKind: 'sky', frozen: 0, coopDown: false
     });
     S.weapons.startRun();
     // A fresh energy bar for the run (engine/player/energy.js).
     ctx.systems.energy.resetEnergy();
     api.attachKeys();
     S.Hero.active = true;
+    S.runs += 1;
     // Every run, Restart included, starts at full health (health/system.js).
     if (ctx.systems.health) ctx.systems.health.resetHealth();
     if (S.button) {
@@ -817,7 +820,7 @@ export function createHeroModeSystem(ctx) {
     rogerPose: () => {
       if (!S.Hero.active || !S.roger) return null;
       const p = S.roger.mesh.position;
-      return { x: p.x, z: p.z, heading: S.state.heading, weapon: S.weapons ? S.weapons.current() : '', driving: S.state.phase === 'driving' };
+      return { x: p.x, z: p.z, heading: S.state.heading, weapon: S.weapons ? S.weapons.current() : '', driving: S.state.phase === 'driving', run: S.runs };
     },
     guestFlame: (/** @type {any} */ gun, /** @type {number} */ dt, /** @type {THREE.Vector3} */ muzzle, /** @type {THREE.Vector3} */ dir) => { if (S.weapons) S.weapons.guestFlame(gun, dt, muzzle, dir); },
     setCoopDown: (/** @type {boolean} */ down) => {

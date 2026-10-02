@@ -56,3 +56,54 @@ export const splashAmount = (weapon, distance, radius) => {
   if (!(base > 0) || !(radius > 0) || !(distance >= 0) || distance >= radius) return 0;
   return Math.round(base * (1 - distance / radius) * 100) / 100;
 };
+
+/** The body a ray must pass through to hit a player: radius and top, metres (the guest's hit cylinder). */
+export const BODY = Object.freeze({ radius: 0.5, top: 1.9 });
+
+/**
+ * Where a ray first crosses a player's body (a standing cylinder), as the
+ * distance along the ray, or -1 for a miss. Past the muzzle guard only, and
+ * not beyond `maxT`. The direction must be a unit vector.
+ * @param {number} ox Ray origin x.
+ * @param {number} oy Ray origin height.
+ * @param {number} oz Ray origin z.
+ * @param {number} dx Unit direction x.
+ * @param {number} dy Unit direction y.
+ * @param {number} dz Unit direction z.
+ * @param {number} maxT Furthest distance that counts.
+ * @param {number} tx The player's x.
+ * @param {number} tz The player's z.
+ * @returns {number} Distance along the ray, or -1.
+ */
+export const rayBodyDistance = (ox, oy, oz, dx, dy, dz, maxT, tx, tz) => {
+  const hx = Math.hypot(dx, dz) || 1e-6;
+  const t = ((tx - ox) * dx + (tz - oz) * dz) / (hx * hx);
+  if (!(t >= HEALTH.friendlyFire.muzzleGuard) || t > maxT) return -1;
+  const py = oy + dy * t;
+  if (py < 0 || py > BODY.top) return -1;
+  return Math.hypot(ox + dx * t - tx, oz + dz * t - tz) > BODY.radius ? -1 : t;
+};
+
+/**
+ * Whether a point on the ground is inside a forward sector (a melee arc or the
+ * Fire Gun's cone): within `reach` and within the angle whose cosine is
+ * `cosArc` of the facing direction. Anything closer than `near` counts, so
+ * someone on top of the attacker is never missed.
+ * @param {number} ox Attacker x.
+ * @param {number} oz Attacker z.
+ * @param {number} fx Facing x (unit, ground plane).
+ * @param {number} fz Facing z.
+ * @param {number} tx Target x.
+ * @param {number} tz Target z.
+ * @param {number} reach Metres.
+ * @param {number} cosArc Cosine of the half-angle.
+ * @param {number} [near] Distance inside which the angle is ignored.
+ * @returns {boolean} True when the target is in the sector.
+ */
+export const inSector = (ox, oz, fx, fz, tx, tz, reach, cosArc, near = 0.05) => {
+  const dx = tx - ox, dz = tz - oz;
+  const d = Math.hypot(dx, dz);
+  if (d > reach) return false;
+  if (d < near) return true;
+  return (dx * fx + dz * fz) / d >= cosArc;
+};

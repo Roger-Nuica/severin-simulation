@@ -235,7 +235,29 @@ export function createPlayerRegistry() {
     return p.seat.seat === 0 ? { move: false, aim: false, steer: true } : { move: false, aim: true, steer: false };
   }
 
+  /**
+   * A new Hero run: everyone is up again, at full energy and out of every
+   * seat. Guests get the run's spawn shield (Roger's own runs in the hero
+   * state, R-035), so both Rogers are equally safe for the first seconds.
+   * Positions and identities stay; the room is kept.
+   * @param {number} [guestShield] Seconds of spawn shield for every guest.
+   * @returns {void}
+   */
+  function resetRun(guestShield = 0) {
+    for (const p of players.values()) {
+      p.state = 'up';
+      p.downFor = 0;
+      p.reviveProgress = 0;
+      p.reviver = null;
+      p.shield = p.id === '0' ? 0 : Math.max(0, guestShield);
+      p.energy = 100;
+      p.wantsRevive = false;
+      p.seat = null;
+    }
+    seats.clear();
+  }
+
   function clear() { players.clear(); seats.clear(); }
 
-  return { add, remove, get, list, up, nearestEligible, down, update, gameOver, canDamagePlayer, enterSeat, leaveSeat, occupants, controls, clear };
+  return { resetRun, add, remove, get, list, up, nearestEligible, down, update, gameOver, canDamagePlayer, enterSeat, leaveSeat, occupants, controls, clear };
 }

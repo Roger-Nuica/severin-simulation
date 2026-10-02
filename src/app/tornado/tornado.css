@@ -2068,6 +2068,10 @@ body.ship-cutscene .minimap {
 .coop-hp.low .coop-hbar i { background: #ff4a3a; }
 .coop-hp.low .coop-hpct { color: #ff6a5a; }
 .coop-hp.glowing .coop-hbar { animation: hero-health-glow calc(1.1s - var(--glow) * 0.6s) ease-in-out infinite alternate; }
+/* Guest HUD weapon wheel: every weapon in the host's order, the held one lit. */
+.coop-wheel { display: flex; flex-wrap: wrap; gap: 3px; margin: 4px 0; }
+.coop-wheel span { padding: 1px 5px; border-radius: 3px; font-size: 10px; letter-spacing: 0.04em; background: rgba(255, 255, 255, 0.08); opacity: 0.6; }
+.coop-wheel span.on { background: #ffc94d; color: #10141c; opacity: 1; font-weight: 700; }
 .coop-hud.hurt-a { animation: coop-hurt-a 0.2s ease-out; }
 .coop-hud.hurt-b { animation: coop-hurt-b 0.2s ease-out; }
 @keyframes coop-hurt-a { from { box-shadow: 0 0 0 3px rgba(255, 40, 30, 0.9); } to { box-shadow: 0 0 0 0 rgba(255, 40, 30, 0); } }

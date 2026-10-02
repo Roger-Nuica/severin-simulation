@@ -12,7 +12,10 @@ import { ENERGY } from '../player/energy.js';
 import { IMPACT_SCORE } from '../damage/config.js';
 import { HEALTH } from '../health/config.js';
 import { glowLevel } from '../health/state.js';
-import { mayHurtPlayer, splashAmount } from '../health/friendlyFire.js';
+import { mayHurtPlayer, splashAmount, rayBodyDistance, inSector } from '../health/friendlyFire.js';
+import { dressAsRoger, rogerLimbs, createRogerTag, newOwned, disposeRoger } from '../hero/rogerLook.js';
+import { rogerStyle, newRunCycle, stepRunCycle, swingLimbs, newCameraPose, followCamera, wheelHtml } from './rogerView.js';
+import { createHeroRequests, heroRequestOutcome, mayRequestLock, HERO_FLAG_SECONDS } from './heroRequest.js';
 
 /**
  * ===========================================================================
@@ -38,7 +41,26 @@ import { mayHurtPlayer, splashAmount } from '../health/friendlyFire.js';
  * The guest carries the whole wheel (rifle, minigun, railgun, Fire Gun, Black
  * Hole Gun, Katana), each through the systems Roger's use. Not implemented
  * for the guest: EMP and Time Slow (time is host-authoritative).
+ *
+ * Both Rogers: every player is drawn as Roger (hero/rogerLook.js, the same
+ * costume as the host's own), the host in the original look with a gold tag,
+ * a guest with a teal tee and tag. The peer follows its own Roger with a
+ * per-client camera (rogerView.js `followCamera`; first person while aiming)
+ * and has the Roger HUD: own health large, partner small, energy, weapon wheel
+ * and a crosshair on aim. Roger versus Roger goes through `health.damagePlayer`
+ * only: `hurtRay`, `hurtSector`, `hurtArea` (weapons of both players),
+ * `splashGuests` and `hitGuestsArea` (R-053), each honouring `mayHurt`.
+ *
+ * Hero Mode in a room: the host presses Hero as usual; the guest's Hero button
+ * becomes a request (`hero` flag on its input, acted on once by the host). A
+ * room survives Hero ending and a Restart. On a peer, the world-affecting
+ * controls of the panel are disabled and blocked (the local sim is idle), and
+ * the OrbitControls camera is switched off in favour of the follow camera.
  */
+
+/** Panel controls a peer may still use: the panel fold, local audio and the Hero request. */
+const PEER_UI_ALLOWED = (/** @type {Element} */ el) => el.id === 'btn-panel-toggle' || el.id === 'btn-mute' || el.id === 'p-volume' || el.id === 'btn-hero' || el.id.startsWith('set-');
+const VERSION_TEXT = 'Version mismatch: refresh the page (Ctrl+Shift+R) so host and guest run the same build.';
 
 const SNAP_INTERVAL = 1 / LIMITS.snapshotHz;
 const INPUT_INTERVAL = 1 / 30;
@@ -69,6 +91,7 @@ export function createNetSystem(ctx) {
   const emitter = createEventEmitter();
   const deduper = createEventDeduper();
   const buffer = createSnapshotBuffer();
+  const heroRequests = createHeroRequests();
 
   const S = {
     /** @type {ReturnType<typeof createRelayClient>|null} */
@@ -88,13 +111,27 @@ export function createNetSystem(ctx) {
     bypass: false,
     holdRevive: false,
     pendingWelcome: false,
-    /** @type {Map<string, {obj: any, cd: number, tpCd: number, lastAbil: number, lastUse: boolean, flame: {tick: number}}>} */
+    /** @type {Map<string, {obj: any, cd: number, tpCd: number, lastAbil: number, lastUse: boolean, flame: {tick: number, shooter: string}, run: import('./rogerView.js').RunCycle, owned: import('../hero/rogerLook.js').Owned, limbs: any}>} */
     avatars: new Map(),
     /** @type {WeakMap<object, number>} */
     ids: new WeakMap(),
     nextId: 1,
     lastMission: '',
     peerScore: 0,
+    /** Seconds the peer keeps sending `hero: true` after a Hero press. */
+    heroFlag: 0,
+    /** Last Hero run seen by the host (spots a Restart, which starts a new run). */
+    lastRun: 0,
+    /** When a pointer lock last ended or failed (performance.now() ms; 0 = never). */
+    lockExitAt: 0,
+    wasLocked: false,
+    versionWarned: false,
+    peerReadyShown: false,
+    resetting: false,
+    /** @type {{pos: THREE.Vector3, target: THREE.Vector3}|null} */
+    savedCam: null,
+    /** Panel controls disabled for the peer, with what to put back. */
+    lockedUi: /** @type {Map<HTMLElement, {disabled: boolean, title: string}>} */ (new Map()),
     peerRow: /** @type {number[]|null} */ (null),
     /** Latest synced health per player id: value, seconds since last damage, receipt time (ms). */
     peerHp: /** @type {Map<number, {v: number, since: number, at: number}>} */ (new Map()),
@@ -124,6 +161,8 @@ export function createNetSystem(ctx) {
     hud: null,
     /** @type {HTMLDivElement|null} */
     toast: null,
+    /** @type {HTMLDivElement|null} */
+    cross: null,
     toastTimer: 0
   };
   /** @type {Record<string, HTMLElement|null>} */
@@ -132,6 +171,10 @@ export function createNetSystem(ctx) {
   // Scratch for the guest's flame (per instance, never module state).
   const aimVec = new THREE.Vector3();
   const muzzleVec = new THREE.Vector3();
+  // Scratch for the peer camera.
+  const camPose = newCameraPose();
+  const camGoal = new THREE.Vector3();
+  const FOLLOW = { back: HERO.followBack, height: HERO.followHeight, lookAhead: HERO.lookAhead, lookHeight: HERO.lookHeight, eye: EYE };
 
   // ---------------------------------------------------------------------
   // Small helpers
@@ -194,9 +237,14 @@ export function createNetSystem(ctx) {
     S.code = '';
     S.myId = '';
     S.pendingWelcome = false;
+    S.peerReadyShown = false;
+    S.versionWarned = false;
+    S.heroFlag = 0;
+    S.lastRun = 0;
     for (const id of [...S.avatars.keys()]) removeAvatar(id);
     players.clear();
     gate.clear();
+    heroRequests.clear();
     deduper.reset();
     emitter.reset();
     buffer.clear();
@@ -209,6 +257,7 @@ export function createNetSystem(ctx) {
     clearProxies();
     if (wasPeer) restorePeerView();
     if (S.hud) S.hud.classList.remove('visible');
+    if (S.cross) S.cross.classList.remove('visible');
     setStatus();
   }
 
@@ -216,14 +265,11 @@ export function createNetSystem(ctx) {
   function startSession(role, code) {
     if (S.client && S.client.state().status !== 'idle' && S.client.state().status !== 'closed') return;
     if (S.client) endSession();
-    if (role === 'host' && hero() && ctx.Hero && ctx.Hero.active) {
-      say('Leave Hero Mode before hosting a room.');
-      return;
-    }
-    if (role === 'peer' && ctx.Hero && ctx.Hero.active) {
-      say('Leave Hero Mode before joining a room.');
-      return;
-    }
+    // Hero Mode no longer blocks a room. Hosting rebuilds the town from a shared
+    // seed (a reset), which ends a run in progress; joining ends the guest's own
+    // local run first so its Hero keys, HUD and camera do not linger.
+    if (role === 'host' && hero() && ctx.Hero && ctx.Hero.active) say('Hosting rebuilds the town: your Hero run ends.');
+    if (role === 'peer' && hero() && ctx.Hero && ctx.Hero.active) hero().resetHero();
     S.sessionAbort = new AbortController();
     const signal = anySignal([ctx.signal, S.sessionAbort.signal]);
     S.role = role;
@@ -248,6 +294,12 @@ export function createNetSystem(ctx) {
     return ac.signal;
   }
 
+  /** @param {string} code A relay or client error code. @returns {string} Text for the toast. */
+  function errorText(code) {
+    if (code === 'version' || code.startsWith('field:')) return VERSION_TEXT;
+    return `Co-op: ${code}`;
+  }
+
   /** @param {{status: string, role: string|null, code: string|null, id: string|null, error: string|null}} st */
   function onClientState(st) {
     if (st.code) S.code = st.code;
@@ -265,15 +317,13 @@ export function createNetSystem(ctx) {
       if (st.error === 'host-left') say('The host closed the room.');
       else if (st.error === 'full') say('That room is full.');
       else if (st.error === 'no-room') say('No room with that code.');
-      else if (st.error) say(`Co-op: ${st.error}`);
+      else if (st.error) say(errorText(st.error));
       endSession();
       return;
     }
-    if (st.status === 'in-room' && st.error) say(`Co-op: ${st.error}`);
+    if (st.status === 'in-room' && st.error) say(errorText(st.error));
     setStatus();
   }
-
-  S.peerReadyShown = false;
 
   /** @param {number} seed rebuilds the town from it (same seed, same town) */
   function applySeed(seed) {
@@ -314,6 +364,7 @@ export function createNetSystem(ctx) {
         removeAvatar(id);
         players.remove(id);
         gate.forget(id);
+        heroRequests.forget(id);
         say(msg.reason === 'dropped' ? 'A player lost connection.' : 'A player left.');
         setStatus();
         return;
@@ -325,6 +376,7 @@ export function createNetSystem(ctx) {
         if (p) {
           p.input = r.input;
           p.wantsRevive = r.input.use;
+          if (heroRequests.edge(r.id, r.input.hero)) onGuestHeroRequest(r.id);
         }
         return;
       }
@@ -332,17 +384,36 @@ export function createNetSystem(ctx) {
     }
   }
 
-  /** @param {string} id @param {number} x @param {number} z */
+  /**
+   * A guest pressed Hero. In a run the guest's avatar is already (or is about
+   * to be) on foot beside Roger; otherwise it waits and the host is told.
+   * @param {string} id Guest player id.
+   * @returns {void}
+   */
+  function onGuestHeroRequest(id) {
+    const outcome = heroRequestOutcome(!!hero().rogerPose());
+    sendEvent('notice', { text: outcome.text }, id);
+    if (outcome.action === 'wait') say(`Player ${id} wants to play Hero Mode: press Hero.`);
+  }
+
+  /**
+   * A guest's figure on the host: Roger's costume in the guest's colours with a
+   * name tag (hero/rogerLook.js), standing at (x, z). Not a town person: it is
+   * not in the environment's lists, only in the scene.
+   * @param {string} id Guest id.
+   * @param {number} x
+   * @param {number} z
+   * @returns {void}
+   */
   function spawnAvatar(id, x, z) {
     const obj = ctx.systems.people.createPerson(x, z, 95000 + Number(id));
     obj.mesh.name = `coop_player_${id}`;
-    // A marker over the head so the guest reads as a player, not a bystander.
-    const marker = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.45, 8), new THREE.MeshBasicMaterial({ color: 0x35e0a1 }));
-    marker.rotation.x = Math.PI;
-    marker.position.y = 2.5;
-    obj.mesh.add(marker);
+    const owned = newOwned();
+    const style = rogerStyle(id);
+    dressAsRoger(obj.mesh, owned.keep, { tee: style.tee });
+    obj.mesh.add(createRogerTag(style.label, style.accent, owned.keep));
     Sim.three.scene.add(obj.mesh);
-    S.avatars.set(id, { obj, cd: 0, tpCd: 0, lastAbil: 0, lastUse: false, flame: { tick: 0 } });
+    S.avatars.set(id, { obj, cd: 0, tpCd: 0, lastAbil: 0, lastUse: false, flame: { tick: 0, shooter: id }, run: newRunCycle(), owned, limbs: rogerLimbs(obj.mesh) });
   }
 
   /** @param {string} id */
@@ -350,10 +421,7 @@ export function createNetSystem(ctx) {
     const a = S.avatars.get(id);
     if (!a) return;
     Sim.three.scene.remove(a.obj.mesh);
-    a.obj.mesh.traverse((/** @type {any} */ child) => {
-      if (child.geometry) child.geometry.dispose();
-      if (child.material) child.material.dispose();
-    });
+    disposeRoger(a.obj.mesh, a.owned);
     S.avatars.delete(id);
   }
 
@@ -454,27 +522,93 @@ export function createNetSystem(ctx) {
   }
 
   /**
-   * A guest's shot against the other players: the first one whose body the
-   * ray crosses within `maxT` (the enemy it struck, if nearer) takes the
-   * weapon's `damageToPlayer` value. Past the muzzle guard only.
-   * @param {import('./players.js').Player} shooter
-   * @param {number} dx @param {number} dy @param {number} dz Unit direction.
-   * @param {number} maxT
+   * Who is attacking, for the victim's card.
+   * @param {string} shooterId
+   * @returns {string}
+   */
+  const attacker = (shooterId) => (shooterId === '0' ? 'Roger' : `Player ${shooterId}`);
+
+  /**
+   * One shot of a hitscan weapon (either player's) against the other players:
+   * each one whose body the ray crosses past the muzzle guard and within
+   * `maxT` (the enemy it struck, if nearer) takes the weapon's
+   * `damageToPlayer` value once, through the one health API.
+   * @param {string} shooterId `'0'` is Roger.
+   * @param {number} ox Ray origin x.
+   * @param {number} oy Ray origin height.
+   * @param {number} oz Ray origin z.
+   * @param {number} dx Unit direction.
+   * @param {number} dy
+   * @param {number} dz
+   * @param {number} maxT Furthest distance that counts.
    * @param {string} weapon A `HEALTH.damageToPlayer` key.
    * @returns {void}
    */
-  function shootPlayers(shooter, dx, dy, dz, maxT, weapon) {
-    if (!ctx.systems.health) return;
-    const hx = Math.hypot(dx, dz) || 1e-6;
+  function hurtRay(shooterId, ox, oy, oz, dx, dy, dz, maxT, weapon) {
+    if (!coopActive() || !ctx.systems.health) return;
+    const amount = /** @type {Record<string, number>} */ (HEALTH.damageToPlayer)[weapon];
+    if (!(amount > 0)) return;
     for (const p of players.list()) {
-      if (p.id === shooter.id || !mayHurt(shooter.id, p.id)) continue;
-      const t = ((p.x - shooter.x) * dx + (p.z - shooter.z) * dz) / (hx * hx);
-      if (t < HEALTH.friendlyFire.muzzleGuard || t > maxT) continue;
-      const py = EYE + dy * t;
-      if (py < 0 || py > 1.9 || Math.hypot(shooter.x + dx * t - p.x, shooter.z + dz * t - p.z) > 0.5) continue;
+      if (p.id === shooterId || !mayHurt(shooterId, p.id)) continue;
+      if (rayBodyDistance(ox, oy, oz, dx, dy, dz, maxT, p.x, p.z) < 0) continue;
       ctx.systems.health.damagePlayer({
-        source: 'friendlyFire', amount: /** @type {Record<string, number>} */ (HEALTH.damageToPlayer)[weapon], type: 'ray',
-        position: { x: shooter.x, y: 0, z: shooter.z }, targetId: p.id, title: 'FRIENDLY FIRE', sub: `Shot by Player ${shooter.id}`
+        source: 'friendlyFire', amount, type: 'ray',
+        position: { x: ox, y: 0, z: oz }, targetId: p.id, title: 'FRIENDLY FIRE', sub: `Shot by ${attacker(shooterId)}`
+      });
+    }
+  }
+
+  /**
+   * A melee arc or the Fire Gun's cone (either player's): every other player
+   * inside the sector takes the weapon's `damageToPlayer` value once.
+   * @param {string} shooterId `'0'` is Roger.
+   * @param {number} ox Attacker x.
+   * @param {number} oz Attacker z.
+   * @param {number} fx Facing (need not be unit).
+   * @param {number} fz
+   * @param {number} reach Metres.
+   * @param {number} cosArc Cosine of the half-angle.
+   * @param {number} near Distance inside which the angle is ignored.
+   * @param {string} weapon A `HEALTH.damageToPlayer` key.
+   * @param {string} type Damage kind (`melee`, `fire`).
+   * @param {string} verb Card text before the attacker (`Cut down by`).
+   * @returns {void}
+   */
+  function hurtSector(shooterId, ox, oz, fx, fz, reach, cosArc, near, weapon, type, verb) {
+    if (!coopActive() || !ctx.systems.health) return;
+    const amount = /** @type {Record<string, number>} */ (HEALTH.damageToPlayer)[weapon];
+    if (!(amount > 0)) return;
+    const len = Math.hypot(fx, fz) || 1;
+    for (const p of players.list()) {
+      if (p.id === shooterId || !mayHurt(shooterId, p.id)) continue;
+      if (!inSector(ox, oz, fx / len, fz / len, p.x, p.z, reach, cosArc, near)) continue;
+      ctx.systems.health.damagePlayer({
+        source: 'friendlyFire', amount, type, position: { x: ox, y: 0, z: oz },
+        targetId: p.id, title: 'FRIENDLY FIRE', sub: `${verb} ${attacker(shooterId)}`
+      });
+    }
+  }
+
+  /**
+   * A flat-damage area (the railgun's bolt): every other player inside the
+   * radius takes the weapon's `damageToPlayer` value once.
+   * @param {string} shooterId `'0'` is Roger.
+   * @param {number} x Centre x.
+   * @param {number} z Centre z.
+   * @param {number} radius Metres.
+   * @param {string} weapon A `HEALTH.damageToPlayer` key.
+   * @param {string} verb Card text before the attacker.
+   * @returns {void}
+   */
+  function hurtArea(shooterId, x, z, radius, weapon, verb) {
+    if (!coopActive() || !ctx.systems.health) return;
+    const amount = /** @type {Record<string, number>} */ (HEALTH.damageToPlayer)[weapon];
+    if (!(amount > 0)) return;
+    for (const p of players.list()) {
+      if (p.id === shooterId || !mayHurt(shooterId, p.id) || Math.hypot(p.x - x, p.z - z) >= radius) continue;
+      ctx.systems.health.damagePlayer({
+        source: 'friendlyFire', amount, type: 'ray', position: { x, y: 0, z },
+        targetId: p.id, title: 'FRIENDLY FIRE', sub: `${verb} ${attacker(shooterId)}`
       });
     }
   }
@@ -526,6 +660,13 @@ export function createNetSystem(ctx) {
       else if (!pose.driving && roger.seat) ejectPassengers(players.leaveSeat('0'), pose);
     }
     const heroOn = !!pose;
+    // A new run (first start or a Restart, even within one frame): everyone up
+    // again, guests dropped back beside the new spawn. The room stays.
+    if (pose && pose.run !== S.lastRun) {
+      S.lastRun = pose.run;
+      players.resetRun(HERO.spawnShieldSeconds);
+      for (const id of [...S.avatars.keys()]) removeAvatar(id);
+    }
 
     for (const p of players.list()) {
       if (p.id === '0') continue;
@@ -535,6 +676,8 @@ export function createNetSystem(ctx) {
         const nx = (pose.x) + (Number(p.id) % 2 ? 2 : -2);
         spawnAvatar(p.id, nx, pose.z + 2);
         p.x = nx; p.z = pose.z + 2;
+        // A guest dropping into a run in progress is as safe as Roger was at his start (R-035).
+        p.shield = Math.max(p.shield, HERO.spawnShieldSeconds);
         a = /** @type {NonNullable<typeof a>} */ (S.avatars.get(p.id));
       }
       const pos = a.obj.mesh.position;
@@ -577,7 +720,9 @@ export function createNetSystem(ctx) {
       a.obj.mesh.rotation.y = p.heading;
       // Down: lying flat; revived: upright.
       a.obj.mesh.rotation.x = p.state === 'up' ? 0 : -Math.PI / 2 + 0.1;
-      a.obj.mesh.visible = p.state !== 'dead' && !p.seat;
+      // Blinks while a shield (spawn or revive) lasts, like Roger's own.
+      a.obj.mesh.visible = p.state !== 'dead' && !p.seat && (p.shield <= 0 || Math.floor(p.shield * 10) % 2 === 0);
+      swingLimbs(a.limbs, a.run.phase, p.state === 'up' ? stepRunCycle(a.run, p.x, p.z, dt, HERO.stride, HERO.runSpeed) : 0);
       // Hunters now hurt a guest through the health API (melee touches, rays),
       // which calls catchPlayer at 0 health; there is no instant catch here.
     }
@@ -686,8 +831,9 @@ export function createNetSystem(ctx) {
    * One trigger pull from a guest, whatever is in their hand. Every weapon
    * resolves through the paths Roger's use: the enemy registry (so each
    * enemy's own `accepts` and damage handler decide), the building-fire and
-   * black-hole systems, and damage.addDamageScore. Nothing hits a player
-   * (friendly fire is off).
+   * black-hole systems, and damage.addDamageScore. The other players in the
+   * line of fire, arc or cone are hurt through health.damagePlayer (friendly
+   * fire is on, R-053).
    * @param {import('./players.js').Player} p
    * @param {{cd: number, flame: {tick: number}}} a
    * @param {import('./protocol.js').PlayerInput} input
@@ -712,7 +858,7 @@ export function createNetSystem(ctx) {
       const hit = scan(p, input, w.range);
       if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: EYE + dy * hit.t, z: oz + dz * hit.t } })) credit(KILL_SCORE, p.id);
       // Friendly fire (D4): the partner in the line of fire, if nearer than the enemy hit.
-      shootPlayers(p, dx, dy, dz, hit ? hit.t : w.range, w.type);
+      hurtRay(p.id, ox, EYE, oz, dx, dy, dz, hit ? hit.t : w.range, w.type);
     } else if (name === 'katana') {
       a.cd = KATANA.cooldown;
       // A cut in front of the guest: the nearest enemy inside the arc takes a blade hit.
@@ -732,16 +878,8 @@ export function createNetSystem(ctx) {
         const t = /** @type {{e: any, kind: any, q: {x: number, z: number}}} */ (target);
         if (ctx.systems.enemies.hit(t.e, t.kind, { type: 'blade', amount: 1, at: { x: t.q.x, z: t.q.z } })) credit(KILL_SCORE, p.id);
       }
-      // Friendly fire (D4): the partner inside the same arc.
-      for (const q of players.list()) {
-        if (q.id === p.id || !mayHurt(p.id, q.id) || Math.hypot(q.x - ox, q.z - oz) > KATANA.reach) continue;
-        const off = Math.atan2(q.x - ox, q.z - oz) - input.yaw;
-        if (Math.abs(Math.atan2(Math.sin(off), Math.cos(off))) > KATANA.halfAngle) continue;
-        ctx.systems.health.damagePlayer({
-          source: 'friendlyFire', amount: HEALTH.damageToPlayer.blade, type: 'melee', position: { x: ox, y: 0, z: oz },
-          targetId: q.id, title: 'FRIENDLY FIRE', sub: `Cut down by Player ${p.id}`
-        });
-      }
+      // Friendly fire (D4): the other player inside the same arc.
+      hurtSector(p.id, ox, oz, Math.sin(input.yaw), Math.cos(input.yaw), KATANA.reach, Math.cos(KATANA.halfAngle), 0.05, 'blade', 'melee', 'Cut down by');
       // People are not in the registry: the nearest standing civilian in the
       // same arc is killed through the people owner (as the host's blade
       // does) and credited at the person-kill value. `blade` is sent to no kind.
@@ -858,6 +996,10 @@ export function createNetSystem(ctx) {
 
   /** @param {any} msg */
   function peerMessage(msg) {
+    if ((msg.type === 'snapshot' || msg.type === 'event') && msg.v !== PROTOCOL_VERSION) {
+      if (!S.versionWarned) { S.versionWarned = true; say(VERSION_TEXT); }
+      return;
+    }
     if (msg.type === 'snapshot') {
       if (Array.isArray(msg.hp)) {
         const at = performance.now();
@@ -877,9 +1019,11 @@ export function createNetSystem(ctx) {
         S.myId = String(d.id);
         S.pendingWelcome = false;
         S.peerReadyShown = true;
-        enterPeerView();
-        // The same town as the host's.
+        // The same town as the host's first: the reset it triggers puts the
+        // panel and the camera back to defaults, which the peer view then locks.
         if (Number.isFinite(d.seed)) applySeed(d.seed >>> 0);
+        enterPeerView();
+        say('Click the game view to look around (Esc frees the mouse). Hero asks the host to bring you in.');
         setStatus();
         break;
       case 'announce': say(`${String(d.title || '')} ${String(d.sub || '')}`.trim()); break;
@@ -903,22 +1047,59 @@ export function createNetSystem(ctx) {
     }
   }
 
-  function enterPeerView() {
-    S.savedControls = Sim.three.controls.enabled;
-    Sim.three.controls.enabled = false;
-    for (const id of ['btn-hero', 'btn-start']) {
-      const el = /** @type {HTMLButtonElement|null} */ (document.getElementById(id));
-      if (el) el.disabled = true;
+  /**
+   * Disables (or restores) the panel's world-affecting controls on a peer: its
+   * local simulation is idle, so Tornado, disasters, presets, storm, Reset,
+   * Pause and the rest must not act on it. The click blocker in initNet is the
+   * backstop if another system re-enables one.
+   * @param {boolean} locked
+   * @returns {void}
+   */
+  function setPeerUiLocked(locked) {
+    if (locked) {
+      document.querySelectorAll('#ui-panel button, #ui-panel input, #ui-panel select, #ui-panel textarea').forEach((node) => {
+        const el = /** @type {HTMLButtonElement} */ (node);
+        if (PEER_UI_ALLOWED(el) || S.lockedUi.has(el)) return;
+        S.lockedUi.set(el, { disabled: el.disabled, title: el.title });
+        el.disabled = true;
+        el.title = 'Controlled by the host in a co-op room';
+      });
+      return;
     }
+    for (const [el, was] of S.lockedUi) {
+      /** @type {HTMLButtonElement} */ (el).disabled = was.disabled;
+      el.title = was.title;
+    }
+    S.lockedUi.clear();
+  }
+
+  /** @returns {void} */
+  function enterPeerView() {
+    const { controls, camera } = Sim.three;
+    S.savedControls = controls.enabled;
+    S.savedCam = { pos: camera.position.clone(), target: controls.target.clone() };
+    controls.enabled = false;
+    setPeerUiLocked(true);
     if (!S.proxyRoot) { S.proxyRoot = new THREE.Group(); S.proxyRoot.name = 'coop_proxies'; Sim.three.scene.add(S.proxyRoot); }
     if (S.hud) S.hud.classList.add('visible');
   }
 
+  /** Leave: single-player controls, panel and camera back as they were. */
   function restorePeerView() {
-    Sim.three.controls.enabled = S.savedControls;
-    for (const id of ['btn-hero', 'btn-start']) {
-      const el = /** @type {HTMLButtonElement|null} */ (document.getElementById(id));
-      if (el) el.disabled = false;
+    const { controls, camera, renderer } = Sim.three;
+    if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
+    S.keys.up = S.keys.down = S.keys.left = S.keys.right = false;
+    S.buttons.fire = S.buttons.aim = S.buttons.use = false;
+    S.abil = 0;
+    S.look.yaw = 0;
+    S.look.pitch = 0;
+    setPeerUiLocked(false);
+    controls.enabled = S.savedControls;
+    if (S.savedCam) {
+      camera.position.copy(S.savedCam.pos);
+      controls.target.copy(S.savedCam.target);
+      camera.lookAt(S.savedCam.target);
+      S.savedCam = null;
     }
   }
 
@@ -927,15 +1108,43 @@ export function createNetSystem(ctx) {
   /** @returns {THREE.Material} */
   const keepMat = (/** @type {THREE.Material} */ m) => { S.mats.push(m); return m; };
 
-  /** @param {string} kind @param {boolean} [mine] @returns {THREE.Object3D} */
-  function makeProxy(kind, mine = false) {
+  /**
+   * A player as Roger on the peer: the town's person figure dressed in his
+   * costume (hero/rogerLook.js), in the player's colours with a name tag. It
+   * owns its geometry, materials and tag texture, released by `disposeProxy`.
+   * @param {number} id Player id from the snapshot row.
+   * @returns {THREE.Object3D} The figure's root, scaled like a person.
+   */
+  function makeRogerProxy(id) {
+    const person = ctx.systems.people.createPerson(0, 0, 96000 + id);
+    const root = person.mesh;
+    root.name = `coop_roger_${id}`;
+    const owned = newOwned();
+    const style = rogerStyle(id);
+    dressAsRoger(root, owned.keep, { tee: style.tee });
+    root.add(createRogerTag(style.label, style.accent, owned.keep));
+    root.userData.owned = owned;
+    root.userData.run = newRunCycle();
+    root.userData.limbs = rogerLimbs(root);
+    return root;
+  }
+
+  /**
+   * Releases a proxy that owns its resources (a Roger); the shared kinds are
+   * released together in `clearProxies`.
+   * @param {THREE.Object3D} obj The proxy.
+   * @returns {void}
+   */
+  function disposeProxy(obj) {
+    if (obj.userData.owned) disposeRoger(obj, obj.userData.owned);
+  }
+
+  /** @param {string} kind @param {number} [id] Player id, for the players kind. @returns {THREE.Object3D} */
+  function makeProxy(kind, id = 0) {
+    if (kind === 'players') return makeRogerProxy(id);
     const g = new THREE.Group();
     const mat = (/** @type {number} */ c, o = 1) => /** @type {THREE.Material} */ (keepMat(new THREE.MeshStandardMaterial({ color: c, transparent: o < 1, opacity: o, roughness: 0.7 })));
-    if (kind === 'players') {
-      const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(0.28, 1.1, 4, 8)), mat(mine ? 0x35e0a1 : 0xffa24a));
-      body.position.y = 0.9;
-      g.add(body);
-    } else if (kind === 'terminators') {
+    if (kind === 'terminators') {
       const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(0.34, 1.4, 4, 8)), mat(0xc0392b));
       body.position.y = 1.05;
       g.add(body);
@@ -959,6 +1168,7 @@ export function createNetSystem(ctx) {
   }
 
   function clearProxies() {
+    for (const map of S.proxies.values()) for (const obj of map.values()) disposeProxy(obj);
     if (S.proxyRoot) Sim.three.scene.remove(S.proxyRoot);
     S.proxyRoot = null;
     S.proxies.clear();
@@ -971,6 +1181,7 @@ export function createNetSystem(ctx) {
   /** @param {number} dt */
   function updatePeer(dt) {
     if (!S.peerReadyShown || !S.proxyRoot || !S.client) return;
+    S.heroFlag = Math.max(0, S.heroFlag - dt);
     // Input at ~30 Hz.
     S.inputAcc += dt;
     if (S.inputAcc >= INPUT_INTERVAL) {
@@ -980,7 +1191,7 @@ export function createNetSystem(ctx) {
         type: 'input', v: PROTOCOL_VERSION, seq: ++S.seq,
         mx: (k.right ? 1 : 0) - (k.left ? 1 : 0), mz: (k.up ? 1 : 0) - (k.down ? 1 : 0),
         yaw: S.look.yaw, pitch: S.look.pitch,
-        fire: S.buttons.fire, aim: S.buttons.aim, weapon: S.weapon, abil: S.abil, use: S.buttons.use
+        fire: S.buttons.fire, aim: S.buttons.aim, weapon: S.weapon, abil: S.abil, use: S.buttons.use, hero: S.heroFlag > 0
       });
     }
     const s = buffer.sample(performance.now() / 1000);
@@ -990,12 +1201,12 @@ export function createNetSystem(ctx) {
       let map = S.proxies.get(kind);
       if (!map) { map = new Map(); S.proxies.set(kind, map); }
       for (const [id, obj] of [...map]) {
-        if (!rows.has(id)) { S.proxyRoot.remove(obj); map.delete(id); }
+        if (!rows.has(id)) { S.proxyRoot.remove(obj); disposeProxy(obj); map.delete(id); }
       }
       for (const [id, row] of rows) {
         const mine = kind === 'players' && String(id) === S.myId;
         let obj = map.get(id);
-        if (!obj) { obj = makeProxy(kind, mine); map.set(id, obj); S.proxyRoot.add(obj); }
+        if (!obj) { obj = makeProxy(kind, id); map.set(id, obj); S.proxyRoot.add(obj); }
         if (kind === 'tornadoes') {
           obj.position.set(row[1], 0, row[2]);
           obj.scale.set(row[3], 140, row[3]);
@@ -1005,21 +1216,27 @@ export function createNetSystem(ctx) {
         } else {
           obj.position.set(row[1], 0, row[2]);
           obj.rotation.y = row[3];
-          if (kind === 'players') obj.rotation.x = row[4] === 0 ? 0 : -Math.PI / 2 + 0.1;
+          if (kind === 'players') {
+            obj.rotation.x = row[4] === 0 ? 0 : -Math.PI / 2 + 0.1;
+            swingLimbs(obj.userData.limbs, obj.userData.run.phase, row[4] === 0 ? stepRunCycle(obj.userData.run, row[1], row[2], dt, HERO.stride, HERO.runSpeed) : 0);
+          }
           if (kind === 'terminators') obj.rotation.x = row[4] === 0 ? 0 : -Math.PI / 2 + 0.1;
         }
         if (mine) S.peerRow = row;
       }
     }
-    // Follow the avatar: behind and above, looking over its shoulder.
+    // Follow the avatar: over Roger's shoulder at the host's follow distances,
+    // or at his eyes while aiming (rogerView.js `followCamera`; scratch only).
     const me = s.kinds.players.get(Number(S.myId));
     if (me) {
       const cam = Sim.three.camera;
-      const yaw = S.look.yaw;
-      const back = 5.5;
-      const tx = me[1] - Math.sin(yaw) * back, tz = me[2] - Math.cos(yaw) * back;
-      cam.position.lerp(new THREE.Vector3(tx, 3.4 + S.look.pitch * 3, tz), Math.min(1, dt * 8));
-      cam.lookAt(me[1] + Math.sin(yaw) * 6, 1.4 + S.look.pitch * 6, me[2] + Math.cos(yaw) * 6);
+      followCamera(camPose, me[1], me[2], S.look.yaw, S.look.pitch, S.buttons.aim, FOLLOW);
+      if (camPose.firstPerson) cam.position.set(camPose.px, camPose.py, camPose.pz);
+      else cam.position.lerp(camGoal.set(camPose.px, camPose.py, camPose.pz), Math.min(1, dt * 8));
+      cam.lookAt(camPose.lx, camPose.ly, camPose.lz);
+      const mine = S.proxies.get('players');
+      const own = mine && mine.get(Number(S.myId));
+      if (own) own.visible = !camPose.firstPerson;
     }
     drawHud();
   }
@@ -1055,9 +1272,10 @@ export function createNetSystem(ctx) {
     const now = performance.now();
     let bars = hpBar(me, 'HEALTH ', false, !!row && row[4] !== 0, now);
     for (const id of S.peerHp.keys()) {
-      if (id !== me) bars += hpBar(id, `P${id} `, true, false, now);
+      if (id !== me) bars += hpBar(id, `${rogerStyle(id).label} `, true, false, now);
     }
-    const html = `<b>PLAYER ${S.myId}</b> · ${state}${bars}WEAPON ${WEAPONS[S.weapon] || ''} · ENERGY ${row ? row[6] : 100}%<br>SCORE ${S.peerScore.toLocaleString()}${ms ? `<br>MISSION ${ms.id}: ${ms.value}/${ms.goal}` : ''}<br><small>WASD move · mouse look (click to lock) · click fire · wheel weapon · E teleport · F revive</small>`;
+    if (S.cross) S.cross.classList.toggle('visible', S.buttons.aim && S.peerReadyShown);
+    const html = `<b style="color:${rogerStyle(S.myId).accent}">${rogerStyle(S.myId).label}</b> · ${state}${bars}${wheelHtml(S.weapon)}ENERGY ${row ? row[6] : 100}%<br>SCORE ${S.peerScore.toLocaleString()}${ms ? `<br>MISSION ${ms.id}: ${ms.value}/${ms.goal}` : ''}<br><small>WASD move · mouse look (click to lock) · click fire · wheel weapon · E teleport · F revive</small>`;
     // Written only on change, so the bar's glow animation is not restarted every frame.
     if (html !== S.hudHtml) { S.hudHtml = html; S.hud.innerHTML = html; }
   }
@@ -1104,6 +1322,11 @@ export function createNetSystem(ctx) {
     S.toast = document.createElement('div');
     S.toast.className = 'coop-toast';
     container.appendChild(S.toast);
+    // The aim crosshair, in the host's own style (tornado.css `.hero-crosshair`).
+    S.cross = document.createElement('div');
+    S.cross.className = 'hero-crosshair';
+    S.cross.innerHTML = '<i class="n"></i><i class="s"></i><i class="w"></i><i class="e"></i><b></b>';
+    container.appendChild(S.cross);
 
     // Peer input + host revive key; harmless when not in a session.
     const keyMap = /** @type {Record<string, 'up'|'down'|'left'|'right'>} */ ({ KeyW: 'up', KeyS: 'down', KeyA: 'left', KeyD: 'right' });
@@ -1130,9 +1353,52 @@ export function createNetSystem(ctx) {
       S.buttons.fire = S.buttons.aim = S.buttons.use = false; S.abil = 0; S.holdRevive = false;
     }, opts);
     const canvas = Sim.three.renderer.domElement;
+
+    // Pointer lock: the browser refuses a new lock for a moment after the old
+    // one is released, so a request waits out the cooldown and a rejection is
+    // handled instead of surfacing as an uncaught promise error.
+    document.addEventListener('pointerlockchange', () => {
+      const locked = document.pointerLockElement === canvas;
+      if (S.wasLocked && !locked) S.lockExitAt = performance.now();
+      S.wasLocked = locked;
+    }, opts);
+    document.addEventListener('pointerlockerror', () => { S.lockExitAt = performance.now(); }, opts);
+    /** @returns {void} */
+    const requestLock = () => {
+      if (!mayRequestLock(performance.now(), S.lockExitAt)) { say('Mouse look is cooling down: click again in a moment.'); return; }
+      try {
+        const request = /** @type {any} */ (canvas.requestPointerLock());
+        if (request && typeof request.catch === 'function') request.catch(() => { S.lockExitAt = performance.now(); });
+      } catch { /* unavailable (an embedding frame may forbid it) */ }
+    };
+
+    // Peer panel: the Hero button is a request to the host; every other
+    // world-affecting control is blocked (capture phase, before its own handler).
+    /** @param {Event} e */
+    const guardPeerUi = (e) => {
+      if (S.role !== 'peer') return;
+      const t = e.target instanceof Element ? e.target : null;
+      if (!t || !t.closest('#ui-panel')) return;
+      const el = t.closest('button, input, select, textarea');
+      if (!el) return;
+      if (el.id === 'btn-hero') {
+        e.stopPropagation();
+        e.preventDefault();
+        if (e.type !== 'click') return;
+        if (!S.peerReadyShown) { say('Waiting for the host to be ready.'); return; }
+        S.heroFlag = HERO_FLAG_SECONDS;
+        say('Hero Mode requested from the host.');
+        return;
+      }
+      if (PEER_UI_ALLOWED(el)) return;
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    for (const type of ['click', 'input', 'change']) document.addEventListener(type, guardPeerUi, { capture: true, signal: ctx.signal });
+
     canvas.addEventListener('mousedown', (e) => {
       if (S.role !== 'peer' || !S.peerReadyShown) return;
-      if (document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch { /* unavailable */ } return; }
+      if (document.pointerLockElement !== canvas) { requestLock(); return; }
       if (e.button === 0) S.buttons.fire = true;
       if (e.button === 2) S.buttons.aim = true;
     }, opts);
@@ -1191,7 +1457,6 @@ export function createNetSystem(ctx) {
     S.seed = 0;
     ctx.townSeed = undefined;
   }
-  S.resetting = false;
 
   /** @returns {void} */
   function disposeNet() {
@@ -1199,13 +1464,15 @@ export function createNetSystem(ctx) {
     if (S.panel && S.panel.parentNode) S.panel.parentNode.removeChild(S.panel);
     if (S.hud && S.hud.parentNode) S.hud.parentNode.removeChild(S.hud);
     if (S.toast && S.toast.parentNode) S.toast.parentNode.removeChild(S.toast);
-    S.panel = S.hud = S.toast = S.status = null;
+    if (S.cross && S.cross.parentNode) S.cross.parentNode.removeChild(S.cross);
+    S.panel = S.hud = S.toast = S.status = S.cross = null;
   }
 
   return {
     initNet, updateNet, resetNet, disposeNet,
+    isPeerView: () => S.role === 'peer' && S.peerReadyShown,
     pickTarget, catchPlayer, interceptRogerDeath, coopActive,
-    notifyDamage, hitGuestsArea, splashGuests,
+    notifyDamage, hitGuestsArea, splashGuests, hurtRay, hurtSector, hurtArea,
     /** For tests and the HUD. */
     players, role: () => S.role, seed: () => S.seed
   };

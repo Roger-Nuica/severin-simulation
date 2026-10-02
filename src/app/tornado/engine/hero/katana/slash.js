@@ -254,6 +254,9 @@ export function createKatanaSlash(ctx, env) {
     reach.dirZ = Math.cos(h);
     reach.reach = REACH;
     reach.cosArc = COS_STRIKE_ARC;
+    // The other Rogers in the arc take a cut too (co-op friendly fire, R-053): once
+    // per landing, through health.damagePlayer; nothing outside a room.
+    if (ctx.systems.net) ctx.systems.net.hurtSector('0', reach.x, reach.z, reach.dirX, reach.dirZ, REACH, COS_STRIKE_ARC, 0.05, 'blade', 'melee', 'Cut down by');
     // Aimed again: Roger may have turned or slid since the press.
     cut.point.set(p.x + reach.dirX * REACH * 0.5, reach.y, p.z + reach.dirZ * REACH * 0.5);
     // The slicing core: pieces already lying about are cut again first (so

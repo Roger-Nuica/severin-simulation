@@ -140,6 +140,15 @@ export function createSceneSystem(ctx) {
     controls.minDistance = 15;
     controls.maxDistance = 260;
     controls.target.set(0, 8, 0);
+    // OrbitControls captures the pointer on every press; while the pointer is
+    // locked (first-person aim, a co-op guest's look) the browser has no such
+    // pointer and throws. The capture is only a convenience, so a refusal is ignored.
+    const guardCapture = (/** @type {'setPointerCapture'|'releasePointerCapture'} */ name) => {
+      const native = renderer.domElement[name].bind(renderer.domElement);
+      renderer.domElement[name] = (/** @type {number} */ id) => { try { native(id); } catch { /* no such active pointer */ } };
+    };
+    guardCapture('setPointerCapture');
+    guardCapture('releasePointerCapture');
 
     // Ground term desaturated and darkened versus the original warm brown,
     // for a stormier ambient mood.

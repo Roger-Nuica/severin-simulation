@@ -886,7 +886,9 @@ export function createSimulation(container) {
     cameraSystem.restoreGlide();
     // Before OrbitControls, so the target it damps towards is the moved one.
     updateKeyPan(rawDt);
-    Sim.three.controls.update();
+    // A co-op guest's camera is placed by the net system; OrbitControls would
+    // pull it back to the town's orbit every frame (the "blocked screen").
+    if (!ctx.systems.net.isPeerView()) Sim.three.controls.update();
     if (Chase.active) {
       updateChaseCar(dt);
       updateCarVisuals(dt);

@@ -178,7 +178,13 @@ export function createCameraSystem(ctx) {
     // Hero Mode owns the camera and the pointer: left enabled, OrbitControls
     // would call setPointerCapture on every click while the pointer is
     // locked (first-person aim) and throw an InvalidStateError.
-    Sim.three.controls.enabled = Cinematic.blend <= 0.001 && !(ctx.Hero && ctx.Hero.active);
+    // A co-op guest's follow camera (net/system.js) owns the view likewise.
+    const peerView = !!(ctx.systems.net && ctx.systems.net.isPeerView());
+    Sim.three.controls.enabled = Cinematic.blend <= 0.001 && !(ctx.Hero && ctx.Hero.active) && !peerView;
+
+    // The guest's follow camera is the only writer: no scripted shot and no
+    // tornado orbit may pull it back (it would trail Roger 2 by metres).
+    if (peerView) return;
 
     // A scripted shot outranks both the manual camera and the orbit.
     if (updateCameraBeat(dt)) return;
