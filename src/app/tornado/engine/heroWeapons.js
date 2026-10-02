@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { LIGHTING } from './lightingTuning.js';
 import { HOLE } from './player/blackHole.js';
+import { RIFT } from './gravityRift.js';
 import { tableDamage, shipKindOf } from './health/enemyDamage.js';
 import { createBullets } from './hero/bullets.js';
 import { createFireGun } from './hero/fireGun.js';
@@ -17,10 +18,10 @@ import { createKatanaBladeCut } from './hero/katana/bladeCut.js';
  * ===========================================================================
  * SECTION AM.1 — Hero Mode weapons
  * ===========================================================================
- * Roger carries six weapons (engine/heroMode.js), and the mouse wheel
+ * Roger carries seven weapons (engine/heroMode.js), and the mouse wheel
  * cycles through them on foot (Q did, until it went to Time Slow): the
  * plasma rifle, the minigun, the railgun, the Fire Gun, the Black Hole
- * Gun and the Katana. Whichever is
+ * Gun, the Katana and the Gravitron. Whichever is
  * in hand, the right mouse button raises it into first person as before,
  * and the left button (or Enter) is its trigger. The plasma rifle is
  * heroMode.js's own; this module is the other three and their close-up
@@ -55,17 +56,22 @@ import { createKatanaBladeCut } from './hero/katana/bladeCut.js';
  *    black hole there (engine/player/blackHole.js) for 20 s, at HOLE.cost
  *    energy segments (half the bar). Firing while one is open makes it
  *    collapse and opens the new one behind it.
+ *  - **Gravitron**: aimed the same way; a ring on the ground shows the
+ *    rift's circle, and the trigger opens a gravity rift there
+ *    (engine/gravityRift.js) at RIFT.cost energy segments: everything
+ *    inside floats up, then slams down and explodes. One at a time.
  *
  * Meshes are made through heroMode.js's keepGeo/keepMat, so they go with
  * the rest of a run's resources when Hero Mode ends.
  */
 
-export const WEAPONS = ['rifle', 'minigun', 'railgun', 'fire', 'blackhole', 'katana'];
+// The Gravitron is last so the co-op wheel (net/protocol.js) keeps its indices.
+export const WEAPONS = ['rifle', 'minigun', 'railgun', 'fire', 'blackhole', 'katana', 'gravitron'];
 /** The most a single frame's mouse movement may add to a first-person swipe, pixels (a pointer-lock spike is scaled down to it). */
 const SWIPE_FRAME_MAX_PX = 400;
-const WEAPON_NAMES = { rifle: 'PLASMA RIFLE', minigun: 'MINIGUN', railgun: 'RAILGUN', fire: 'FIRE GUN', blackhole: 'BLACK HOLE GUN', katana: 'KATANA' };
+const WEAPON_NAMES = { rifle: 'PLASMA RIFLE', minigun: 'MINIGUN', railgun: 'RAILGUN', fire: 'FIRE GUN', blackhole: 'BLACK HOLE GUN', katana: 'KATANA', gravitron: 'GRAVITRON' };
 // Each weapon's colour on the HUD's WEAPON line (the railgun is yellow now).
-const WEAPON_COLOURS = { rifle: '', minigun: '#e8c46a', railgun: '#ffd83a', fire: '#ff8a3a', blackhole: '#c99bff', katana: '#9fe8ff' };
+const WEAPON_COLOURS = { rifle: '', minigun: '#e8c46a', railgun: '#ffd83a', fire: '#ff8a3a', blackhole: '#c99bff', katana: '#9fe8ff', gravitron: '#7fffd0' };
 // The railgun's yellow: its coils, its flash, its ring.
 // Held to ~1-1.5 so the core stays yellow instead of clipping to white.
 const RAIL_YELLOW = new THREE.Color(1.5, 1.15, 0.1);
@@ -87,6 +93,10 @@ const RAILGUN = {
 };
 const HOLE_GUN = {
   minRange: 12,            // not opened on his own feet
+  cooldown: 0.6
+};
+const GRAVITRON = {
+  minRange: 12,
   cooldown: 0.6
 };
 
@@ -175,6 +185,11 @@ export function createHeroWeapons(ctx, hero) {
   /** @type {THREE.Group|null} the Black Hole Gun's aim: a point and the no-escape line */
   let holeReticle = null;
   let holeCooldown = 0;
+  /** @type {{group: THREE.Group, muzzle: THREE.Object3D, flash: THREE.Mesh, glow: THREE.MeshBasicMaterial, rings: THREE.Group}|null} */
+  let gravView = null;
+  /** @type {THREE.Group|null} the Gravitron's aim: a point and the rift's circle */
+  let gravReticle = null;
+  let gravCooldown = 0;
   /** @type {ReturnType<typeof createBullets>|null} the rounds in flight */
   let bullets = null;
   /** @type {ReturnType<typeof createFireGun>|null} */
@@ -435,6 +450,47 @@ export function createHeroWeapons(ctx, hero) {
   }
 
   /**
+   * The Gravitron: a pale emitter with three rings stacked along the
+   * barrel, turning, glowing mint when the bar can pay for a shot.
+   * @returns {NonNullable<typeof gravView>}
+   */
+  function buildGravitron() {
+    const group = new THREE.Group();
+    group.name = 'hero_view_gravitron';
+    const body = hero.keepMat(new THREE.MeshStandardMaterial({ color: 0xc8d0d8, metalness: 0.7, roughness: 0.35 }));
+    const glow = /** @type {THREE.MeshBasicMaterial} */ (hero.keepMat(new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 2.2, 1.6) })));
+    /**
+     * @param {THREE.BufferGeometry} geo
+     * @param {THREE.Material} mat
+     * @param {number} x
+     * @param {number} y
+     * @param {number} z
+     * @param {THREE.Object3D} [parent]
+     * @returns {THREE.Mesh}
+     */
+    const add = (geo, mat, x, y, z, parent = group) => {
+      const mesh = new THREE.Mesh(hero.keepGeo(geo), mat);
+      mesh.position.set(x, y, z);
+      mesh.frustumCulled = false;
+      parent.add(mesh);
+      return mesh;
+    };
+    add(new THREE.BoxGeometry(0.2, 0.2, 0.55), body, 0, 0, -0.28);
+    add(new THREE.CylinderGeometry(0.05, 0.05, 0.75, 10).rotateX(Math.PI / 2), body, 0, 0, -0.85);
+    add(new THREE.SphereGeometry(0.06, 14, 10), glow, 0, 0, -1.25);
+    const rings = new THREE.Group();
+    group.add(rings);
+    for (let i = 0; i < 3; i++) {
+      add(new THREE.TorusGeometry(0.11 - i * 0.015, 0.012, 6, 28), glow, 0, 0, -0.62 - i * 0.2, rings);
+    }
+    const { muzzle, flash } = addHandsAndMuzzle(group, -1.25, new THREE.Color(0.8, 2.6, 1.9));
+    group.traverse((child) => { child.castShadow = false; child.receiveShadow = false; });
+    group.visible = false;
+    Sim.three.scene.add(group);
+    return { group, muzzle, flash, glow, rings };
+  }
+
+  /**
    * The bullets, the Fire Gun's flames and the aiming rings, made on first
    * use.
    * @returns {void}
@@ -469,6 +525,20 @@ export function createHeroWeapons(ctx, hero) {
     for (const m of [centre, line]) { m.renderOrder = 3; holeReticle.add(m); }
     holeReticle.visible = false;
     Sim.three.scene.add(holeReticle);
+
+    // The Gravitron's: a point and the rift's circle, what it will lift.
+    gravReticle = new THREE.Group();
+    gravReticle.name = 'hero_gravitron_reticle';
+    const gravMat = hero.keepMat(new THREE.MeshBasicMaterial({
+      color: new THREE.Color(0.5, 1.8, 1.3), transparent: true, opacity: 0.7,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3
+    }));
+    const gravCentre = new THREE.Mesh(hero.keepGeo(new THREE.RingGeometry(2.4, 3.2, 40).rotateX(-Math.PI / 2)), gravMat);
+    const gravLine = new THREE.Mesh(hero.keepGeo(new THREE.RingGeometry(RIFT.radius - 0.6, RIFT.radius, 96).rotateX(-Math.PI / 2)), gravMat);
+    for (const m of [gravCentre, gravLine]) { m.renderOrder = 3; gravReticle.add(m); }
+    gravReticle.visible = false;
+    Sim.three.scene.add(gravReticle);
   }
 
   /**
@@ -480,6 +550,7 @@ export function createHeroWeapons(ctx, hero) {
     if (current() === 'minigun') return minigunView || (minigunView = buildMinigun());
     if (current() === 'railgun') return railgunView || (railgunView = buildRailgun());
     if (current() === 'blackhole') return holeView || (holeView = buildHoleGun());
+    if (current() === 'gravitron') return gravView || (gravView = buildGravitron());
     if (current() === 'fire') {
       buildEffects();
       return fireView || (fireView = /** @type {NonNullable<typeof fireGun>} */ (fireGun).build(addHandsAndMuzzle));
@@ -498,9 +569,10 @@ export function createHeroWeapons(ctx, hero) {
     if (!on) triggerUp();
     buildEffects();
     const inHand = on ? view() : null;
-    for (const vm of [minigunView, railgunView, holeView, fireView]) if (vm) vm.group.visible = vm === inHand;
+    for (const vm of [minigunView, railgunView, holeView, gravView, fireView]) if (vm) vm.group.visible = vm === inHand;
     if (reticle && !on) reticle.visible = false;
     if (holeReticle && !on) holeReticle.visible = false;
+    if (gravReticle && !on) gravReticle.visible = false;
   }
 
   /**
@@ -539,6 +611,7 @@ export function createHeroWeapons(ctx, hero) {
       : w === 'railgun' ? ' · click to call a bolt down'
         : w === 'fire' ? ' · hold to burn · the only thing the Yeti fears'
           : w === 'blackhole' ? ` · ${HOLE.cost * 10}% energy a shot`
+            : w === 'gravitron' ? ` · ${RIFT.cost * 10}% energy a shot · everything in the circle floats up, then falls and explodes`
             : w === 'katana' ? ' · drawn · RIGHT-CLICK for first person · hold the left button and drag a line to cut along it' : '';
     hero.flashMessage(`${WEAPON_NAMES[w]}${extra}`);
   }
@@ -570,6 +643,10 @@ export function createHeroWeapons(ctx, hero) {
     }
     if (w === 'blackhole') {
       fireHole();
+      return true;
+    }
+    if (w === 'gravitron') {
+      fireGravitron();
       return true;
     }
     return false;
@@ -912,6 +989,49 @@ export function createHeroWeapons(ctx, hero) {
     ctx.systems.heroSound.playZap();
   }
 
+  /**
+   * The Gravitron: a gravity rift where the crosshair meets the town, paid
+   * for from the energy bar. Refused at no cost while one is open.
+   * @returns {void}
+   */
+  function fireGravitron() {
+    if (gravCooldown > 0) return;
+    if (!railHasPoint) {
+      hero.flashMessage('GRAVITRON — aim at the ground or a target');
+      return;
+    }
+    const r = hero.rogerPosition();
+    if (Math.hypot(railPoint.x - r.x, railPoint.z - r.z) < GRAVITRON.minRange) {
+      hero.flashMessage('TOO CLOSE — aim further out');
+      return;
+    }
+    if (ctx.systems.gravityRift.isOpen()) {
+      ctx.systems.heroSound.playDryClick();
+      hero.flashMessage('GRAVITRON — a rift is already open');
+      return;
+    }
+    const energy = ctx.systems.energy.hero;
+    if (!energy.canSpend(RIFT.cost)) {
+      ctx.systems.heroSound.playDryClick();
+      hero.flashMessage(`GRAVITRON — needs ${RIFT.cost * 10}% energy`);
+      return;
+    }
+    if (!ctx.systems.gravityRift.openAt(railPoint.x, railPoint.z)) return;
+    energy.spend(RIFT.cost);
+    ctx.systems.energy.glow();
+    gravCooldown = GRAVITRON.cooldown;
+    state.recoil = 1;
+    hero.flashMessage(`🪐 GRAVITY RIFT · ${RIFT.radius} m · everything inside goes up`);
+    const vm = view();
+    if (vm) {
+      vm.flash.visible = true;
+      vm.flash.material.opacity = 1;
+      vm.flash.scale.setScalar(2.4);
+      vm.flash.userData.life = 0.18;
+    }
+    ctx.systems.heroSound.playZap();
+  }
+
   // ---------------------------------------------------------------------
   // Per frame
   // ---------------------------------------------------------------------
@@ -978,10 +1098,17 @@ export function createHeroWeapons(ctx, hero) {
       holeView.glow.color.setRGB(1.3 * ready, 0.5 * ready, 2.4 * ready);
     }
 
-    // The railgun's ring (and the Black Hole Gun's): where the crosshair
-    // meets the town.
+    gravCooldown = Math.max(0, gravCooldown - rawDt);
+    if (gravView) {
+      gravView.rings.rotation.z += rawDt * 3;
+      const ready = ctx.systems.energy.hero.canSpend(RIFT.cost) && !ctx.systems.gravityRift.isOpen() ? 1 : 0.25;
+      gravView.glow.color.setRGB(0.6 * ready, 2.2 * ready, 1.6 * ready);
+    }
+
+    // The railgun's ring (and the Black Hole Gun's and the Gravitron's):
+    // where the crosshair meets the town.
     railHasPoint = false;
-    if (aiming && (current() === 'railgun' || current() === 'blackhole')) {
+    if (aiming && (current() === 'railgun' || current() === 'blackhole' || current() === 'gravitron')) {
       const hit = hero.traceAim(cam.position, aimDir);
       if (hit.kind !== 'sky') {
         railPoint.copy(cam.position).addScaledVector(aimDir, hit.t);
@@ -992,6 +1119,10 @@ export function createHeroWeapons(ctx, hero) {
       holeReticle.visible = railHasPoint && current() === 'blackhole';
       if (holeReticle.visible) holeReticle.position.set(railPoint.x, 0.08, railPoint.z);
     }
+    if (gravReticle) {
+      gravReticle.visible = railHasPoint && current() === 'gravitron';
+      if (gravReticle.visible) gravReticle.position.set(railPoint.x, 0.08, railPoint.z);
+    }
     if (reticle) {
       reticle.visible = railHasPoint && current() === 'railgun';
       if (railHasPoint) {
@@ -1000,7 +1131,7 @@ export function createHeroWeapons(ctx, hero) {
       }
     }
 
-    for (const vm of [minigunView, railgunView, holeView, fireView]) {
+    for (const vm of [minigunView, railgunView, holeView, gravView, fireView]) {
       if (!vm || !vm.flash.visible) continue;
       vm.flash.userData.life -= rawDt;
       vm.flash.material.opacity = Math.max(0, vm.flash.userData.life * 20);
@@ -1016,6 +1147,7 @@ export function createHeroWeapons(ctx, hero) {
     const w = current();
     if (w === 'minigun') return `${WEAPON_NAMES[w]} · ${state.ammo}${ctx.systems.time.scale('world') < 1 ? ' · ⏱' : ''}`;
     if (w === 'blackhole') return `${WEAPON_NAMES[w]} · ${HOLE.cost * 10}%${ctx.systems.blackHole.isOpen() ? ' · 🕳️' : ''}`;
+    if (w === 'gravitron') return `${WEAPON_NAMES[w]} · ${RIFT.cost * 10}%${ctx.systems.gravityRift.isOpen() ? ' · 🪐' : ''}`;
     return WEAPON_NAMES[w];
   }
 
@@ -1028,7 +1160,7 @@ export function createHeroWeapons(ctx, hero) {
   function isHot(kind) {
     const w = current();
     if (w === 'minigun') return kind === 'person' || kind === 'terminator' || kind === 'unit' || kind === 'enemy';
-    if (w === 'railgun' || w === 'blackhole') return kind !== 'sky';
+    if (w === 'railgun' || w === 'blackhole' || w === 'gravitron') return kind !== 'sky';
     if (w === 'fire') return kind === 'person' || kind === 'enemy' || kind === 'building';
     // The Katana's crosshair (first person, at the centre) never turns red.
     return null;
@@ -1064,7 +1196,7 @@ export function createHeroWeapons(ctx, hero) {
     bladeUi.clear();
     state.firing = false;
     state.shown = false;
-    for (const vm of [minigunView, railgunView, holeView, fireView]) if (vm) Sim.three.scene.remove(vm.group);
+    for (const vm of [minigunView, railgunView, holeView, gravView, fireView]) if (vm) Sim.three.scene.remove(vm.group);
     if (bullets) bullets.dispose();
     if (fireGun) fireGun.dispose();
     if (pieces) pieces.dispose();
@@ -1076,10 +1208,13 @@ export function createHeroWeapons(ctx, hero) {
     bladeUi.dispose();
     if (reticle) Sim.three.scene.remove(reticle);
     if (holeReticle) Sim.three.scene.remove(holeReticle);
+    if (gravReticle) Sim.three.scene.remove(gravReticle);
     minigunView = null;
     railgunView = null;
     holeView = null;
     holeReticle = null;
+    gravView = null;
+    gravReticle = null;
     fireView = null;
     bullets = null;
     fireGun = null;

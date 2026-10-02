@@ -7,8 +7,9 @@ import { BLAST_SIZE } from './player/energy.js';
  * ===========================================================================
  * SECTION GR — Gravity Rift
  * ===========================================================================
- * A manually triggered disaster (btn-gravity-rift), opened under what the
- * camera is looking at. Inside a circle gravity lets go: cars, people, loose
+ * Opened by Roger's Gravitron (heroWeapons.js), aimed like the Black Hole
+ * Gun: a ring on the ground shows the circle and the trigger opens it
+ * there (`openAt`), one at a time. Inside the circle gravity lets go: cars, people, loose
  * debris and the alien crew float up, turning slowly, to between 10 and
  * 24 m. Then it comes back all at once: everything is slammed down, and
  * everything that went up blows up where it lands (owner's request,
@@ -36,7 +37,9 @@ import { BLAST_SIZE } from './player/energy.js';
  * trees and the other enemies are left alone.
  */
 
-const RIFT = {
+export const RIFT = {
+  // Energy segments a shot (10% each): the Gravitron's price.
+  cost: 4,
   warningSeconds: 2.2,
   riseSeconds: 6,
   hangSeconds: 1.4,
@@ -46,8 +49,6 @@ const RIFT = {
   dropMaxSeconds: 3.5,
   fadeSeconds: 1.6,
   radius: 40,
-  // Opened under the camera's target, kept this close to the middle of town.
-  reach: 90,
   height: [10, 24],
   // Metres a second at most while rising, and how hard it pulls to its height.
   riseSpeed: 5,
@@ -105,7 +106,8 @@ const COLUMN_FRAGMENT = /* glsl */`
  * @returns {{
  *   initGravityRift: () => void,
  *   updateGravityRift: (dt: number) => void,
- *   triggerGravityRift: () => void,
+ *   openAt: (x: number, z: number) => boolean,
+ *   isOpen: () => boolean,
  *   resetGravityRift: () => void,
  *   disposeGravityRift: () => void,
  *   gravityRiftZone: () => null|{x: number, z: number, radius: number, phase: string}
@@ -178,9 +180,6 @@ export function createGravityRiftSystem(ctx) {
     banner.className = 'downburst-banner';
     banner.innerHTML = '<span class="title"></span><span class="sub"></span>';
     bannerHost(container).appendChild(banner);
-
-    const button = document.getElementById('btn-gravity-rift');
-    if (button) button.addEventListener('click', () => triggerGravityRift(), { signal: ctx.signal });
   }
 
   /**
@@ -196,18 +195,6 @@ export function createGravityRiftSystem(ctx) {
     banner.classList.toggle('alert', alert);
     banner.classList.add('visible');
     state.bannerTimer = RIFT.bannerSeconds;
-  }
-
-  /**
-   * @param {boolean} on
-   * @returns {void}
-   */
-  function setButtonActive(on) {
-    const button = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-gravity-rift'));
-    if (!button) return;
-    button.classList.toggle('active', on);
-    button.setAttribute('aria-pressed', on ? 'true' : 'false');
-    button.disabled = on;
   }
 
   /**
@@ -230,26 +217,19 @@ export function createGravityRiftSystem(ctx) {
   }
 
   /**
-   * Opens one under what the camera is looking at. Ignored while one is
-   * already open.
-   * @returns {void}
+   * Opens one at (x, z): the Gravitron's shot. Refused while one is open.
+   * @param {number} x
+   * @param {number} z
+   * @returns {boolean} whether it opened
    */
-  function triggerGravityRift() {
-    if (state.phase !== 'idle') return;
-    const target = Sim.three.controls ? Sim.three.controls.target : scratch.set(0, 0, 0);
-    let x = target.x;
-    let z = target.z;
-    const r = Math.hypot(x, z);
-    if (r > RIFT.reach) {
-      x *= RIFT.reach / r;
-      z *= RIFT.reach / r;
-    }
+  function openAt(x, z) {
+    if (state.phase !== 'idle') return false;
     Object.assign(state, { phase: 'warning', age: 0, x, z });
     state.counts = { car: 0, person: 0, debris: 0, alien: 0 };
     if (column) column.position.set(x, 0, z);
     if (ring) ring.position.set(x, 0.15, z);
     showBanner('⚠ GRAVITY RIFT', 'Gravity is letting go · get out of the circle', true);
-    setButtonActive(true);
+    return true;
   }
 
   /**
@@ -514,7 +494,6 @@ export function createGravityRiftSystem(ctx) {
       fall(dt);
     } else if (state.phase === 'fading' && state.age >= RIFT.fadeSeconds) {
       state.phase = 'idle';
-      setButtonActive(false);
     }
     updateVisuals();
   }
@@ -567,7 +546,6 @@ export function createGravityRiftSystem(ctx) {
     if (column) column.visible = false;
     if (ring) ring.visible = false;
     if (banner) banner.classList.remove('visible');
-    setButtonActive(false);
   }
 
   /** @returns {void} */
@@ -595,6 +573,6 @@ export function createGravityRiftSystem(ctx) {
   }
 
   return {
-    initGravityRift, updateGravityRift, triggerGravityRift, resetGravityRift, disposeGravityRift, gravityRiftZone
+    initGravityRift, updateGravityRift, openAt, isOpen: () => state.phase !== 'idle', resetGravityRift, disposeGravityRift, gravityRiftZone
   };
 }
