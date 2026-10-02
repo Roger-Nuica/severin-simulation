@@ -63,7 +63,11 @@ const MOTHER = {
   scorchY: 0.035,
   score: 3000,
   colour: new THREE.Color(2.2, 5.5, 3),
-  lightPeak: 900,
+  // The beam's glow, dimmed on request (2026-10-02: it washed the screen
+  // out): light 900, beam opacity 0.8, foot 0.6 before.
+  lightPeak: 300,
+  beamOpacity: 0.4,
+  footOpacity: 0.3,
   lightDistance: 90,
   // Hull points: a normal plasma shot takes 1, a mega beam 5 -- fifteen
   // shots, or three mega beams. (It was mega beams only, which read as the
@@ -192,7 +196,7 @@ export function createMothershipSystem(ctx) {
     const beamGeo = new THREE.CylinderGeometry(MOTHER.beamRadius * 0.6, MOTHER.beamRadius, 1, 16, 1, true);
     beamGeo.translate(0, 0.5, 0);
     beam = new THREE.Mesh(beamGeo, new THREE.MeshBasicMaterial({
-      color: MOTHER.colour.clone(), transparent: true, opacity: 0.8,
+      color: MOTHER.colour.clone(), transparent: true, opacity: MOTHER.beamOpacity,
       blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
     }));
     beam.name = 'mothership_beam';
@@ -201,7 +205,7 @@ export function createMothershipSystem(ctx) {
     Sim.three.scene.add(beam);
 
     foot = new THREE.Mesh(new THREE.CircleGeometry(MOTHER.cutRadius, 24), new THREE.MeshBasicMaterial({
-      color: MOTHER.colour.clone(), transparent: true, opacity: 0.6,
+      color: MOTHER.colour.clone(), transparent: true, opacity: MOTHER.footOpacity,
       blending: THREE.AdditiveBlending, depthWrite: false
     }));
     foot.rotation.x = -Math.PI / 2;
@@ -507,7 +511,7 @@ export function createMothershipSystem(ctx) {
       foot.visible = true;
       placeBeam();
       beam.scale.x = beam.scale.z = 0.15 + 0.85 * u * u;
-      beam.material.opacity = (0.3 + 0.5 * u) * (0.75 + 0.25 * Math.random());
+      beam.material.opacity = MOTHER.beamOpacity * (0.375 + 0.625 * u) * (0.75 + 0.25 * Math.random());
       light.intensity = MOTHER.lightPeak * u;
       ctx.systems.gamefeel.addShake(0.3 * u, 0.3);
       if (u >= 1) {
@@ -530,7 +534,7 @@ export function createMothershipSystem(ctx) {
       g.position.x += (contact.x - g.position.x) * k;
       g.position.z += (contact.z - g.position.z) * k;
       placeBeam();
-      beam.material.opacity = 0.8 * (0.8 + 0.2 * Math.random());
+      beam.material.opacity = MOTHER.beamOpacity * (0.8 + 0.2 * Math.random());
       light.intensity = MOTHER.lightPeak * (0.85 + 0.15 * Math.random());
       scorch.scale.x = Math.max(0.001, u * scorch.userData.length);
       ctx.systems.gamefeel.addShake(0.55, 0.2);

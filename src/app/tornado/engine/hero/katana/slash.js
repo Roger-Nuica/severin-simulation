@@ -1,5 +1,6 @@
 // @ts-check
 import * as THREE from 'three';
+import { HERO } from '../config.js';
 import { createKatanaTargets } from './targets.js';
 
 /**
@@ -19,8 +20,12 @@ import { createKatanaTargets } from './targets.js';
  *    chip (a plain `blade` hit, D1: see targets.js). The strike lands
  *    STRIKE_DELAY seconds after the press, at the blade's strike (the
  *    model's wind-up), not at the press.
- *  - No lunge: Roger stays where he stands (the auto-lunge was removed on
- *    request, 2026-10-02; REACH was raised from 3 m to 6 m instead).
+ *  - The auto-lunge: during that wind-up Roger slides towards the nearest
+ *    cuttable alien in front (looked for up to LUNGE_MAX metres away), at
+ *    most LUNGE_SLIDE metres -- a nudge, barely noticed -- stopping
+ *    LUNGE_STOP metres short. Every step is tested with the movement helpers (blockedAt,
+ *    pushOut) so he never enters a building or leaves HERO.bound, and nothing
+ *    runs while he is dazed, frozen, driving or dying.
  *  - The cooldown is COOLDOWN seconds on the weapons' real-time clock
  *    (R-029, R-032): Time Slow does not stretch it. A held button does not
  *    repeat.
@@ -44,6 +49,14 @@ import { createKatanaTargets } from './targets.js';
 const REACH = 6.0;
 /** Half-angle of the forward arc the cut lands in, cosine of 60 degrees. */
 const COS_STRIKE_ARC = 0.5;
+/** Half-angle of the arc the lunge looks in, cosine of 45 degrees (narrower, so the cut still lands). */
+const COS_LUNGE_ARC = Math.SQRT1_2;
+/** The furthest an alien can be for Roger to lunge at it, metres. */
+const LUNGE_MAX = 6.0;
+/** The furthest the lunge slides him, metres: a nudge (it was up to LUNGE_MAX until 2026-10-02). */
+const LUNGE_SLIDE = 0.4;
+/** How close the lunge brings him to the alien's centre, metres (inside REACH). */
+const LUNGE_STOP = 1.6;
 /** The blade's height above Roger's feet, metres. */
 const BLADE_HEIGHT = 1.1;
 /** Real seconds between slashes. */
@@ -78,7 +91,9 @@ const ALIEN_CHEST = 0.7;
  * @property {() => number} heading Roger's heading, radians (S.state.heading)
  * @property {() => boolean} canAct on foot, upright and not frozen
  * @property {() => ({slash: (kind: SlashKind) => boolean, isSlashing: () => boolean}|null)} rig
- * @property {() => THREE.Vector3} position Roger's position
+ * @property {() => THREE.Vector3} position Roger's position, mutated by the lunge
+ * @property {(x: number, z: number, pad: number) => boolean} blockedAt
+ * @property {(p: THREE.Vector3, pad: number) => void} pushOut
  * @property {() => (import('./pieces.js').KatanaPieces|null)} [pieces] the
  *   slicing core (made on first use by heroWeapons.js); without it a cut alien
  *   is simply removed
@@ -142,7 +157,7 @@ export function createKatanaSlash(ctx, env) {
   const targets = createKatanaTargets(ctx);
   /** @type {CutPlane} */
   const cut = { point: new THREE.Vector3(), normal: new THREE.Vector3(0, 0, 1), kind: 'vertical' };
-  /** The reach query, one object reused for every strike. */
+  /** The reach query, one object reused for the lunge search and the strike. */
   const reach = { x: 0, z: 0, y: BLADE_HEIGHT, dirX: 0, dirZ: 1, reach: REACH, cosArc: COS_STRIKE_ARC };
   const swipe = { x: 0, y: 0 };
   const right = new THREE.Vector3();
@@ -155,8 +170,8 @@ export function createKatanaSlash(ctx, env) {
   let cooldown = 0;
   let lastSlashAt = -Infinity;
   let chain = 0;
-  /** The strike waiting for its moment. */
-  const pending = { active: false, timer: 0 };
+  /** The strike waiting for its moment, and the lunge on the way to it. */
+  const pending = { active: false, timer: 0, lunge: 0, lungeSpeed: 0, dirX: 0, dirZ: 0 };
 
   /**
    * Aims the shared cut plane: the swipe's direction on screen (right and
@@ -185,6 +200,44 @@ export function createKatanaSlash(ctx, env) {
     if (cut.normal.lengthSq() < 1e-6) cut.normal.set(Math.cos(h), 0, -Math.sin(h));
     cut.normal.normalize();
     cut.kind = kind;
+  }
+
+  /**
+   * The nearest cuttable alien or civilian in front, for the lunge.
+   * @param {THREE.Vector3} p Roger
+   * @param {number} h his heading
+   * @returns {boolean} whether there is one; if so `pending.dir*` points at it
+   *   and `pending.lunge` is how far to slide
+   */
+  function aimLunge(p, h) {
+    reach.x = p.x;
+    reach.z = p.z;
+    reach.y = BLADE_HEIGHT + p.y;
+    reach.dirX = Math.sin(h);
+    reach.dirZ = Math.cos(h);
+    reach.reach = LUNGE_MAX;
+    reach.cosArc = COS_LUNGE_ARC;
+    const f = targets.find(reach);
+    let best = Infinity;
+    for (let i = 0; i < f.cuttableCount; i++) {
+      const a = f.cuttable[i];
+      // An alien stands at its `root`, a civilian at its `mesh` (no registry kind).
+      const at = a.root ? a.root.position : a.mesh.position;
+      const dx = at.x - p.x;
+      const dz = at.z - p.z;
+      const d = Math.hypot(dx, dz);
+      if (d < best) {
+        best = d;
+        pending.dirX = dx / (d || 1);
+        pending.dirZ = dz / (d || 1);
+      }
+      f.cuttable[i] = null;
+    }
+    for (let i = 0; i < f.parryCount; i++) f.parryable[i] = null;
+    if (best === Infinity) return false;
+    pending.lunge = Math.min(LUNGE_SLIDE, Math.max(0, best - LUNGE_STOP));
+    pending.lungeSpeed = pending.lunge / STRIKE_DELAY;
+    return true;
   }
 
   /**
@@ -221,6 +274,28 @@ export function createKatanaSlash(ctx, env) {
   }
 
   /**
+   * One step of the lunge, along the line to the alien, stopped by anything
+   * solid and kept inside the map.
+   * @param {number} dt real seconds
+   * @returns {void}
+   */
+  function lungeStep(dt) {
+    if (pending.lunge <= 0) return;
+    const p = env.position();
+    const step = Math.min(pending.lunge, pending.lungeSpeed * dt);
+    const x = p.x + pending.dirX * step;
+    const z = p.z + pending.dirZ * step;
+    if (env.blockedAt(x, z, HERO.pad)) {
+      pending.lunge = 0;
+      return;
+    }
+    p.x = x;
+    p.z = z;
+    pending.lunge -= step;
+    env.pushOut(p, HERO.pad * 0.5);
+  }
+
+  /**
    * The button came up: a quick slash, if it is one and the blade is ready.
    * @param {KatanaRelease} r
    * @returns {boolean} whether a slash started
@@ -252,6 +327,9 @@ export function createKatanaSlash(ctx, env) {
     lastSlashAt = clock;
     pending.active = true;
     pending.timer = STRIKE_DELAY;
+    pending.lunge = 0;
+    pending.lungeSpeed = 0;
+    aimLunge(env.position(), env.heading());
     if (ctx.systems.katanaSound) ctx.systems.katanaSound.playSwing();
     return true;
   }
@@ -270,9 +348,11 @@ export function createKatanaSlash(ctx, env) {
       cancel();
       return;
     }
+    lungeStep(dt);
     pending.timer -= dt;
     if (pending.timer <= 0) {
       pending.active = false;
+      pending.lunge = 0;
       land();
     }
   }
@@ -284,6 +364,7 @@ export function createKatanaSlash(ctx, env) {
    */
   function cancel() {
     pending.active = false;
+    pending.lunge = 0;
     cooldown = 0;
     chain = 0;
     lastSlashAt = -Infinity;
