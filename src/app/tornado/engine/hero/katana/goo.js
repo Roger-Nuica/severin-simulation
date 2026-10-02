@@ -58,7 +58,7 @@ function createSplatTexture() {
 
 /**
  * @typedef {Object} KatanaGoo
- * @property {(from: THREE.Vector3, to: THREE.Vector3, normal: THREE.Vector3) => number} burst
+ * @property {(from: THREE.Vector3, to: THREE.Vector3, normal: THREE.Vector3, human?: boolean) => number} burst
  *   a burst along the cut line from `from` to `to` (world metres), the plane's unit normal given;
  *   how many particles were emitted
  * @property {(dt: number) => void} update world seconds
@@ -93,6 +93,8 @@ export function createKatanaGoo(ctx) {
   const svz = new Float32Array(S);
   const sLeft = new Float32Array(S);
   const sOwed = new Float32Array(S);
+  /** Whether each drip source bleeds red (a person) rather than green. */
+  const sRed = new Uint8Array(S);
   let nextSource = 0;
   let sourcesLive = 0;
 
@@ -195,14 +197,15 @@ export function createKatanaGoo(ctx) {
    * @param {number} size
    * @param {number} life
    * @param {number} kind SEED_DROPLET or SEED_DRIP
+   * @param {boolean} red red blood (a person) instead of alien green
    * @returns {boolean} false when the pool had no free slot
    */
-  function emit(x, y, z, vx, vy, vz, size, life, kind) {
+  function emit(x, y, z, vx, vy, vz, size, life, kind, red) {
     const i = claim();
     if (i < 0) return false;
     const k = Math.random();
-    const b = CFG.colourBright;
-    const d = CFG.colourDark;
+    const b = red ? CFG.bloodBright : CFG.colourBright;
+    const d = red ? CFG.bloodDark : CFG.colourDark;
     const p = i * 3;
     pool.positions[p] = x;
     pool.positions[p + 1] = y;
@@ -243,9 +246,10 @@ export function createKatanaGoo(ctx) {
    * @param {number} z
    * @param {THREE.Vector3} normal the cut plane's unit normal
    * @param {number} sign which half: 1 or -1
+   * @param {boolean} red red blood (a person)
    * @returns {void}
    */
-  function startSource(x, y, z, normal, sign) {
+  function startSource(x, y, z, normal, sign, red) {
     const i = nextSource;
     nextSource = (i + 1) % S;
     // Follows the half it bleeds from: the pieces' own push and pop (pieces.js).
@@ -260,6 +264,7 @@ export function createKatanaGoo(ctx) {
     if (sLeft[i] <= 0) sourcesLive++;
     sLeft[i] = between(CFG.dripLife);
     sOwed[i] = Math.random() * CFG.dripEvery;
+    sRed[i] = red ? 1 : 0;
   }
 
   /**
@@ -268,9 +273,10 @@ export function createKatanaGoo(ctx) {
    * @param {THREE.Vector3} from one end of the cut line, world metres
    * @param {THREE.Vector3} to the other end
    * @param {THREE.Vector3} normal the cut plane's unit normal
+   * @param {boolean} [human] a person's cut: red blood instead of alien green
    * @returns {number} how many particles were emitted
    */
-  function burst(from, to, normal) {
+  function burst(from, to, normal, human = false) {
     const length = from.distanceTo(to);
     const wanted = Math.min(CFG.burstMax, Math.max(CFG.burstMin, Math.round(length * CFG.perMetre)));
     // Never past what the shared budget has left (R-048).
@@ -288,7 +294,7 @@ export function createKatanaGoo(ctx) {
         normal.x * speed + along.x + (Math.random() - 0.5) * 0.8,
         normal.y * speed + between(CFG.lift),
         normal.z * speed + along.z + (Math.random() - 0.5) * 0.8,
-        between(CFG.size), between(CFG.life), SEED_DROPLET
+        between(CFG.size), between(CFG.life), SEED_DROPLET, human
       );
       if (!ok) break;
       made++;
@@ -298,8 +304,8 @@ export function createKatanaGoo(ctx) {
       const per = Math.floor(CFG.dripSources / 2);
       for (let k = 0; k < per; k++) {
         line.lerpVectors(from, to, (k + 0.5) / per);
-        startSource(line.x, line.y, line.z, normal, 1);
-        startSource(line.x, line.y, line.z, normal, -1);
+        startSource(line.x, line.y, line.z, normal, 1, human);
+        startSource(line.x, line.y, line.z, normal, -1, human);
       }
     }
     // One decal under the middle of the line so even a short cut leaves a mark.
@@ -334,7 +340,7 @@ export function createKatanaGoo(ctx) {
       while (sOwed[i] >= CFG.dripEvery) {
         sOwed[i] -= CFG.dripEvery;
         if (ctx.systems.caps.particleRoom() <= 0) { sOwed[i] = 0; break; }
-        if (!emit(sx[i], sy[i], sz[i], svx[i] * 0.2, 0, svz[i] * 0.2, CFG.dripSize, 0.9, SEED_DRIP)) break;
+        if (!emit(sx[i], sy[i], sz[i], svx[i] * 0.2, 0, svz[i] * 0.2, CFG.dripSize, 0.9, SEED_DRIP, sRed[i] === 1)) break;
       }
     }
   }

@@ -39,7 +39,9 @@ export const PERSON_SCALE = PERSON.height / PERSON_BUILT_HEIGHT;
  * @param {Object} ctx
  * @returns {{
  *   createPerson: (x: number, z: number, index?: number) => Object,
- *   explodePerson: (person: Object) => void
+ *   explodePerson: (person: Object) => void,
+ *   eachCuttable: (visit: (person: Object) => void) => void,
+ *   slicePerson: (person: Object, takeOver?: (root: THREE.Object3D, plane?: Object, skin?: THREE.Material) => void, plane?: Object) => boolean
  * }}
  */
 export function createPeopleSystem(ctx) {
@@ -188,6 +190,55 @@ export function createPeopleSystem(ctx) {
     if (envIdx !== -1) ctx.Environment.people.splice(envIdx, 1);
   }
 
+  /**
+   * Every standing civilian, for the Katana (hero/katana/targets.js): the
+   * additive visitor, in the style of the aliens' `eachCuttable`. Anyone
+   * carried off, lifted, a statue or one of Action Hero's named extras is
+   * left alone. The caller does its own distance reject; no list is built.
+   * @param {(person: any) => void} visit
+   * @returns {void}
+   */
+  function eachCuttable(visit) {
+    const people = /** @type {any[]} */ (ctx.Environment.people);
+    for (let i = 0; i < people.length; i++) {
+      const person = people[i];
+      if (!person.mesh.parent || person.captureState !== 'grounded' || person.abducted || person.statue || person.heroName) continue;
+      visit(person);
+    }
+  }
+
+  /**
+   * A civilian cut by the Katana: taken out of both lists exactly as
+   * `explodePerson` does, but cut in two instead of exploded when the
+   * slicing core's `takeOver` is given (the pieces bake the figure, so its
+   * own geometry and materials are freed here afterwards). Without
+   * `takeOver` it falls back to `explodePerson`. No score here: the caller
+   * scores the kill once.
+   * @param {any} person
+   * @param {(root: THREE.Object3D, plane?: any, skin?: THREE.Material) => void} [takeOver]
+   * @param {any} [plane] the cut's plane, read at once by `takeOver`
+   * @returns {boolean} whether a person was removed
+   */
+  function slicePerson(person, takeOver, plane) {
+    if (!person.mesh.parent) return false;
+    if (!takeOver) {
+      explodePerson(person);
+      return true;
+    }
+    const root = person.mesh;
+    takeOver(root, plane);
+    root.removeFromParent();
+    root.traverse((/** @type {any} */ child) => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) child.material.dispose();
+    });
+    const objIdx = Sim.objects.indexOf(person);
+    if (objIdx !== -1) Sim.objects.splice(objIdx, 1);
+    const envIdx = ctx.Environment.people.indexOf(person);
+    if (envIdx !== -1) ctx.Environment.people.splice(envIdx, 1);
+    return true;
+  }
+
   // People are lightning's primary targets (strikeTargets.js): the scripted
   // opening strikes aim at them, and a random strike landing beside one
   // still hits them.
@@ -201,5 +252,5 @@ export function createPeopleSystem(ctx) {
     onStruck: explodePerson
   });
 
-  return { createPerson, explodePerson };
+  return { createPerson, explodePerson, eachCuttable, slicePerson };
 }

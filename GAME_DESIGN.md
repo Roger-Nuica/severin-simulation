@@ -28,11 +28,13 @@ The Lightning tile turns the pointer into a strike reticle. The player can call 
 
 The disaster panel offers distinct events rather than starting them with the storm: electrical weather, the Final Boss wedge, Doomsday, Fujiwhara, Ignite, earthquake, dam break, meteors, downburst, lightning, gas-main rupture and Landing Support. Earthquakes open a chasm and can expose lava; a tornado crossing lava becomes a Lavanado. A dam break sends a destructive flood through town, while a Blizzard freezes water, lava and living things. Meteors leave craters, and a downburst drives straight-line wind across a chosen area.
 
+A waterspout rises over the lake behind the dam only when the player calls it (its button or a scenario); it never appears by itself during an Outbreak.
+
 The town is a closed basin behind the dam. The flood is opaque and turbulent, carries wreckage, damages buildings piece by piece, and eventually drains so the dam can be broken again. Fire is put out by flood water; electricity in flood water becomes a hazard; lava and flood water can create a steam blast.
 
 ## Landing Support and special events
 
-Landing Support lets the player call Samurai Support or a Rocket Strike at a chosen point. The samurai protect the town from aliens and the T-Rex while ignoring civilians, Roger and the Cyber Yeti. The rocket arrives in a filmed descent and devastates its impact area; enemies still follow their own damage rules.
+Landing Support lets the player call Samurai Support or a Rocket Strike at a chosen point (each has its own cooldown). The samurai ship leaves once the last samurai is down the ramp; the squad stays on the ground until no hostile has been near for a few seconds, a time limit passes or all have fallen. The samurai protect the town from aliens and the T-Rex while ignoring civilians, Roger and the Cyber Yeti. The rocket arrives in a filmed descent and devastates its impact area; enemies still follow their own damage rules.
 
 Smooth Criminal is a staged interruption to the disaster. A violet-lit platform rises, the music takes over, and townspeople and aliens dance. Fighting pauses while the peace holds. If Roger breaks it by killing someone, the dancer ascends and detonates in a violet spectacle; choosing the event again ends it quietly.
 
@@ -58,7 +60,7 @@ Destruction earns points, and large set pieces award bonuses. A short chain of d
 
 ## Hero Mode
 
-Roger arrives at a safe spot and must reach the marked bunker. He can choose between the plasma rifle, minigun, railgun, Fire Gun, Black Hole Gun and Katana using the weapon wheel. The right mouse button raises or holsters the weapon; the trigger fires. The plasma rifle charges into a MEGA BEAM, the minigun can enter Bullet Time, the railgun calls lightning, the Fire Gun projects the T-Rex's flame, and the Black Hole Gun draws objects into a vortex. The Katana is a melee weapon that costs no energy and cuts aliens only: right-click draws it in the follow camera, a click or swipe cuts in one of six directions, and holding the button enters Blade Mode, which slows the world to 10 % while you draw up to three cut lines. A cut slices the alien in two along the line, with a glowing cut face and green goo; each half can be cut again (three cuts an alien) and fades after about six seconds. Every other enemy parries the blade and takes no damage.
+Roger arrives at a safe spot and must reach the marked bunker. He can choose between the plasma rifle, minigun, railgun, Fire Gun, Black Hole Gun and Katana using the weapon wheel. The right mouse button raises or holsters the weapon; the trigger fires. The plasma rifle charges into a MEGA BEAM, the minigun can enter Bullet Time, the railgun calls lightning, the Fire Gun projects the T-Rex's flame, and the Black Hole Gun draws objects into a vortex. The Katana is a melee weapon that costs no energy and cuts aliens and people: selecting it draws it from the sheath on the back, right-click raises first person (right-click again, or wheeling to another weapon, lowers it), with the crosshair at the centre; with the button up the mouse looks, and with it held the view is frozen and the mouse movement is the cut. A click or swipe cuts in one of six directions, and pressing Q enters Blade Mode (Q again, Escape, three cuts or four seconds end it; while the Katana is in hand Q is not Time Slow), which slows the world to 10 % while you hold the button and drag up to three cut lines, releasing to cut. A cut slices the alien in two along the line, with a glowing cut face and green goo; each half can be cut again (three cuts an alien) and fades after about six seconds. A person falls in two as well, with red blood and a red cut face. Every other enemy parries the blade and takes no damage; hunter ships and the samurai are ignored.
 
 Roger also has Time Slow, Teleport and EMP abilities. Energy comes from explosions and nuclear terminals. Weapons, abilities and enemies have distinct interactions; consult `.claude/rules.md` for the exact combat contracts and values.
 
@@ -66,7 +68,7 @@ A tornado can daze Roger or throw him from a car, but it is not a lethal source.
 
 ## Aliens and enemies
 
-The abduction ship arrives before the storm. Its crew escorts people up the ramp; enough abductions call in the mothership. The crew later rampages through town. A second wave of sombrero-wearing aliens arrives by transport, and hunter ships attack people and nuclear plants. The mothership sweeps the town with its beam and can be brought down by Roger.
+The abduction ship arrives before the storm. Its crew escorts people up the ramp; enough abductions call in the mothership. The crew later rampages through town. A second wave of sombrero-wearing aliens arrives by transport, and hunter ships attack people and nuclear plants; every Roger weapon except the Katana can hurt a hunter ship, and the Black Hole Gun pulls it in. The mothership sweeps the town with its beam and can be brought down by Roger.
 
 Terminators are resistant to ordinary environmental destruction and have specific EMP and Hero Mode interactions. Aliens, the Cyber Yeti, the Cyber T-Rex, Patient Zero, samurai and other characters each have their own damage rules. Do not infer vulnerabilities from visual effects; use the per-enemy contracts in `.claude/rules.md` and the implementation.
 
@@ -94,5 +96,5 @@ These notes preserve the historical context that was embedded in the former comb
 - The Cyber T-Rex's 40 hit points were explicitly retained as unchanged.
 - Smooth Criminal's stage lighting was reduced by 20 percent from its earlier level.
 - Satellite funnels were disabled; the earthquake disaster was re-enabled and no longer starts by itself during a run.
-- Shooting a tanker no longer creates a free-standing flame tornado; Ignite requires a grounded tornado. Waterspouts no longer break the dam.
+- Shooting a tanker no longer creates a free-standing flame tornado; Ignite requires a grounded tornado. Waterspouts no longer break the dam, and no longer appear automatically in an Outbreak: the player triggers one from its button.
 - Hank Granite became panel-triggered rather than appearing automatically. The arrow keys were disabled on 2026-10-01.

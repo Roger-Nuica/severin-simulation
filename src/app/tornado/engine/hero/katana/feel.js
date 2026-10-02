@@ -37,7 +37,7 @@ import { KATANA_FEEL as CFG } from './config.js';
 
 /**
  * @typedef {Object} KatanaFeel
- * @property {(aliens: number, pieces: number, at: THREE.Vector3) => number} cut a slash landed: hit-stop, shake, combo event and score; returns the bonus points scored
+ * @property {(aliens: number, pieces: number, at: THREE.Vector3, people?: number) => number} cut a slash landed: hit-stop, shake, combo event and score; returns the bonus points scored
  * @property {(from: THREE.Vector3, to: THREE.Vector3) => void} flash lights the cut line
  * @property {(realDt: number) => void} update per frame, real seconds
  * @property {() => void} clear hold released, flash removed
@@ -96,17 +96,19 @@ export function createKatanaFeel(ctx) {
    * @param {number} aliens
    * @param {number} pieces
    * @param {THREE.Vector3} at where the cut landed, for the shake falloff
+   * @param {number} [people] civilians cut: they trigger the hit-stop, the
+   *   combo event and the shake, but earn no multi-cut bonus (each is scored once, by the cut itself)
    * @returns {number}
    */
-  function cut(aliens, pieces, at) {
-    if (aliens + pieces <= 0) return 0;
+  function cut(aliens, pieces, at, people = 0) {
+    if (aliens + pieces + people <= 0) return 0;
     startHold();
     const feel = ctx.systems.gamefeel;
     if (feel) {
       // The event first: it extends the chain, then the score below is
       // multiplied by the chain's new value, once.
       feel.event('slice', at);
-      if (aliens + pieces > 1) feel.addShake(CFG.multiShake, CFG.multiShakeTime);
+      if (aliens + pieces + people > 1) feel.addShake(CFG.multiShake, CFG.multiShakeTime);
     }
     const bonus = sliceBonus(aliens, pieces);
     if (ctx.systems.damage) ctx.systems.damage.addDamageScore(bonus);

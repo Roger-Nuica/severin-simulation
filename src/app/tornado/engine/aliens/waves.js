@@ -30,13 +30,25 @@ export function createAlienWaves(ctx, S, api) {
    *   -1 when there was nothing left to hit
    */
   function hitHunter(hunter, points, at) {
-    const heavy = points > 1;
-    ctx.systems.explosions.spawnImpactBurst(at, heavy ? 3 : 1.4);
+    // A downed or dead ship is ignored before any effect, so a late hit adds
+    // no second explosion, cue or score.
     if (hunter.phase === 'downed' || hunter.phase === 'dead') return -1;
+    const heavy = points > 1;
     hunter.hull = Math.max(0, hunter.hull - points);
     hunter.damage++;
-    ctx.systems.cues.playLargeExplosion({ priority: true, gain: heavy ? 1 : 0.6 });
-    if (hunter.hull <= 0) {
+    const downed = hunter.hull <= 0;
+    if (points >= 1 || downed) {
+      // A plasma hit, or the last one: the full burst and the large cue.
+      ctx.systems.explosions.spawnImpactBurst(at, heavy ? 3 : 1.4);
+      ctx.systems.cues.playLargeExplosion({ priority: true, gain: heavy ? 1 : 0.6 });
+    } else {
+      // A sub-point hit (a minigun round, a flame tick): a small spark on
+      // every fourth, within the particle budget, and a quiet cue that the
+      // spacing and voice cap may drop, so rapid fire cannot flood either.
+      if (hunter.damage % 4 === 0 && ctx.systems.caps.particleRoom() > 0) ctx.systems.explosions.spawnImpactBurst(at, 0.4);
+      ctx.systems.cues.playLargeExplosion({ gain: 0.25 });
+    }
+    if (downed) {
       hunter.phase = 'downed';
       hunter.timer = 0;
       api.stopTracker(hunter.tracker);

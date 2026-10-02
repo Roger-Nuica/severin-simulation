@@ -69,6 +69,7 @@ const NEVER = 1e6;
  * @property {THREE.MeshStandardMaterial} skin template cloned for each piece (owned here)
  * @property {THREE.MeshStandardMaterial} detail template cloned for each piece (owned here)
  * @property {number} refs pieces using it
+ * @property {boolean} [human] a person's body (no alien skin was given): red blood and a red cut face
  */
 
 /**
@@ -382,7 +383,7 @@ function centroidOf(bake, planes) {
 
 /**
  * @param {Object} ctx
- * @param {{onCut?: (from: THREE.Vector3, to: THREE.Vector3, normal: THREE.Vector3) => void}} [hooks]
+ * @param {{onCut?: (from: THREE.Vector3, to: THREE.Vector3, normal: THREE.Vector3, human?: boolean) => void}} [hooks]
  *   `onCut`: told of each alien cut, with the two ends of the cut line (world metres) and the
  *   plane's unit normal, read at once (the alien blood, goo.js)
  * @returns {KatanaPieces}
@@ -479,7 +480,7 @@ export function createKatanaPieces(ctx, hooks = {}) {
     body.castShadow = false;
     body.receiveShadow = false;
     body.quaternion.copy(quat);
-    const [r, g, b] = CFG.capColour;
+    const [r, g, b] = bake.human ? CFG.bloodCapColour : CFG.capColour;
     const capMaterial = new THREE.MeshBasicMaterial({
       color: new THREE.Color(r, g, b), side: THREE.DoubleSide, transparent: true
     });
@@ -554,7 +555,7 @@ export function createKatanaPieces(ctx, hooks = {}) {
     const b = farthest(a);
     lineA.copy(a).add(bake.origin);
     lineB.copy(b).add(bake.origin);
-    hooks.onCut(lineA, lineB, normal);
+    hooks.onCut(lineA, lineB, normal, bake.human === true);
   }
 
   /**
@@ -570,6 +571,8 @@ export function createKatanaPieces(ctx, hooks = {}) {
     const bake = bakeAlien(root, skin);
     scene.remove(root);
     if (!bake) return;
+    // A person is handed over without an alien skin: red blood, not green.
+    bake.human = skin === undefined;
     const normal = plane ? plane.normal.clone().normalize() : new THREE.Vector3(1, 0, 0);
     const point = plane ? plane.point.clone().sub(bake.origin) : new THREE.Vector3(0, 0.7, 0);
     const keepA = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, point);

@@ -24,14 +24,18 @@ The mouse wheel cycles through them; UI text mirrors the same names and colours.
 
 ## Katana
 
-The Katana (`engine/hero/katana/`) is a melee weapon with no energy cost. It stays in the follow camera: right-click draws or holsters it and never enters first-person `aiming`.
+The Katana (`engine/hero/katana/`) is a melee weapon with no energy cost. Selecting it draws it automatically from the sheath on the back. Right-click enters first person (it reuses the `aiming` phase) and lowers it again; wheeling onto the Katana lowers to the follow camera. In first person the crosshair is at the centre, a first-person blade is shown and Roger's heading follows the view: with the left button up the mouse looks, with it held the look is frozen and the mouse movement is the swipe or Blade Mode line.
 
-- **Quick Slash**: a click or swipe under 0.25 s. A swipe of 28 px or more picks one of six directions; a plain click chains diagonal, horizontal, vertical. Reach about 3 m, auto-lunge up to about 6 m, cooldown 0.35 s (real time).
-- **Blade Mode**: hold the button 0.25 s. The world is held at 10 % through the named hold `bladeMode`; it ends on release with no line, on Escape, after three cuts or after 4 s (real time). Roger is not slowed.
-- **Targets**: only registry kind `alien` (patrol, escort, exiting) is cut, through `enemies.hit` with a `blade` hit that carries `cut`. Every other registered kind parries and takes no damage; no `accepts` list was changed. The T-Rex accepts `blade` for the samurai, so the Katana never sends `blade` to a non-alien.
+- **Quick Slash**: a click or swipe outside Blade Mode, however long the button is held (there is no hold-to-enter). A swipe of 28 px or more picks one of six directions; a plain click chains diagonal, horizontal, vertical. Reach about 3 m, auto-lunge up to about 6 m, cooldown 0.35 s (real time).
+- **Blade Mode**: press Q with the Katana drawn (`katanaBladeToggle`); Q again ends it. While the Katana is the current weapon Q is not Time Slow and costs no energy; every other weapon keeps Q as Time Slow (Bullet Time with the minigun), and Q still leaves a car. The world is held at 10 % through the named hold `bladeMode`; it ends on Q, Escape, leaving first person (right-click out), changing weapon, a daze, a freeze or death, after the third cut or after 4 s (real time). Roger is not slowed and the look stays in real time. While it is on, hold the left button and drag to draw the line (from the crosshair in first person) and release to cut; a drag shorter than 24 px on release does nothing and the mode stays on. The hint 'Q: Blade Mode' is in the weapon message when the Katana is selected.
+- **Targets**: registry kind `alien` (patrol, escort, exiting) is cut, through `enemies.hit` with a `blade` hit that carries `cut`. People are cut too, through the people owner's `eachCuttable`/`slicePerson` (never sent `blade`, no parry): the person-kill score 8 once per person with no multi-cut bonus, and the person falls in two through the pieces core. Hunter ships and samurai are ignored. Every other registered kind parries and takes no damage; the co-op guest's Katana also cuts people (a burst, credited 8); no `accepts` list was changed. The T-Rex accepts `blade` for the samurai, so the Katana never sends `blade` to a non-alien.
 - **Cut**: `crew.js` `sliceKill` removes the alien and hands its root to `katana/pieces.js`, which builds two clipped halves with a glowing cap. At most 32 live pieces (oldest recycled), three cuts an alien, about 6 s life with a 1.5 s fade.
 - **Feel and score**: `gamefeel.event('slice')` then one `damage.addDamageScore` per landed slash; multi-cut bonus 50 and extra-piece bonus 20 (`KATANA_FEEL`). Hit-stop is 0.065 s of real time on the hold `katanaHitStop`.
 - **Blood**: one 600-particle pool (inside the shared 10,000 cap, clamped by `particleRoom()`) and a ring of 48 splatter decals.
+
+## Hunter ships
+
+Every weapon except the Katana can hurt a hunter ship (registry kind `hunterShip`, hull 4): rifle 1 (MEGA BEAM 5), minigun 0.25 a round, railgun and Lightning-tile bolt 2, Fire Gun 0.5 a tick (about 8 ticks; a 3D cone test and the 9 m ship disc). The Black Hole Gun pulls and consumes them. See `docs/enemies.md`.
 
 ## Input and firing
 

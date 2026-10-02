@@ -6,7 +6,8 @@ import { HERO } from './config.js';
  * ===========================================================================
  * SECTION HM.3 — The controls
  * ===========================================================================
- * W A S D to run, right-click to raise the weapon, click or Enter to fire,
+ * W A S D to run, right-click to raise the weapon into first person (the Katana included),
+ * click or Enter to fire,
  * the mouse wheel to switch weapon, Q W E R for the abilities, Enter at a
  * car's door to drive.
  *
@@ -64,7 +65,8 @@ export function createHeroInput(ctx, S, api) {
    *  - mouse wheel: the next or the previous weapon;
    *  - Q E R: the abilities (engine/player/abilities.js) -- Time Slow (Bullet
    *    Time with the minigun), Teleport, EMP -- not while dying, safe or
-   *    driving;
+   *    driving; with the Katana in hand Q is Blade Mode instead
+   *     (on, and off again by Q), never Time Slow, and costs no energy;
    *  - right button: raise / lower the weapon; left button: fire while it is
    *    raised;
    *  - the mouse moving: looking round while aiming.
@@ -78,9 +80,16 @@ export function createHeroInput(ctx, S, api) {
     S.keys.left = held.left;
     S.keys.right = held.right;
     const phase = () => S.state.phase;
-    // The Katana is only ever drawn on foot, upright and unfrozen: a car, a
-    // daze, a freeze, death or the win puts it away at once.
-    if (S.weapons.katanaState().drawn && (phase() !== 'running' || S.state.frozen > 0)) S.weapons.katanaCancel();
+    // The Katana is drawn from the sheath on the back as soon as it is the
+    // weapon in hand, and only ever on foot, upright and unfrozen (running or
+    // raised into first person): a car, a daze, a freeze, death or the win
+    // puts it away at once, and it comes out again when he is back on his
+    // feet. A freeze also lowers the first-person view.
+    const katanaHeld = S.weapons.current() === 'katana';
+    if (katanaHeld && S.state.frozen > 0 && phase() === 'aiming') api.leaveAim();
+    const katanaOut = katanaHeld && (phase() === 'running' || phase() === 'aiming') && !(S.state.frozen > 0);
+    if (katanaOut) S.weapons.katanaDraw();
+    else if (S.weapons.katanaState().drawn) S.weapons.katanaCancel();
     for (const e of input.drain()) {
       switch (e.type) {
         case 'keydown': {
@@ -101,8 +110,13 @@ export function createHeroInput(ctx, S, api) {
             else if (phase() === 'running') api.flashMessage('RIGHT-CLICK to raise the weapon · ENTER to fire');
           } else if (code === 'Escape' && phase() === 'aiming') {
             api.leaveAim();
-          } else if (code === 'Escape' && S.weapons.katanaState().drawn) {
+          } else if (code === 'Escape' && S.weapons.katanaBlade().active()) {
+            // Esc ends Blade Mode (in first person it has already lowered the view above).
             S.weapons.katanaCancel();
+          } else if (code === 'KeyQ' && S.weapons.current() === 'katana') {
+            // With the Katana in hand Q is Blade Mode, not Time Slow: no energy,
+            // and nothing at all while dazed or frozen (he cannot act).
+            if ((phase() === 'running' || phase() === 'aiming') && !(S.state.frozen > 0)) S.weapons.katanaBladeToggle();
           } else if ((phase() === 'running' || phase() === 'aiming' || phase() === 'dazed') && !(S.state.frozen > 0)) {
             ctx.systems.abilities.press(code);
           }
@@ -114,21 +128,24 @@ export function createHeroInput(ctx, S, api) {
         case 'wheel':
           if (phase() === 'running' || phase() === 'aiming' || phase() === 'dazed') {
             api.cancelCharge();
+            const fromKatana = S.weapons.current() === 'katana';
             S.weapons.cycle(e.dir);
-            // Cycled onto the Katana from the raised rifle: back to third person.
-            if (phase() === 'aiming' && S.weapons.current() === 'katana') api.leaveAim();
+            // Leaving the Katana puts the first-person view away (the follow
+            // camera, FOV, Roger and the cursor back); the other weapons keep
+            // their raised state as before.
+            // Wheeling ONTO the Katana from a raised weapon lowers it as well:
+            // first person for the Katana is entered by right-click only.
+            if (phase() === 'aiming' && (fromKatana || S.weapons.current() === 'katana')) api.leaveAim();
             if (S.viewRifle) S.viewRifle.group.visible = phase() === 'aiming' && S.weapons.current() === 'rifle';
           }
           break;
         case 'mousedown':
           if (!(e.onCanvas || S.state.locked)) break;
           if (e.button === 2) {
-            // The Katana is drawn in the follow camera, never raised into aim.
-            if (S.weapons.current() === 'katana') {
-              if (S.weapons.katanaState().drawn || (phase() === 'running' && !(S.state.frozen > 0))) S.weapons.katanaToggle();
-            } else api.toggleAim();
-          } else if (e.button === 0 && phase() === 'aiming') pullTrigger();
-          else if (e.button === 0) S.weapons.katanaPress();
+            // The Katana is already drawn; right-click raises first person or lowers it.
+            api.toggleAim();
+          } else if (e.button === 0 && S.weapons.current() === 'katana') S.weapons.katanaPress(phase() === 'aiming');
+          else if (e.button === 0 && phase() === 'aiming') pullTrigger();
           break;
         case 'mouseup':
           if (e.button === 0) {
@@ -146,8 +163,6 @@ export function createHeroInput(ctx, S, api) {
           // Esc under a pointer lock goes to the browser, which drops the
           // lock: that is the way out of aim mode then.
           if (S.state.locked && !e.locked && phase() === 'aiming') api.leaveAim();
-          // Esc under the Katana's lock: the browser dropped it, so put it away.
-          if (S.state.locked && !e.locked) S.weapons.katanaCancel();
           S.state.locked = e.locked;
           break;
         }
@@ -156,14 +171,24 @@ export function createHeroInput(ctx, S, api) {
       }
     }
     // Mouse look, while aiming (the movement is taken either way, so it does
-    // not pile up for the next time the weapon comes up).
+    // not pile up for the next time the weapon comes up). With the Katana in
+    // first person the left button decides: up, the mouse looks (real time,
+    // never scaled by the world's); down, the view is frozen at the press and
+    // the same movement is the swipe / Blade Mode cut line instead.
     const look = input.takeLook();
-    if (phase() === 'aiming' && (look.dx || look.dy)) {
+    const aiming = phase() === 'aiming';
+    const katanaFirstPerson = aiming && S.weapons.current() === 'katana';
+    const swiping = katanaFirstPerson && S.weapons.katanaState().down;
+    if (aiming && !swiping && (look.dx || look.dy)) {
       S.state.yaw -= look.dx * HERO.lookSensitivity;
       S.state.pitch = THREE.MathUtils.clamp(S.state.pitch - look.dy * HERO.lookSensitivity, HERO.pitchMin, HERO.pitchMax);
     }
-    // The same drain feeds the Katana's virtual cursor and swipe.
-    S.weapons.katanaLook(look.dx, look.dy);
+    // Cuts, the lunge and the plane go where he looks.
+    if (katanaFirstPerson) S.state.heading = S.state.yaw;
+    // The same drain feeds the Katana's virtual cursor and swipe: in first
+    // person only while swiping (the cursor is the crosshair otherwise).
+    if (!katanaFirstPerson) S.weapons.katanaLook(look.dx, look.dy);
+    else if (swiping) S.weapons.katanaLook(look.dx, look.dy, true);
   }
 
   // ---------------------------------------------------------------------
@@ -177,6 +202,8 @@ export function createHeroInput(ctx, S, api) {
    */
   function pullTrigger() {
     if (S.state.phase !== 'aiming') return;
+    // The Katana has no trigger (and no rifle charge): its click is katanaPress.
+    if (S.weapons.current() === 'katana') return;
     if (!S.weapons.triggerDown()) api.beginCharge();
   }
 

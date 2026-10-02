@@ -343,7 +343,8 @@ export function createHeroModeSystem(ctx) {
     // the movement helpers are looked up lazily, as `api` fills in.
     katanaBody: {
       heading: () => S.state.heading,
-      canAct: () => S.state.phase === 'running' && !(S.state.frozen > 0),
+      // On foot, or raised into first person with the Katana; never dazed, driving or dying.
+      canAct: () => (S.state.phase === 'running' || S.state.phase === 'aiming') && !(S.state.frozen > 0),
       rig: () => S.katanaRig || null,
       position: () => S.roger.mesh.position,
       blockedAt: (x, z, pad) => api.blockedAt(x, z, pad),
@@ -525,6 +526,7 @@ export function createHeroModeSystem(ctx) {
     api.removePursuers();
     for (const obj of [S.marker, S.nameTag, S.stars, S.beam, S.beamSplash, S.burst, S.doorGlow]) if (obj) Sim.three.scene.remove(obj);
     if (S.viewRifle) Sim.three.scene.remove(S.viewRifle.group);
+    if (S.katanaRig) S.katanaRig.disposeView();
     for (const ring of S.rings) Sim.three.scene.remove(ring);
     for (const g of S.runGeometries) g.dispose();
     for (const m of S.runMaterials) m.dispose();

@@ -107,14 +107,14 @@ export function createHeroPlasma(ctx, S, api) {
   }
 
   /**
-   * Into first person: the rifle comes up, Roger's own figure is hidden,
+   * Into first person: the weapon in hand comes up (the Katana too), Roger's own figure is hidden,
    * the crosshair appears and the pointer is locked.
    * @returns {void}
    */
   function enterAim() {
     if (S.state.phase !== 'running') return;
-    // The Katana stays in third person (heroWeapons.js katanaToggle).
-    if (S.weapons.current() === 'katana') return;
+    // Raising the view mid-Blade-Mode would re-aim its cut line: it ends instead.
+    if (S.weapons.katanaBlade().active()) S.weapons.katanaCancel();
     S.state.drawn = true;
     if (S.rifle) S.rifle.visible = true;
     S.state.phase = 'aiming';
@@ -141,11 +141,13 @@ export function createHeroPlasma(ctx, S, api) {
   }
 
   /**
-   * Back to third person, the rifle put away.
+   * Back to the follow camera, the weapon lowered.
    * @returns {void}
    */
   function leaveAim() {
     cancelCharge();
+    // Blade Mode ends with the view (right-click out, Esc, pointer-lock loss, a wheel change).
+    if (S.weapons.katanaBlade().active()) S.weapons.katanaCancel();
     if (S.state.phase === 'aiming') S.state.phase = 'running';
     S.state.drawn = false;
     if (S.rifle) S.rifle.visible = false;
@@ -153,6 +155,7 @@ export function createHeroPlasma(ctx, S, api) {
     if (S.roger) S.roger.mesh.visible = true;
     if (S.nameTag) S.nameTag.visible = true;
     if (S.viewRifle) S.viewRifle.group.visible = false;
+    if (S.katanaRig) S.katanaRig.placeView(Sim.three.camera, false);
     S.weapons.showView(false);
     if (S.crosshair) S.crosshair.classList.remove('visible');
     if (S.hud) S.hud.classList.remove('aiming');

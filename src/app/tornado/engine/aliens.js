@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { bannerHost } from '../utils/banners.js';
 import { ALIENS, RAY_COLOURS } from './aliens/config.js';
+import { SHIP_DAMAGE } from './hero/config.js';
 import { createAlienModels } from './aliens/models.js';
 import { createAlienShip } from './aliens/ship.js';
 import { createAlienAbduction } from './aliens/abduction.js';
@@ -324,8 +325,8 @@ export function createAliensSystem(ctx) {
       }
     };
     ctx.systems.enemies.registerKind(alienKind);
-    // The ship and the hunter ships, for the black hole
-    // (engine/effects/consumables.js): gone, with no crash of their own.
+    // The ship, for the black hole (engine/effects/consumables.js): gone,
+    // with no crash of its own.
     ctx.systems.consumables.register({
       kind: 'ufo',
       list: () => (S.ship && S.state.phase !== 'idle' && S.state.phase !== 'wrecked' ? [S.ship] : []),
@@ -351,10 +352,27 @@ export function createAliensSystem(ctx) {
         S.state.phase = 'gone';
       }
     });
-    ctx.systems.consumables.register({
+    // The hunter ships, in the shared register too (engine/enemies.js): every
+    // weapon but the katana hurts them, through the one hitHunter (waves.js).
+    // No `hitbox` on purpose: the rifle and minigun already aim at them
+    // through shipTargets (a 'ship' hit in hero/plasma.js traceAim), and a
+    // hitbox would make traceAim see each hunter twice. The black hole takes
+    // them from here too (consume and object), so there is no separate
+    // consumables entry: a second one would hold each hunter twice.
+    ctx.systems.enemies.registerKind({
       kind: 'hunterShip',
       list: () => S.hunters.filter(h => h.phase === 'arriving' || h.phase === 'hunting'),
       position: (h) => h.group.position,
+      accepts: ['plasma', 'bullet', 'bolt', 'fire'],
+      damage: (h, hit) => {
+        /** @type {number} */
+        const points = hit.type === 'plasma'
+          ? (hit.mega ? SHIP_DAMAGE.mega : SHIP_DAMAGE.normal)
+          : ALIENS.hunterHit[/** @type {'bullet'|'bolt'|'fire'} */ (hit.type)];
+        const at = hit.at ? S.scratch.set(hit.at.x, hit.at.y === undefined ? h.group.position.y : hit.at.y, hit.at.z) : h.group.position;
+        // 0 only when the hull is gone; -1 (already downed) is not a kill.
+        return api.hitHunter(h, points, at) === 0;
+      },
       object: (h) => h.group,
       consume: (h) => api.removeHunter(h)
     });

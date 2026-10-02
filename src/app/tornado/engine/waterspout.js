@@ -14,9 +14,9 @@ import { createSharks } from './waterspout/sharks.js';
  * A tornado over water: the lake behind the dam (flood.js's reservoir) is
  * the only water there is, so that is where it happens -- no new ocean.
  *
- * 🌊 Waterspout (in 💥 Disasters), or at random once an Outbreak (two or
- * more funnels) is under way: a spinning column of spray rises off the lake
- * and wanders across it for WS.seconds.
+ * 🌊 Waterspout (in 💥 Disasters), or a scenario call to spawn(): a spinning
+ * column of spray rises off the lake and wanders across it for WS.seconds.
+ * It is player-triggered only; an Outbreak no longer brings one on its own.
  *  - The lake answers: rings of waves racing out from its foot (a
  *    displaced ring of the lake surface round it) and the whole reservoir
  *    sloshing.
@@ -44,7 +44,6 @@ export const WS = {
   boats: 5,
   waveRadius: 45,
   sprayMax: 1100,
-  outbreakDelay: [20, 60],  // seconds after the Outbreak starts
   colour: 0xdceef7
 };
 
@@ -102,8 +101,6 @@ export function createWaterspoutSystem(ctx) {
   /** @type {HTMLDivElement|null} */
   let banner = null;
   let bannerTimer = 0;
-  let outbreakTimer = -1;
-  let spawnedThisRun = false;
   /** @type {{bus: GainNode, roar: GainNode, surf: GainNode, surfFilter: BiquadFilterNode, sources: AudioBufferSourceNode[]}|null} */
   let sound = null;
   const scratch = new THREE.Vector3();
@@ -446,12 +443,6 @@ export function createWaterspoutSystem(ctx) {
       bannerTimer -= rawDt;
       if (bannerTimer <= 0 && banner) banner.classList.remove('visible');
     }
-    // At random in an Outbreak: once a run, a while after it starts.
-    if (dt > 0 && !spout && !spawnedThisRun && Sim.state.running && ctx.tornadoes.count() >= 2) {
-      if (outbreakTimer < 0) outbreakTimer = WS.outbreakDelay[0] + Math.random() * (WS.outbreakDelay[1] - WS.outbreakDelay[0]);
-      outbreakTimer -= dt;
-      if (outbreakTimer <= 0 && spawn()) spawnedThisRun = true;
-    }
     const L = lake();
     if (dt > 0) stepSpray(dt);
     if (L && dt > 0) {
@@ -532,8 +523,6 @@ export function createWaterspoutSystem(ctx) {
     if (column) column.visible = false;
     if (waves) waves.visible = false;
     if (button) button.disabled = false;
-    outbreakTimer = -1;
-    spawnedThisRun = false;
     if (spray) {
       spray.life.fill(0);
       spray.colours.fill(0);

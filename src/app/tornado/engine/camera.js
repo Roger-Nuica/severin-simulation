@@ -175,7 +175,10 @@ export function createCameraSystem(ctx) {
     // Manual dragging is only blocked while genuinely committed to the
     // automatic orbit; the instant it starts easing back out, OrbitControls
     // regains control from wherever the orbit last left the camera.
-    Sim.three.controls.enabled = Cinematic.blend <= 0.001;
+    // Hero Mode owns the camera and the pointer: left enabled, OrbitControls
+    // would call setPointerCapture on every click while the pointer is
+    // locked (first-person aim) and throw an InvalidStateError.
+    Sim.three.controls.enabled = Cinematic.blend <= 0.001 && !(ctx.Hero && ctx.Hero.active);
 
     // A scripted shot outranks both the manual camera and the orbit.
     if (updateCameraBeat(dt)) return;

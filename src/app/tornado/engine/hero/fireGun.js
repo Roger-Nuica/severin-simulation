@@ -1,6 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
 import { createTrexFlames } from '../trex/flames.js';
+import { ALIENS } from '../aliens/config.js';
 
 /**
  * ===========================================================================
@@ -112,6 +113,27 @@ export function createFireGun(ctx, hero) {
   }
 
   /**
+   * Is a point in the air inside the cone, by the real (3D) angle? The flat
+   * test cannot tell a hunter ship hovering ~26 m up from the ground under
+   * it, so a flame pointed at the street would burn it. No allocation.
+   * @param {THREE.Vector3} origin
+   * @param {THREE.Vector3} dir unit aim direction
+   * @param {THREE.Vector3} q the target's position
+   * @param {number} radius
+   * @returns {boolean}
+   */
+  function inCone3D(origin, dir, q, radius) {
+    const dx = q.x - origin.x;
+    const dy = q.y - origin.y;
+    const dz = q.z - origin.z;
+    const len = Math.hypot(dx, dy, dz);
+    if (len > FIRE_GUN.range + radius) return false;
+    if (len < 3 + radius) return true;
+    const cos = (dx * dir.x + dy * dir.y + dz * dir.z) / len;
+    return Math.acos(Math.min(1, Math.max(-1, cos))) < FIRE_GUN.halfAngle + radius / len;
+  }
+
+  /**
    * What the flame has reached, burning.
    * @param {THREE.Vector3} dir
    * @returns {void}
@@ -137,8 +159,12 @@ export function createFireGun(ctx, hero) {
     ctx.systems.enemies.each((e, kind) => {
       if (!kind.accepts.includes('fire')) return;
       const q = kind.position(e);
-      const radius = kind.hitbox ? kind.hitbox(e).radius : 1;
-      if (inCone(r.x, r.z, dir, q.x, q.z, radius)) found.push({ e, kind, at: q });
+      const hunter = kind.kind === 'hunterShip';
+      // A hunter has no hitbox: its radius is its disc (as shipTargets and boltAt).
+      const radius = hunter ? 15 * ALIENS.hunterScale : kind.hitbox ? kind.hitbox(e).radius : 1;
+      // A hunter ship hovers high above the ground: it needs the 3D test.
+      const inside = hunter ? inCone3D(r, dir, q, radius) : inCone(r.x, r.z, dir, q.x, q.z, radius);
+      if (inside) found.push({ e, kind, at: q });
     });
     for (const f of found) {
       if (ctx.systems.enemies.hit(f.e, f.kind, { type: 'fire', at: f.at })) killed = true;

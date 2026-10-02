@@ -57,7 +57,7 @@ const PIECE_HEIGHT = 0;
 
 /**
  * @typedef {'none'|'miss'|'cut'} CutOutcome
- *   `none`: no line was drawn (the mode should end); `miss`: a line, but it
+ *   `none`: no line was drawn (nothing happens, the mode stays on); `miss`: a line, but it
  *   crossed nothing; `cut`: something was cut
  */
 
@@ -252,12 +252,12 @@ export function createKatanaBladeCut(ctx, env) {
     const pieces = env.pieces();
     const recut = pieces ? cutPieces(pieces) : 0;
     const result = targets.strikeAlong(reach, touches, CFG.bodyRadius, pieces ? pieces.takeOver : undefined, plane);
-    if (result.cut + recut === 0) return 'miss';
+    if (result.cut + result.people + recut === 0) return 'miss';
     if (sys.katanaSound) sys.katanaSound.playSlice();
     // A killing breaks Smooth Criminal's spell, as the other weapons' do.
     ctx.events.emit('rogerKill');
     const feel = env.feel();
-    if (feel) feel.cut(result.cut, recut, roger);
+    if (feel) feel.cut(result.cut, recut, roger, result.people);
     return 'cut';
   }
 

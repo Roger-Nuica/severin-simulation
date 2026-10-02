@@ -39,6 +39,9 @@ export const SLASH_KINDS = /** @type {readonly SlashKind[]} */ (
  * @property {(armL: THREE.Object3D, armR: THREE.Object3D) => void} applyArms poses the arms on the grip
  * @property {(kind: SlashKind) => boolean} slash starts a slash; false unless the katana is drawn
  * @property {() => boolean} isSlashing
+ * @property {(cam: THREE.Camera, active: boolean) => void} placeView puts the first-person blade in the
+ *   camera's frame (hidden unless `active` and the katana is in his hands)
+ * @property {() => void} disposeView takes the first-person blade out of the scene
  */
 
 // (The grip points were fitted so both fists meet the grip with the figure's
@@ -93,6 +96,19 @@ const TRAIL_FROM = 0.4;          // along the blade, from the guard (0 to 1)
 const WIND_UP = 0.3;
 const STRIKE_END = 0.62;
 const BLADE_COLOUR = new THREE.Color(0.55, 2.0, 3.0);
+// The first-person blade. Its pose is the third-person pose (so the swing
+// shares the slash's timing and direction) moved to rest low on the right of
+// the view: the grip point and angles are the idle values below plus how far
+// the current pose is from the low ready, scaled to stay in frame. The frame
+// is Roger's (forward +z, his left +x), measured from the eye, in metres.
+// Raised and leaning forward (pitch 0.75) so the whole blade stands up in the
+// frame, not edge-on along the line of sight as a near-level one would.
+const VIEW_IDLE = [-0.26, -0.4, 0.5, 0.75, 0.12, -0.1];
+const VIEW_HAND_SCALE = 1.0;
+const VIEW_PITCH_SCALE = 0.85;
+const VIEW_YAW_SCALE = 0.8;
+const VIEW_MIN_FORWARD = 0.38;   // keeps the grip clear of the near plane (0.1)
+const VIEW_SPIN = 0.9;           // turns the blade about its own axis to show its flat
 
 /**
  * @param {number} t 0 to 1
@@ -160,6 +176,11 @@ export function createKatanaRig(ctx, S, kit) {
   const sheathedHilt = [];
   /** @type {THREE.Mesh|null} */
   let trailMesh = null;
+  /** @type {THREE.Group|null} the first-person blade, in the scene (not on Roger) */
+  let view = null;
+  /** @type {THREE.Group|null} the first-person blade's hand, posed each frame */
+  let holder = null;
+  const viewFlip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
 
   // Animation state (all per rig, so per run).
   let clock = 0;
@@ -221,6 +242,36 @@ export function createKatanaRig(ctx, S, kit) {
     glow.position.z = 0.0185;
     addPart(katana, new THREE.CylinderGeometry(0.05, 0.05, 0.012, 10), brass, guardAt);
     addPart(katana, new THREE.BoxGeometry(0.03, gripLength, 0.032), wrap, guardAt - gripLength / 2);
+  }
+
+  /**
+   * The first-person blade: meshes that share the katana's own geometry and
+   * materials (nothing new to compile or dispose), the blade a little thicker
+   * and turned to show its flat, hung in a group that follows the camera.
+   * @returns {void}
+   */
+  function buildView() {
+    view = new THREE.Group();
+    view.name = 'hero_view_katana';
+    view.visible = false;
+    holder = new THREE.Group();
+    holder.rotation.order = 'YXZ';
+    holder.scale.setScalar(PERSON_SCALE);
+    const spin = new THREE.Group();
+    spin.rotation.y = VIEW_SPIN;
+    // Wider and thicker than the third-person blade: seen from a hand's length away it must read at once.
+  spin.scale.set(3, 1, 2.4);
+    for (const part of katana.children) {
+      const mesh = /** @type {THREE.Mesh} */ (part);
+      const copy = new THREE.Mesh(mesh.geometry, mesh.material);
+      copy.position.copy(mesh.position);
+      copy.frustumCulled = false;
+      copy.castShadow = false;
+      spin.add(copy);
+    }
+    holder.add(spin);
+    view.add(holder);
+    ctx.Sim.three.scene.add(view);
   }
 
   /**
@@ -288,6 +339,7 @@ export function createKatanaRig(ctx, S, kit) {
     armGrip = roger.limbs.armR;
     buildKatana();
     buildSheath();
+    buildView();
     trailMesh = buildTrail();
     root.add(sheath, katana, trailMesh);
   }
@@ -426,6 +478,8 @@ export function createKatanaRig(ctx, S, kit) {
    */
   function step(dt, selected, drawn, run, interrupted) {
     clock += dt;
+    // Roger's figure is on show: third person, so the first-person blade goes.
+    if (view && root && root.visible) view.visible = false;
     sheath.visible = selected;
     if (!selected || interrupted) {
       draw = 0;
@@ -478,5 +532,40 @@ export function createKatanaRig(ctx, S, kit) {
     return true;
   }
 
-  return { attach, step, applyArms, slash, isSlashing: () => slashT < 1 };
+  /**
+   * First person: the blade low on the right, swinging with the current pose.
+   * The third-person rig is hidden with Roger's figure while he aims.
+   * @param {THREE.Camera} cam
+   * @param {boolean} active the katana is the weapon in hand and he is aiming
+   * @returns {void}
+   */
+  function placeView(cam, active) {
+    if (!view || !holder) return;
+    const show = active && driven && draw > 0.02;
+    view.visible = show;
+    if (!show) return;
+    const ready = POSES.ready;
+    view.position.copy(cam.position);
+    view.quaternion.copy(cam.quaternion).multiply(viewFlip);
+    holder.position.set(
+      VIEW_IDLE[HX] + (pose[HX] - ready[HX]) * VIEW_HAND_SCALE,
+      VIEW_IDLE[HY] + (pose[HY] - ready[HY]) * VIEW_HAND_SCALE,
+      Math.max(VIEW_MIN_FORWARD, VIEW_IDLE[HZ] + (pose[HZ] - ready[HZ]) * VIEW_HAND_SCALE)
+    );
+    holder.rotation.set(
+      VIEW_IDLE[PITCH] + (pose[PITCH] - ready[PITCH]) * VIEW_PITCH_SCALE,
+      VIEW_IDLE[YAW] + (pose[YAW] - ready[YAW]) * VIEW_YAW_SCALE,
+      VIEW_IDLE[ROLL] + (pose[ROLL] - ready[ROLL])
+    );
+    view.updateMatrixWorld(true);
+  }
+
+  /** @returns {void} */
+  function disposeView() {
+    if (view) view.removeFromParent();
+    view = null;
+    holder = null;
+  }
+
+  return { attach, step, applyArms, slash, isSlashing: () => slashT < 1, placeView, disposeView };
 }

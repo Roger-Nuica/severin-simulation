@@ -329,7 +329,7 @@ export default function TornadoSimulator() {
                 title="Captain Spotless: a giant of light strides across town. Debris gone, fires out, enemies disintegrated, and a blinding glare. Also comes at random once a run.">✨ Captain Spotless</button>
               {/* engine/waterspout.js (plan PR 9): a tornado over the dam's lake. */}
               <button id="btn-waterspout" className="pill event" type="button"
-                title="Waterspout: a tornado over the lake behind the dam. Waves, spray and mist; it takes the boats; left against the dam it throws the lake over the wall. Also comes at random in an Outbreak.">🌊 Waterspout</button>
+                title="Waterspout: a tornado over the lake behind the dam. Waves, spray and mist; it takes the boats; left against the dam it throws the lake over the wall.">🌊 Waterspout</button>
               {/* engine/volcano.js (plan PR 8): a cone over the quake's caldera
                   (or on open ground, with a quake), then 60 s of lava bombs. */}
               <button id="btn-volcano" className="pill event" type="button"

@@ -270,6 +270,8 @@ export function createHeroScreen(ctx, S, api) {
       g.rotateX(S.state.recoil * 0.12);
       g.updateMatrixWorld(true);
     }
+    // The Katana's blade (hero/katana/model.js) while it is the weapon in hand.
+    if (S.katanaRig) S.katanaRig.placeView(cam, S.weapons.current() === 'katana');
     S.weapons.placeView(cam, S.state.speed > 0 ? Math.sin(performance.now() * 0.0055) : 0);
   }
 

@@ -54,6 +54,10 @@ Scoring is centralized in `engine/damage.js`; `gamefeel.js` owns combo and visua
 
 A Katana cut calls `gamefeel.event('slice', at)` (a combo event with a small shake) immediately before one `damage.addDamageScore`, so the chain extends and the score is multiplied once. Multi-cut (50) and extra-piece (20) bonuses go through the same path. The hit-stop is a 0.065 s real-time world hold with its own id, `katanaHitStop`, so it never releases Time Slow or Bullet Time.
 
+## Hunter ships
+
+The hunter ships are the registry kind `hunterShip` and take `plasma`, `bullet`, `bolt` and `fire` (never `blade`): rifle 1 (MEGA BEAM 5), minigun 0.25 a round, railgun and Lightning-tile bolt 2 (the bolt lands within the 9 m ship disc), Fire Gun 0.5 a tick (3D cone test and the 9 m disc), against a hull of 4. The Katana never hits them; Rocket Strike uses its existing ship path. A downed hunter ignores further hits.
+
 ## Immunity and exclusions
 
 Some entities are intentionally resistant or excluded:

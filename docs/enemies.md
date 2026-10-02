@@ -18,7 +18,7 @@ This keeps enemy logic modular while keeping one shared combat contract.
 
 ## Current hostile actors
 
-- `engine/aliens.js` — alien attack logic
+- `engine/aliens.js` — alien attack logic and the `hunterShip` registry kind
 - `engine/terminator.js` — EMP-resistant hostile units
 - `engine/trex.js` — cyber T-Rex logic
 - `engine/yeti.js` — hostile snow/beast variant
@@ -29,7 +29,21 @@ Not every hostile actor is a separate class; some are registry-backed kinds usin
 
 ## Katana interaction
 
-The Katana (`engine/hero/katana/`) cuts registry kind `alien` only, in the phases patrol, escort and exiting, through a `blade` hit carrying `cut`; `aliens.js` routes it to `crew.js` `sliceKill`, which scores `ALIENS.killScore` once and hands the root to the pieces system. Every other kind (Terminator, T-Rex, Yeti, Patient Zero and any other) parries: a clang and sparks, no damage, no state change. No `accepts` list changed. The T-Rex accepts `blade` for the samurai, so the Katana filters on kind itself and never sends `blade` to a non-alien. Samurai are ignored.
+The Katana (`engine/hero/katana/`) cuts registry kind `alien` in the phases patrol, escort and exiting (and people, see `docs/weapons.md`), through a `blade` hit carrying `cut`; `aliens.js` routes it to `crew.js` `sliceKill`, which scores `ALIENS.killScore` once and hands the root to the pieces system. Every other kind (Terminator, T-Rex, Yeti, Patient Zero and any other) parries: a clang and sparks, no damage, no state change. No `accepts` list changed. The T-Rex accepts `blade` for the samurai, so the Katana filters on kind itself and never sends `blade` to a non-alien. Samurai and hunter ships are ignored.
+
+## Hunter ships
+
+Hunter ships are the registry kind `hunterShip` (`engine/aliens.js`; it has no `hitbox`, so the rifle still finds one once through `shipTargets`). It accepts `plasma`, `bullet`, `bolt` and `fire`, never `blade`, `emp` or `freeze`. All damage reaches `waves.js` `hitHunter` against a hull of 4, which ignores downed ships:
+
+| Weapon | Hull per hit |
+| --- | --- |
+| Plasma rifle | 1 (MEGA BEAM 5) |
+| Minigun | 0.25 a round |
+| Railgun and Lightning-tile bolt | 2 |
+| Fire Gun | 0.5 a tick (about 8 ticks) |
+| Katana | none (ignored) |
+
+Rocket Strike still damages hunters only through its existing ship path. The Black Hole Gun pulls hunters like any registry enemy within 100 m and consumes them. Hits below 1 point (minigun, fire) give a light spark and a quiet cue; the full burst is for plasma or the downing hit.
 
 ## Shared enemy states
 

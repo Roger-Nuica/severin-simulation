@@ -497,6 +497,9 @@ export function createRocketStrike(ctx, S, api) {
     /** @type {{e: any, kind: any}[]} */
     const reached = [];
     s.enemies.each((e, kind) => {
+      // The hunter ships are hit once, by the shipTargets loop below
+      // (ROCKET.shipDamage), as before they joined the register.
+      if (kind.kind === 'hunterShip') return;
       if (R.done.has(e)) return;
       const p = kind.position(e);
       if (Math.hypot(p.x - at.x, p.z - at.z) > reach) return;

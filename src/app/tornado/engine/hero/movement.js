@@ -188,7 +188,7 @@ export function createHeroMovement(ctx, S, api) {
     const katanaHeld = S.katanaRig && weapons
       ? S.katanaRig.step(
         dt, weapons.current() === 'katana', weapons.katanaState().drawn, frac,
-        S.state.phase === 'dazed' || S.state.phase === 'aiming'
+        S.state.phase === 'dazed' || (S.state.phase === 'aiming' && !weapons.katanaState().drawn)
       )
       : false;
     if (S.state.phase === 'dazed') {

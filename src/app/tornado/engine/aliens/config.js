@@ -124,6 +124,11 @@ export const ALIENS = {
   hunterShootRange: 60,
   hunterShotEvery: [1.6, 2.8],
   hunterHull: 4,             // hull points, as shipHull: one mega beam, or four shots
+  // Hull points a hunter loses to each weapon besides the plasma rifle, whose
+  // 1 (normal) and 5 (mega) stay in heroMode.js SHIP_DAMAGE: a minigun round,
+  // a railgun or Lightning bolt, and one tick of the fire gun. The katana
+  // (blade), the EMP and the freeze are not accepted at all.
+  hunterHit: { bullet: 0.25, bolt: 2, fire: 0.5 },
   hunterGlow: new THREE.Color(2.4, 0.3, 0.22),
   // The nuclear plants (engine/nuclear.js): every alien ship goes for them
   // while any is standing -- five hits bring one down. The hunters stand

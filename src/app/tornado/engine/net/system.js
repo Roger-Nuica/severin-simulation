@@ -9,6 +9,7 @@ import { PROTOCOL_VERSION, LIMITS, WEAPONS } from './protocol.js';
 import { HERO } from '../hero/config.js';
 import { HOLE } from '../player/blackHole.js';
 import { ENERGY } from '../player/energy.js';
+import { IMPACT_SCORE } from '../damage/config.js';
 
 /**
  * ===========================================================================
@@ -642,6 +643,25 @@ export function createNetSystem(ctx) {
       if (target) {
         const t = /** @type {{e: any, kind: any, q: {x: number, z: number}}} */ (target);
         if (ctx.systems.enemies.hit(t.e, t.kind, { type: 'blade', amount: 1, at: { x: t.q.x, z: t.q.z } })) credit(KILL_SCORE, p.id);
+      }
+      // People are not in the registry: the nearest standing civilian in the
+      // same arc is killed through the people owner (as the host's blade
+      // does) and credited at the person-kill value. `blade` is sent to no kind.
+      /** @type {any} */
+      let person = null;
+      let bestPerson = KATANA.reach;
+      ctx.systems.people.eachCuttable((/** @type {any} */ c) => {
+        const q = c.mesh.position;
+        const d = Math.hypot(q.x - ox, q.z - oz);
+        if (d > bestPerson) return;
+        const off = Math.atan2(q.x - ox, q.z - oz) - input.yaw;
+        if (Math.abs(Math.atan2(Math.sin(off), Math.cos(off))) > KATANA.halfAngle) return;
+        person = c;
+        bestPerson = d;
+      });
+      if (person) {
+        ctx.systems.people.explodePerson(person);
+        credit(IMPACT_SCORE, p.id);
       }
     } else if (name === 'blackhole') {
       a.cd = HOLE_COOLDOWN;

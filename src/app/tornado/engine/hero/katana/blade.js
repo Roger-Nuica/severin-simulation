@@ -5,19 +5,20 @@ import { KATANA_BLADE } from './config.js';
  * ===========================================================================
  * SECTION KT.11 -- Blade Mode (state machine)
  * ===========================================================================
- * Holding the left button with the Katana drawn for KATANA_BLADE.holdSeconds
- * enters Blade Mode: the world is held at KATANA_BLADE.holdScale through the
- * named time hold `bladeMode` (engine/time.js), Roger keeps his own clock
- * (Q3), and the mode lasts until
+ * Pressing Q with the Katana drawn (heroWeapons.katanaBladeToggle) enters
+ * Blade Mode: the world is held at KATANA_BLADE.holdScale through the named
+ * time hold `bladeMode` (engine/time.js), Roger keeps his own clock (Q3), and
+ * the mode lasts until
  *
- *  - the button comes up WITHOUT a line (a drag shorter than
- *    KATANA_BLADE.minLinePx). A release with a line is one cut, made at once
- *    (bladeCut.js) and the mode stays on, so the next press-drag-release is
+ *  - Q is pressed again (`cancel`),
+ *  - while it is on, a release with a line is one cut, made at once
+ *    (bladeCut.js), and the mode stays on, so the next press-drag-release is
  *    the next cut; a line that crosses nothing cuts nothing, books nothing
- *    and also leaves the mode on (the 4 s limit still bounds it),
- *  - the Katana is cancelled (wheel, Esc, blur, pointer-lock loss, car,
- *    daze, freeze, death, the run ending), which also discards any queued
- *    cut,
+ *    and also leaves the mode on, and a drag shorter than
+ *    KATANA_BLADE.minLinePx does nothing at all (no slash, the mode stays on),
+ *  - the Katana is cancelled (wheel, Esc, right-click out of first person,
+ *    blur, pointer-lock loss, car, daze, freeze, death, the run ending), which
+ *    also discards any queued cut,
  *  - the window's cuts are used up (KATANA_BLADE.maxCuts), or
  *  - KATANA_BLADE.maxSeconds of REAL time have passed.
  *
@@ -36,17 +37,17 @@ import { KATANA_BLADE } from './config.js';
  * @typedef {Object} KatanaBladeEnv what Blade Mode needs from Hero Mode
  * @property {() => boolean} canAct on foot, upright and not frozen
  * @property {() => ('none'|'miss'|'cut')} [cut] resolves the line just drawn
- *   (bladeCut.js): `none` when no line was drawn, `miss` when it crossed
- *   nothing, `cut` when something was cut; without it a release just ends the mode
+ *   (bladeCut.js): `none` when no line was drawn (a short drag), `miss` when it crossed
+ *   nothing, `cut` when something was cut; without it a release does nothing
  */
 
 /**
  * @typedef {Object} KatanaBlade
  * @property {() => boolean} active whether Blade Mode is on
- * @property {(heldSeconds: number, rawDt: number) => void} update per frame,
- *   real time; `heldSeconds` is how long the button has been down (0 when up)
+ * @property {(rawDt: number) => void} update per frame, real time (the
+ *   timeout, and leaving if he can no longer act)
  * @property {() => boolean} enter begin Blade Mode (false if on already or he cannot act)
- * @property {(r: {hold: number}) => boolean} release the button came up; true
+ * @property {(r?: {dx: number, dy: number}) => boolean} release the button came up; true
  *   if Blade Mode was on and took the release
  * @property {() => boolean} queueCut books one cut of the window (`release`
  *   does this for a cut that was made); false when the window's cuts are all booked
@@ -69,8 +70,6 @@ export function createKatanaBlade(ctx, env) {
   let elapsed = 0;
   let made = 0;
   let booked = 0;
-  /** Set when this press has begun a mode, so a timeout does not begin another while still held. */
-  let spent = false;
 
   /**
    * The one way out: releases the hold once, clears the window, and (unless
@@ -100,7 +99,6 @@ export function createKatanaBlade(ctx, env) {
     const sys = /** @type {any} */ (ctx).systems;
     if (on || !sys.time || !env.canAct()) return false;
     on = true;
-    spent = true;
     elapsed = 0;
     made = 0;
     booked = 0;
@@ -110,12 +108,10 @@ export function createKatanaBlade(ctx, env) {
   }
 
   /**
-   * @param {number} heldSeconds
    * @param {number} rawDt
    * @returns {void}
    */
-  function update(heldSeconds, rawDt) {
-    if (heldSeconds <= 0) spent = false;
+  function update(rawDt) {
     if (on) {
       // A daze, freeze, car or death ends it even if no cancel reached us.
       if (!env.canAct()) {
@@ -124,23 +120,19 @@ export function createKatanaBlade(ctx, env) {
       }
       elapsed += rawDt;
       if (elapsed >= KATANA_BLADE.maxSeconds || made >= KATANA_BLADE.maxCuts) leave(false);
-      return;
     }
-    if (!spent && heldSeconds >= KATANA_BLADE.holdSeconds) enter();
   }
 
   /**
-   * @param {{hold: number}} r
+   * @param {{dx: number, dy: number}} [r]
    * @returns {boolean}
    */
   function release(r) {
     if (!on) return false;
     void r;
     const outcome = env.cut ? env.cut() : 'none';
-    if (outcome === 'none') {
-      leave(false);
-      return true;
-    }
+    // No line (a drag shorter than minLinePx): nothing happens, the mode stays on.
+    if (outcome === 'none') return true;
     // A cut counts towards the window's limit (the mode ends after the last);
     // a line that crossed nothing does not.
     if (outcome === 'cut' && queueCut()) cutDone();
@@ -166,13 +158,7 @@ export function createKatanaBlade(ctx, env) {
     active, update, enter, release, queueCut, cutDone,
     cuts: () => made, queued: () => booked,
     cancel: () => leave(false),
-    clear: () => {
-      leave(true);
-      spent = false;
-    },
-    dispose: () => {
-      leave(true);
-      spent = false;
-    }
+    clear: () => leave(true),
+    dispose: () => leave(true)
   };
 }

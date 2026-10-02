@@ -26,9 +26,12 @@ import { SAMURAI } from './samuraiModel.js';
  *  - **The ramp** runs out towards the camera, the aliens' own ramp
  *    (aliens/models.js buildAlienRamp) in gold, over ALIENS.rampSeconds;
  *    the squad comes down it one every ALIENS.exitEvery seconds.
- *  - **The stay**: SUPPORT.stay seconds once the last is down (or until
- *    there is none left), then they go back up the ramp, it folds away, and
- *    the ship lifts off and is gone. Only then does SUPPORT.cooldown start.
+ *  - **The leaving**: once the last is down the ramp, it folds away and the
+ *    ship lifts off and is gone (removeShip); it does not wait for the
+ *    squad, which stays on the ground (spaceship/samurai.js) until the area
+ *    has been clear for SUPPORT.clearGrace seconds or SUPPORT.stay runs out.
+ *    SUPPORT.cooldown starts once the squad has ended AND the ship has gone
+ *    (finishSupport), so a second call can never overlap a living squad.
  * One squad at a time.
  */
 
@@ -67,7 +70,8 @@ export function createSpaceshipDescent(ctx, S, api) {
    * @returns {boolean} whether it was called
    */
   function callSamurai(x, z) {
-    if (S.state.phase !== 'idle' || !S.group) return false;
+    if (S.state.phase !== 'idle' || S.state.squad || !S.group) return false;
+    S.state.squad = true;
     S.drop.set(x, 0, z);
     S.landing.copy(S.drop);
     // The ramp runs out towards the camera, so the squad comes down it in
@@ -107,6 +111,7 @@ export function createSpaceshipDescent(ctx, S, api) {
     S.state.spawned = 0;
     S.state.exitTimer = 0;
     S.state.stay = SUPPORT.stay;
+    S.state.clearFor = 0;
     placeShip();
 
     // The camera over to the drop zone for the landing, and back.
@@ -290,20 +295,9 @@ export function createSpaceshipDescent(ctx, S, api) {
         api.spawnUnit(S.state.spawned++);
       }
       if (S.state.spawned >= SAMURAI.count && S.state.timer > SAMURAI.count * ALIENS.exitEvery + api.rampSeconds()) {
-        S.state.phase = 'guarding';
-        S.state.timer = 0;
-      }
-    } else if (phase === 'guarding') {
-      S.state.stay -= dt;
-      if (S.state.stay <= 0 || api.standing() === 0) {
-        api.recall();
-        S.state.phase = 'boarding';
-        S.state.timer = 0;
-        if (api.standing() > 0) api.showBanner('SAMURAI SUPPORT', 'The squad is withdrawing');
-      }
-    } else if (phase === 'boarding') {
-      // Everyone up the ramp, or the ship goes without the stragglers.
-      if (api.allAboard() || S.state.timer > 30) {
+        // The ramp is empty: the squad is on the ground and on its own
+        // clock from here (api.beginGuard); the ship does not wait for it.
+        api.beginGuard();
         S.state.phase = 'retracting';
         S.state.timer = 0;
       }
@@ -315,24 +309,31 @@ export function createSpaceshipDescent(ctx, S, api) {
         S.state.timer = 0;
       }
     }
-    // The belt runs the way they are going: down while they come out, up
-    // while they go back.
+    // The belt runs down the ramp, the way they came out.
     if (belt && dt > 0) {
-      const dirn = phase === 'boarding' ? 1 : -1;
-      belt.offset.x = (belt.offset.x + dirn * (alienRampLength() / ALIENS.climbSeconds / ALIENS.beltStripe) * dt + 1) % 1;
+      belt.offset.x = (belt.offset.x - (alienRampLength() / ALIENS.climbSeconds / ALIENS.beltStripe) * dt + 1) % 1;
     }
   }
 
   /**
-   * The ship gone, the squad with it; the cooldown starts now.
+   * The ship gone (the squad stays on the ground): the cooldown starts once
+   * the squad has ended as well.
    * @returns {void}
    */
   function depart() {
-    api.clearSquad();
     removeShip();
     S.state.phase = 'idle';
-    S.cooldown.samurai = SUPPORT.cooldown;
     ctx.systems.spaceshipSound.fadeOutSpaceshipSound();
+    finishSupport();
+  }
+
+  /**
+   * Starts the samurai cooldown once, and only when both the ship has gone
+   * and the squad has ended; called by whichever of the two ends last.
+   * @returns {void}
+   */
+  function finishSupport() {
+    if (S.state.phase === 'idle' && !S.state.squad) S.cooldown.samurai = SUPPORT.cooldown;
   }
 
   /** @returns {void} */
@@ -345,5 +346,5 @@ export function createSpaceshipDescent(ctx, S, api) {
     if (S.light) S.light.intensity = 0;
   }
 
-  return { tallestBuilding, callSamurai, altitudeAt, brakeAt, placeShip, updateShip, removeShip };
+  return { tallestBuilding, callSamurai, altitudeAt, brakeAt, placeShip, updateShip, removeShip, finishSupport };
 }

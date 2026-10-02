@@ -343,7 +343,7 @@ export function createAlienShip(ctx, S, api) {
       const p = hunter.group.position;
       const s = ALIENS.hunterScale;
       out.push({
-        x: p.x, y: p.y, z: p.z, radius: 15 * s, bottom: p.y + 0.5 * s, top: p.y + 7 * s, name: 'HUNTER SHIP',
+        x: p.x, y: p.y, z: p.z, radius: 15 * s, bottom: p.y + 0.5 * s, top: p.y + 7 * s, name: 'HUNTER SHIP', hunter,
         hit: (points, at) => api.hitHunter(hunter, points, at)
       });
     }
