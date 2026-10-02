@@ -206,14 +206,14 @@ export function createStrikeTargetingSystem(ctx) {
    * One bolt landing, and everything it does there.
    * @param {number} x
    * @param {number} z
-   * @param {boolean} [roger] Roger's own bolt (the railgun): a hunter it stops is his kill
+   * @param {boolean} [roger] Roger's own railgun bolt: a tamer flash, and a hunter it stops is his kill
    * @returns {void}
    */
   function strike(x, z, roger = false) {
     const s = ctx.systems;
     const at = new THREE.Vector3(x, 0, z);
     const power = STRIKE.power[0] + Math.random() * (STRIKE.power[1] - STRIKE.power[0]);
-    s.lightning.strikeAt(at, power);
+    s.lightning.strikeAt(at, power, roger);
     s.explosions.spawnImpactBurst(new THREE.Vector3(x, 0.8, z), 0.7);
     const { damageFromImpact, addDamageScore } = s.damage;
 

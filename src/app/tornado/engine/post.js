@@ -1,6 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { LIGHTING } from './lightingTuning.js';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { GTAOShader, generateMagicSquareNoise } from 'three/examples/jsm/shaders/GTAOShader.js';
 
@@ -53,9 +54,9 @@ import { GTAOShader, generateMagicSquareNoise } from 'three/examples/jsm/shaders
 // Threshold is in linear luminance. 0.9 sits well above anything the scene
 // lights produce on ordinary surfaces and below every HDR source listed in
 // the header, with a soft knee so sources ramp in rather than popping.
-const BLOOM_THRESHOLD = 0.9;
+const BLOOM_THRESHOLD = LIGHTING.bloomThreshold;
 const BLOOM_KNEE = 0.35;
-const BLOOM_STRENGTH = 0.95;
+const BLOOM_STRENGTH = LIGHTING.bloomStrength;
 const BLOOM_RADIUS = 0.55;
 // Per-mip tint, finest to widest: the tight core stays the source's own
 // colour, the wide halo drifts warm. This is most of the "warm highlights

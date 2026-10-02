@@ -3,6 +3,7 @@ import { mulberry32 } from './roadsDecor.js';
 import { basinFootprint } from '../flood/basin.js';
 import { VIADUCT_Z, ROUTE } from './viaduct/config.js';
 import { STOREY } from '../scale.js';
+import { LIGHTING } from '../lightingTuning.js';
 
 /**
  * ===========================================================================
@@ -46,7 +47,7 @@ const BACKDROP_HIP_ROOF_CHANCE = 0.45;
 const BACKDROP_MAX_BUILDINGS = 900;
 const BACKDROP_MAX_TREES = 1400;
 const BACKDROP_WINDOW_GLOW = 0xffc070;
-const BACKDROP_WINDOW_HDR = 1.9;
+const BACKDROP_WINDOW_HDR = 1.9 * LIGHTING.buildingEmissiveScale;
 const BACKDROP_WINDOW_LIT_FRACTION = 0.45;
 // Destruction. A block goes down over this long, to this fraction of its
 // height, leaning a little; the funnel takes anything inside this multiple
