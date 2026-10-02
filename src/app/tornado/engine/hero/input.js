@@ -8,7 +8,7 @@ import { HERO } from './config.js';
  * ===========================================================================
  * W A S D to run, right-click to raise the weapon into first person (the Katana included),
  * click or Enter to fire,
- * the mouse wheel to switch weapon, Q E R G for the abilities, Enter at a
+ * the mouse wheel to switch weapon, Q E R G C for the abilities, Enter at a
  * car's door to drive.
  *
  * The keyboard and mouse are read by engine/player/input.js, which changes
@@ -64,9 +64,9 @@ export function createHeroInput(ctx, S, api) {
    *  - Esc: the weapon down;
    *  - mouse wheel: the next or the previous weapon;
    *  - V: Invincible on / off (hero/screen.js toggleInvincible);
- *  - Q E R G: the abilities (engine/player/abilities.js) -- Time Slow (Bullet
+ *  - Q E R G C: the abilities (engine/player/abilities.js) -- Time Slow (Bullet
    *    Time with the minigun), Teleport, EMP, the grappling hook
-   *    (engine/player/grapple.js) -- not while dying, safe or
+   *    (engine/player/grapple.js), telekinesis (engine/player/telekinesis.js) -- not while dying, safe or
    *    driving; the Katana keeps Q as Time Slow like every other weapon;
    *  - right button: raise / lower the weapon; left button: fire while it is
    *    raised. With the Katana in first person, the left button held and
@@ -207,6 +207,8 @@ export function createHeroInput(ctx, S, api) {
    */
   function pullTrigger() {
     if (S.state.phase !== 'aiming') return;
+    // A car held by telekinesis goes first: the click throws it.
+    if (ctx.systems.telekinesis && ctx.systems.telekinesis.throwHeld()) return;
     // The Katana has no trigger (and no rifle charge): its click is katanaPress.
     if (S.weapons.current() === 'katana') return;
     if (!S.weapons.triggerDown()) api.beginCharge();

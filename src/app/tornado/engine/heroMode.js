@@ -158,6 +158,7 @@ export { SHIP_DAMAGE } from './hero/config.js';
  *   rogerTarget: () => ({x: number, z: number, onFoot: boolean}|null),
  *   placeRoger: (x: number, z: number) => boolean,
  *   rogerFacing: () => ({x: number, z: number, heading: number}|null),
+ *   rogerAim: () => (THREE.Vector3|null),
  *   standable: (x: number, z: number) => boolean,
  *   freezeRoger: (seconds: number) => boolean,
  *   zipRoger: (x: number, z: number, speed: number) => boolean,
@@ -439,7 +440,7 @@ export function createHeroModeSystem(ctx) {
       <div class="hero-row hero-door">🚗 ENTER — get in the car</div>
       <div class="hero-row hero-drive">🚗 DRIVING · E / Q / Esc — get out</div>
       <div class="hero-msg"></div>
-      <div class="hero-keys">W A S D run · Right-click raise / lower weapon · Wheel switch weapon<br>Click or Enter fire · rifle: hold 2 s for a MEGA BEAM · Q time slow (bullet time with the minigun) · E teleport · R EMP · G grappling hook · V invincible<br>T Landing Support (then R samurai · T rocket · Esc cancel) · Enter at a car's glowing door to drive</div>`;
+      <div class="hero-keys">W A S D run · Right-click raise / lower weapon · Wheel switch weapon<br>Click or Enter fire · rifle: hold 2 s for a MEGA BEAM · Q time slow (bullet time with the minigun) · E teleport · R EMP · G grappling hook · C telekinesis (C again or click to throw) · V invincible<br>T Landing Support (then R samurai · T rocket · Esc cancel) · Enter at a car's glowing door to drive</div>`;
     container.appendChild(S.hud);
 
     S.over = document.createElement('div');
@@ -843,7 +844,7 @@ export function createHeroModeSystem(ctx) {
   }
 
   return {
-    initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, standable, freezeRoger,
+    initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, rogerAim: () => (S.state.phase === 'aiming' ? S.aimDir : null), standable, freezeRoger,
     zipRoger, rogerZipping: () => S.state.zipActive, stopZip: () => { S.state.zipActive = false; }, solidAlong: api.solidAlong, rogerFrozen: () => S.state.frozen > 0, rogerShielded: () => S.state.spawnShield > 0 || S.state.invincible, rogerPhase: () => S.state.phase, killRoger: api.killRoger, hitArea: api.hitArea, chipTornado: api.chipTornado,
     resetHero, disposeHero,
     // Co-op (engine/net/system.js): Roger's pose for the shared snapshot, and

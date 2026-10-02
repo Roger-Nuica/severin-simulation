@@ -23,7 +23,8 @@ import { fullHealth, healthAfter, tableDamage } from './health/enemyDamage.js';
  * (the minigun), 'bolt' (lightning, the railgun), 'emp', 'fire', 'freeze',
  * 'gravity' (the black hole), 'cleanse' (Mr. Proper), 'blade' (a samurai's
  * sword, Landing Support: `amount` is the cut; the Katana's blow on a kind
- * that is not an alien carries no cut).
+ * that is not an alien carries no cut), 'throw' (a car thrown by
+ * telekinesis, player/telekinesis.js).
  *
  * Health (decision D1: every weapon hurts every enemy; the old immunities
  * became weaknesses). Each enemy has the health of engine/health/damageTable.js
@@ -49,7 +50,7 @@ import { fullHealth, healthAfter, tableDamage } from './health/enemyDamage.js';
  * through, and what the entity caps count (engine/perf/caps.js).
  */
 
-/** @typedef {'plasma'|'bullet'|'bolt'|'emp'|'fire'|'freeze'|'gravity'|'cleanse'|'blade'} DamageType */
+/** @typedef {'plasma'|'bullet'|'bolt'|'emp'|'fire'|'freeze'|'gravity'|'cleanse'|'blade'|'throw'} DamageType */
 /**
  * `cut` is only read by the aliens' adapter, for the Katana's blade hit: the
  * alien is removed and `takeOver` receives its root (see crew.js sliceKill).

@@ -29,6 +29,7 @@ not a contract: when one is picked, it gets a plan and its numbers go into
   ahead.
 - [ ] **Decoy clone** — a holographic Roger the enemies attack for a few
   seconds.
-- [ ] **Telekinesis** — lift a car with the mouse and throw it.
+- [x] **Telekinesis** — lift a car with the mouse and throw it (shipped
+  2026-10-02 on C, `engine/player/telekinesis.js`).
 - [ ] **Jetpack / double jump** — a short flight over buildings with flame and
   sound.
