@@ -191,7 +191,11 @@ export function createPostSystem(ctx) {
     // frame-rate independent; `bladeVignetteAt` is the last frame's clock.
     bladeVignette: 0,
     bladeVignetteShown: 0,
-    bladeVignetteAt: 0
+    bladeVignetteAt: 0,
+    // Solar storm surges (engine/solarStorm.js): 0..1, set by it every frame
+    // while it runs. The picture tears into shifted bands with the colour
+    // channels split, and scanlines show -- the camera is electronics too.
+    glitch: 0
   };
 
   const FULLSCREEN_VERTEX = `
@@ -285,7 +289,9 @@ export function createPostSystem(ctx) {
         uDebugView: { value: 0 },
         uLensCenter: { value: new THREE.Vector2() },
         uLensRadius: { value: 0 },
-        uLensStrength: { value: 0 }
+        uLensStrength: { value: 0 },
+        uGlitch: { value: 0 },
+        uGlitchSeed: { value: 0 }
       },
       defines: {
         GRADE_PIVOT: GRADE_PIVOT.toFixed(4),
@@ -319,6 +325,8 @@ export function createPostSystem(ctx) {
         uniform vec2 uLensCenter;
         uniform float uLensRadius;
         uniform float uLensStrength;
+        uniform float uGlitch;
+        uniform float uGlitchSeed;
         varying vec2 vUv;
 
         const vec3 LUMA = vec3( 0.2126, 0.7152, 0.0722 );
@@ -381,6 +389,20 @@ export function createPostSystem(ctx) {
               texture2D( tScene, lensSample( vUv, -LENS_CHROMA ) ).b
             );
             bloomUv = lensSample( vUv, 0.0 );
+          } else if ( uGlitch > 0.001 ) {
+            // A solar storm surge: some horizontal bands torn sideways, a
+            // new set every time the seed moves, and the channels split.
+            float band = floor( vUv.y * 42.0 );
+            float h = fract( sin( band * 91.7 + uGlitchSeed ) * 43758.5453 );
+            float tear = step( 1.0 - 0.32 * uGlitch, h ) * ( h - 0.5 ) * 0.07 * uGlitch;
+            vec2 g = vec2( vUv.x + tear, vUv.y );
+            float split = 0.007 * uGlitch;
+            scene = vec3(
+              texture2D( tScene, g + vec2( split, 0.0 ) ).r,
+              texture2D( tScene, g ).g,
+              texture2D( tScene, g - vec2( split, 0.0 ) ).b
+            );
+            bloomUv = g;
           } else {
             scene = texture2D( tScene, vUv ).rgb;
           }
@@ -430,6 +452,8 @@ export function createPostSystem(ctx) {
           // slow gradient, which is exactly where 8-bit banding shows.
           float noise = fract( sin( dot( gl_FragCoord.xy, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
           p += ( noise - 0.5 ) / 255.0;
+
+          if ( uGlitch > 0.001 ) p *= 1.0 - 0.12 * uGlitch * step( 0.5, fract( gl_FragCoord.y * 0.5 ) );
 
           p = max( p, vec3( 0.0 ) );
           gl_FragColor = vec4( p * p, 1.0 );
@@ -718,6 +742,8 @@ export function createPostSystem(ctx) {
     u.uSplit.value = GRADE_SPLIT_BASE + intensity * GRADE_SPLIT_INTENSITY;
     u.uDebugView.value = Post.debugView;
     u.uExposure.value = Post.exposure * Post.exposureScale * Post.brightness;
+    u.uGlitch.value = Post.glitch;
+    if (Post.glitch > 0.001 && Math.random() < 0.35) u.uGlitchSeed.value = Math.random() * 100;
     updateLens(camera);
     drawQuad(renderer, Post.compositeMaterial, null, null);
 

@@ -220,8 +220,11 @@ export function createHeroCar(ctx, S, api) {
   function updateCar(dt) {
     const car = S.driven;
     const T = CHASE_TUNE;
-    const fwd = S.keys.up;
-    const back = S.keys.down;
+    // A solar storm (engine/solarStorm.js): the engine is dead, so the car
+    // only coasts -- it still steers while it rolls.
+    const dead = !!(ctx.systems.solarStorm && ctx.systems.solarStorm.stalled());
+    const fwd = S.keys.up && !dead;
+    const back = S.keys.down && !dead;
     if (fwd && !back) S.state.carSpeed += T.accel * dt;
     else if (back && !fwd) S.state.carSpeed -= T.accel * dt;
     else {

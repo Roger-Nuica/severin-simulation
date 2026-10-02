@@ -470,7 +470,10 @@ export function createMothershipSystem(ctx) {
     }
     // Smooth Criminal (engine/smoothCriminal.js): it hangs where it is with
     // its beam off, and takes up again where it left off.
-    if (ctx.systems.smoothCriminal && ctx.systems.smoothCriminal.peace() && state.phase !== 'leaving') {
+    // A solar storm (engine/solarStorm.js) jamming it does the same: the beam
+    // cuts out until the surge passes.
+    const jammed = !!(ctx.systems.solarStorm && ctx.systems.solarStorm.jamAt(g.position.x, g.position.z) > 0.5);
+    if (((ctx.systems.smoothCriminal && ctx.systems.smoothCriminal.peace()) || jammed) && state.phase !== 'leaving') {
       if (beam) beam.visible = false;
       if (foot) foot.visible = false;
       state.held = true;

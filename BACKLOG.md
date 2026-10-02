@@ -10,9 +10,10 @@ not a contract: when one is picked, it gets a plan and its numbers go into
   dents cars, dazes people. Builds on the shared particle pool.
 - [ ] **Sandstorm (haboob)** — a brown wall of dust crosses town; visibility
   drops to a few metres, and aliens and Terminators lose sight of Roger.
-- [ ] **Solar storm / blackout** — auroras overhead, the power fails, lights go
+- [x] **Solar storm / blackout** — auroras overhead, the power fails, lights go
   out, cars stall, Terminators and ships glitch for a few seconds. Ties in
-  with the EMP and the power lines.
+  with the EMP and the power lines (shipped 2026-10-02 as the Solar Storm
+  tile, `engine/solarStorm.js`; Roger's EMP runs down the lines during it).
 - [x] **Gravity rift** — inside a zone, cars, people and aliens float up, then
   drop all at once and explode where they land (shipped 2026-10-02 as
   the Gravitron weapon, `engine/gravityRift.js`).

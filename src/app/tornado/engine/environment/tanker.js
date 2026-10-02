@@ -486,6 +486,8 @@ export function createTankerSystem(ctx) {
     const ahead = firstBlockAhead(ctx, (along) => ringPoint(angle, front + along), 0, TANKER.lookAhead, TANKER.lookStep,
       box.hw + TANKER.sideRoom, self);
     let want = TANKER.speed;
+    // A solar storm (engine/solarStorm.js): the engine has died.
+    if (ctx.systems.solarStorm && ctx.systems.solarStorm.stalled()) want = 0;
     if (ahead !== Infinity) {
       want *= Math.min(1, Math.max(0, (ahead - TANKER.stopGap) / (TANKER.lookAhead - TANKER.stopGap)));
       if (ahead <= TANKER.stopGap) want = 0;

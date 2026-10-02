@@ -161,6 +161,59 @@ export function createPowerFaults(ctx, S, api) {
   }
 
   /**
+   * A surge, not a fault: the nearest standing pole to a point, if one is
+   * close enough and not still cooling, crackles with current -- sparks, a
+   * flash, a zap, and a bolt jumping to one or two of its neighbours -- and
+   * nothing more. It sets nothing alight, brings nothing down and does not
+   * walk the network: the overloaded grid of a solar storm
+   * (engine/solarStorm.js), and the amplified EMP running down the lines
+   * (player/emp.js), which would otherwise burn the whole town.
+   * @param {number} x
+   * @param {number} z
+   * @param {number} radius
+   * @returns {THREE.Vector3|null} where it arced (the crossarm), or null
+   */
+  function surgeAt(x, z, radius) {
+    if (!S.sparks) return null;
+    api.ensureGraph();
+    let best = null;
+    let bestDist = radius;
+    for (const pole of S.poles) {
+      if (pole.down || pole.node.cooldown > 0) continue;
+      const d = Math.hypot(pole.x - x, pole.z - z);
+      if (d < bestDist) {
+        bestDist = d;
+        best = pole;
+      }
+    }
+    if (!best) return null;
+    const node = best.node;
+    node.cooldown = NODE_COOLDOWN;
+    S.cooling.push(node);
+    throwSparks(node.position, SPARK_PER_ARC);
+    addFlash(node.position, HOP_FLASH);
+    ctx.systems.gamefeel.event('arc', node.position);
+    ctx.systems.powerArcSound.playZap(0.8);
+    const near = (S.adjacency.get(node.id) || []).map(id => S.nodes.get(id)).filter(Boolean);
+    for (let n = 0; n < 2 && near.length; n++) {
+      const to = near.splice(Math.floor(Math.random() * near.length), 1)[0];
+      api.spawnBolt(node, to);
+      const span = S.edgeSpans.get(edgeKey(node, to));
+      if (span) span.flash = WIRE_FLASH_TIME;
+    }
+    return node.position;
+  }
+
+  /**
+   * Where every pole still standing is, for whoever wants to walk the lines
+   * (the amplified EMP, player/emp.js). Read-only.
+   * @returns {{x: number, z: number}[]}
+   */
+  function standingPoles() {
+    return S.poles.filter(p => !p.down);
+  }
+
+  /**
    * Broad phase for flying debris against the network (debrisImpacts.js),
    * over the segment the piece covered this frame: a standing pole it passes
    * through comes down and faults; a span it cuts snaps and faults at the
@@ -249,5 +302,5 @@ export function createPowerFaults(ctx, S, api) {
     }
   }
 
-  return { throwSparks, addFlash, flickerWindows, energise, branchFrom, seedFault, faultAt, debrisStrike, updateFronts, sweepFunnels };
+  return { throwSparks, addFlash, flickerWindows, energise, branchFrom, seedFault, faultAt, surgeAt, standingPoles, debrisStrike, updateFronts, sweepFunnels };
 }

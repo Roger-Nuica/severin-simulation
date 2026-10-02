@@ -11,6 +11,8 @@ import { createDownburstSystem } from './engine/downburst.js';
 import { createStrikeTargetingSystem } from './engine/strikeTargeting.js';
 import { createDownburstSoundSystem } from './engine/sound/downburst.js';
 import { createGravityRiftSystem } from './engine/gravityRift.js';
+import { createSolarStormSystem } from './engine/solarStorm.js';
+import { createSolarStormSoundSystem } from './engine/sound/solarStorm.js';
 import { createFissureSystem } from './engine/fissure.js';
 import { createSpaceshipSystem } from './engine/spaceship.js';
 import { createKeyPanSystem } from './engine/keyPan.js';
@@ -750,6 +752,10 @@ export function createSimulation(container) {
   const { initDownburst, updateDownburst, resetDownburst, disposeDownburst } = downburstSystem;
   // Gravity lets go inside a circle, then slams back (engine/gravityRift.js).
   register('gravityRift', createGravityRiftSystem(ctx), { auto: true });
+  // A coronal mass ejection: aurora, blackout, engines and machines down
+  // (engine/solarStorm.js).
+  register('solarStormSound', createSolarStormSoundSystem(ctx));
+  register('solarStorm', createSolarStormSystem(ctx), { auto: true });
 
   // Lightning called down by the player (engine/strikeTargeting.js).
   const strikeTargetingSystem = createStrikeTargetingSystem(ctx);
@@ -1055,6 +1061,7 @@ export function createSimulation(container) {
     if (!Sim.state.paused) updateEarthquake(dt);
     if (!Sim.state.paused) updateDownburst(dt);
     if (!Sim.state.paused) ctx.systems.gravityRift.updateGravityRift(dt);
+    if (!Sim.state.paused) ctx.systems.solarStorm.updateSolarStorm(dt);
     if (!Sim.state.paused) updateStrikeTargeting(dt);
     if (!Sim.state.paused) updateChasms(dt);
     if (!Sim.state.paused) updateTerminator(dt);
