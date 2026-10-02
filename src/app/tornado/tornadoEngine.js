@@ -106,6 +106,7 @@ import { createFuelFireSystem } from './engine/fuelFire.js';
 import { createCrowdSystem } from './engine/environment/crowd.js';
 import { createTeleportSystem } from './engine/player/teleport.js';
 import { createGrappleSystem } from './engine/player/grapple.js';
+import { createTelekinesisSystem } from './engine/player/telekinesis.js';
 import { createEmpSystem } from './engine/player/emp.js';
 import { createTrexSystem } from './engine/trex.js';
 import { createFreezeSystem } from './engine/effects/freeze.js';
@@ -349,6 +350,7 @@ export function createSimulation(container) {
   register('abilities', createAbilitySystem(ctx), { auto: true });
   register('teleport', createTeleportSystem(ctx), { auto: true });
   register('grapple', createGrappleSystem(ctx), { auto: true });
+  register('telekinesis', createTelekinesisSystem(ctx), { auto: true });
   register('emp', createEmpSystem(ctx), { auto: true });
   register('playerInput', createPlayerInput(ctx), { auto: true });
   register('enemies', createEnemyRegistry(ctx), { auto: true });
@@ -1162,6 +1164,7 @@ export function createSimulation(container) {
     ctx.systems.teleport.updateTeleport(rawDt);
     // The grappling hook's cable, on real time.
     ctx.systems.grapple.updateGrapple(rawDt);
+    ctx.systems.telekinesis.updateTelekinesis(rawDt);
     ctx.systems.emp.updateEmp(rawDt);
     // Last thing before the render: every system has moved its people and
     // trees for this frame.

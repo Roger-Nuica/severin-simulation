@@ -182,6 +182,7 @@ export const HEALTH = deepFreeze({
     rocket: 100,
     explosion: 100,
     emp: 0,
+    throw: 40,
   },
 
   // Self-hit guards. `muzzleGuard`: an impact closer than this to the muzzle

@@ -1,7 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
 import { bannerHost } from '../utils/banners.js';
-import { BLAST_SIZE } from './player/energy.js';
+import { blowUpCar } from './effects/carBlast.js';
 
 /**
  * ===========================================================================
@@ -21,9 +21,9 @@ import { BLAST_SIZE } from './player/energy.js';
  *               caps below) to its own height;
  *  - 'hang':    a moment of weightless stillness, the column flickering;
  *  - 'drop':    the slam. Everything lifted is thrown down at dropSpeed and
- *               goes up on contact: a car burns out with a fireball (the
- *               fuel-station chain's look, engine/fuelFire/chain.js), a
- *               person and a piece of debris burst, an alien is killed
+ *               goes up on contact: a car burns out with a fireball
+ *               (effects/carBlast.js), a person and a piece of debris
+ *               burst, an alien is killed
  *               through its own kill path (enemies.js `defeat`). Whatever
  *               has not landed after dropMaxSeconds goes up where it is;
  *  - 'fading':  the column and ring fade out.
@@ -64,9 +64,7 @@ export const RIFT = {
   // pool is 36 slots, explosions/index.js).
   debrisBurstChance: 0.35,
   alienBlast: 1.1,
-  // People standing next to a car going up go with it (fuelFire/chain.js).
-  carKillRadius: 3.5,
-  score: { open: 300, car: 60, alien: 0 },
+  score: { open: 300 },
   columnHeight: 46,
   colour: 0x9d6bff,
   bannerSeconds: 3.2
@@ -352,44 +350,13 @@ export function createGravityRiftSystem(ctx) {
   }
 
   /**
-   * One car going up where it landed: the fuel-station chain's look
-   * (fuelFire/chain.js explode), without setting off its neighbours.
-   * @param {Object} car
-   * @returns {void}
-   */
-  function blowCar(car) {
-    const p = car.mesh.position;
-    scratch.set(p.x, p.y + 1.2, p.z);
-    ctx.systems.explosions.spawnImpactBurst(scratch, RIFT.carBlast);
-    ctx.systems.gamefeel.event('gas', scratch);
-    car.velocity.set((Math.random() - 0.5) * 6, 7 + Math.random() * 5, (Math.random() - 0.5) * 6);
-    car.angularVelocity.set((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 6);
-    if (car.damageState === 'intact') {
-      car.damageState = 'tipped';
-      Sim.stats.vehiclesOverturned++;
-    }
-    car.mesh.traverse((/** @type {any} */ o) => {
-      if (o.userData && o.userData.carPart === 'body' && o.material && o.material.color) {
-        o.material.color.multiplyScalar(0.12);
-      }
-    });
-    /** @type {Object[]} */
-    const caught = [];
-    ctx.systems.area.forEachInRadius({ x: p.x, z: p.z, radius: RIFT.carKillRadius, targets: ['person'] },
-      (/** @type {any} */ hit) => caught.push(hit.target));
-    for (const person of caught) if (person.mesh.parent) ctx.systems.people.explodePerson(person);
-    ctx.systems.damage.addDamageScore(RIFT.score.car);
-    ctx.events.emit('explosion', { x: p.x, z: p.z, size: BLAST_SIZE.car, source: car });
-  }
-
-  /**
    * Whatever it was, going up where it landed.
    * @param {Object} obj
    * @returns {void}
    */
   function blowUp(obj) {
     if (!alive(obj)) return;
-    if (obj.type === 'car') blowCar(obj);
+    if (obj.type === 'car') blowUpCar(ctx, obj, RIFT.carBlast);
     else if (obj.type === 'person') {
       ctx.systems.people.explodePerson(obj);
       ctx.systems.gamefeel.event('person', obj.mesh.position);

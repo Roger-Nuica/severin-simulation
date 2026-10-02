@@ -236,3 +236,11 @@ test('the black hole stays an outright kill: it has no table column for the thre
     assert.equal(tableDamage(kind, { type: 'blackHole' }), 0);
   }
 });
+
+test('telekinesis: a thrown car (throw) kills an alien, takes a third of a Terminator, a fifth of the T-Rex', () => {
+  assert.equal(weaponColumn({ type: 'throw' }), 'throw');
+  assert.equal(tableDamage('alien', { type: 'throw' }), fullHealth('alien'));
+  assert.equal(tableDamage('terminator', { type: 'throw' }), 10);
+  assert.equal(tableDamage('trex', { type: 'throw' }), 8);
+  assert.equal(tableDamage('yeti', { type: 'throw' }), 6);
+});

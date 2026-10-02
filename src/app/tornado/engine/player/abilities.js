@@ -21,6 +21,8 @@
  *                           early, and every hanging bullet goes on.
  *   E  Teleport             a short jump the way he looks (player/teleport.js)
  *   R  EMP beam             (player/emp.js)
+ *   G  Grappling hook       (player/grapple.js)
+ *   C  Telekinesis          lift a car and throw it (player/telekinesis.js)
  * (Keys moved 2026-10-01, on request: W A S D walk now; the black hole that
  * was on R is the Black Hole Gun, a weapon.)
  *

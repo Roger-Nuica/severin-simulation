@@ -39,6 +39,8 @@ export const weaponColumn = (hit) => {
     case 'fire':
     case 'blade':
     case 'emp':
+    // A car thrown by telekinesis (player/telekinesis.js).
+    case 'throw':
       return hit.type;
     default:
       return null;

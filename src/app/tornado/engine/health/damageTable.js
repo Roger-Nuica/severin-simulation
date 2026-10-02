@@ -24,9 +24,12 @@
 /** Fraction of an enemy's health a weapon with no real effect on it removes per hit. */
 export const CHIP_FRACTION = 0.02;
 
-/** Weapon columns, in table order. `bullet` is the minigun, `bolt` the railgun. */
+/**
+ * Weapon columns, in table order. `bullet` is the minigun, `bolt` the
+ * railgun, `throw` a car thrown by Roger's telekinesis (player/telekinesis.js).
+ */
 export const WEAPONS = Object.freeze([
-  'plasma', 'mega', 'bullet', 'bolt', 'fire', 'blade', 'rocket', 'lightning', 'emp'
+  'plasma', 'mega', 'bullet', 'bolt', 'fire', 'blade', 'rocket', 'lightning', 'emp', 'throw'
 ]);
 
 /** Enemy kinds that only Roger's weapons may hurt (never enemies or disasters). */
@@ -77,21 +80,24 @@ const row = (health, strong) =>
  * Damage per weapon per enemy kind. A comment per row names the source.
  * Cells not listed in a row are chips (see `CHIP_FRACTION`).
  */
+// Telekinesis (`throw`, added 2026-10-02): a thrown car kills an alien or a
+// clone, takes a third of a Terminator or pursuer, a fifth of the T-Rex and
+// Yeti, a third of Patient Zero; ships, plants, samurai and the funnel chip.
 export const WEAPON_VS_ENEMY = Object.freeze({
   // R-034/R-013: plasma, bolt, fire kill an alien; MEGA BEAM kills in the blast; katana slice kills (R-051).
-  alien: row(ENEMY_HEALTH.alien, { plasma: 1, mega: 1, bolt: 1, lightning: 1, fire: 1, blade: 1 }),
+  alien: row(ENEMY_HEALTH.alien, { plasma: 1, mega: 1, bolt: 1, lightning: 1, fire: 1, blade: 1, throw: 1 }),
   // R-029/R-013: 30 rounds; EMP, Lightning, railgun bolt and MEGA BEAM bring it down; three katana blows destroy it (R-051).
-  terminator: row(ENEMY_HEALTH.terminator, { mega: 30, bullet: 1, bolt: 30, lightning: 30, emp: 30, blade: 10 }),
+  terminator: row(ENEMY_HEALTH.terminator, { mega: 30, bullet: 1, bolt: 30, lightning: 30, emp: 30, blade: 10, throw: 10 }),
   // R-029/R-013: the Hero Mode pursuer shares the Terminator contract.
-  pursuer: row(ENEMY_HEALTH.pursuer, { mega: 30, bullet: 1, bolt: 30, lightning: 30, emp: 30, blade: 10 }),
+  pursuer: row(ENEMY_HEALTH.pursuer, { mega: 30, bullet: 1, bolt: 30, lightning: 30, emp: 30, blade: 10, throw: 10 }),
   // R-037: plasma 3, minigun 0.3, bolt/lightning 8, EMP 6, MEGA BEAM kills.
-  trex: row(ENEMY_HEALTH.trex, { plasma: 3, mega: 40, bullet: 0.3, bolt: 8, lightning: 8, emp: 6 }),
+  trex: row(ENEMY_HEALTH.trex, { plasma: 3, mega: 40, bullet: 0.3, bolt: 8, lightning: 8, emp: 6, throw: 8 }),
   // R-030/R-038: fire 1.2 per tick of 30 HP; EMP stuns only (now a chip).
-  yeti: row(ENEMY_HEALTH.yeti, { fire: 1.2 }),
+  yeti: row(ENEMY_HEALTH.yeti, { fire: 1.2, throw: 6 }),
   // R-039: plasma 3, minigun 0.5, lightning/bolt 6, EMP 4, MEGA BEAM kills.
-  patientZero: row(ENEMY_HEALTH.patientZero, { plasma: 3, mega: 12, bullet: 0.5, bolt: 6, lightning: 6, emp: 4 }),
+  patientZero: row(ENEMY_HEALTH.patientZero, { plasma: 3, mega: 12, bullet: 0.5, bolt: 6, lightning: 6, emp: 4, throw: 4 }),
   // R-039: a clone dies to any accepted hit (plasma, bullet, bolt, EMP, fire).
-  patientZeroClone: row(ENEMY_HEALTH.patientZeroClone, { plasma: 1, mega: 1, bullet: 1, bolt: 1, lightning: 1, fire: 1, emp: 1 }),
+  patientZeroClone: row(ENEMY_HEALTH.patientZeroClone, { plasma: 1, mega: 1, bullet: 1, bolt: 1, lightning: 1, fire: 1, emp: 1, throw: 1 }),
   // R-015/R-034: plasma 1, MEGA BEAM 5, minigun 0.25, bolt 2, fire 0.5 per tick; katana ignored (chip).
   hunterShip: row(ENEMY_HEALTH.hunterShip, { plasma: 1, mega: 5, bullet: 0.25, bolt: 2, lightning: 2, fire: 0.5 }),
   // R-015/R-034: plasma 1, MEGA BEAM 5 of 6 hull; the rest were "no effect".
