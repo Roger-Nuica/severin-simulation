@@ -203,7 +203,7 @@ export function createSupportTargeting(ctx, S, api) {
   /** @returns {void} R */
   function chooseSamurai() {
     if (!T.hasPoint) return note('Point at the ground');
-    if (S.state.phase !== 'idle') return note('The squad is already deployed');
+    if (S.state.phase !== 'idle' || S.state.squad) return note('The squad is already deployed');
     if (S.cooldown.samurai > 0) return note(`Samurai Support ready in ${Math.ceil(S.cooldown.samurai)} s`);
     const { x, z } = T.point;
     close();
@@ -272,8 +272,8 @@ export function createSupportTargeting(ctx, S, api) {
     if (ringA) /** @type {THREE.MeshBasicMaterial} */ (ringA.material).opacity = 0.55 + 0.25 * Math.sin(T.time * 3);
     if (!hud) return;
     hud.classList.toggle('warn', inside);
-    const samurai = S.state.phase !== 'idle'
-      ? (S.state.phase === 'guarding' ? `deployed · ${Math.ceil(S.state.stay)} s left` : 'deployed')
+    const samurai = S.state.phase !== 'idle' || S.state.squad
+      ? (S.state.guarding ? `deployed · ${Math.ceil(S.state.stay)} s left` : 'deployed')
       : S.cooldown.samurai > 0 ? `${Math.ceil(S.cooldown.samurai)} s` : 'ready';
     const rocket = S.cooldown.rocket > 0 ? `${Math.ceil(S.cooldown.rocket)} s` : 'ready';
     setOption('samurai', samurai, samurai === 'ready');

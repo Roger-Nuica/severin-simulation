@@ -224,8 +224,28 @@ export function createFissureSystem(ctx) {
     S.ash = null;
   }
 
+  /**
+   * Whether a point stands on molten ground: inside the radius of a glowing
+   * vent or caldera lake (the same spots the Lavanado reads), no allocation.
+   * @param {number} x
+   * @param {number} z
+   * @param {number} minLevel How molten a spot must be to burn, 0..1.
+   * @returns {boolean}
+   */
+  function lavaContactAt(x, z, minLevel) {
+    const spots = api.hotSpots();
+    for (let i = 0; i < spots.length; i++) {
+      const spot = spots[i];
+      if (spot.level <= minLevel) continue;
+      const dx = x - spot.x;
+      const dz = z - spot.z;
+      if (dx * dx + dz * dz <= spot.radius * spot.radius) return true;
+    }
+    return false;
+  }
+
   return {
-    initFissures, armEruption: api.armEruption, updateFissures, resetFissures, disposeFissures,
+    initFissures, lavaContactAt, armEruption: api.armEruption, updateFissures, resetFissures, disposeFissures,
     // Read by the tornado picking up a load of lava (engine/lavanado.js) and
     // by the flood front finding one (engine/collisions.js).
     hotSpots: api.hotSpots, quench: api.quench

@@ -19,6 +19,7 @@ import { createMegaBlastSystem } from './engine/explosions/megaBlast.js';
 import { createNuclearSystem } from './engine/nuclear.js';
 import { createSmoothCriminalSystem } from './engine/smoothCriminal.js';
 import { createHeroModeSystem } from './engine/heroMode.js';
+import { createHealthSystem } from './engine/health/system.js';
 import { createNetSystem } from './engine/net/system.js';
 import { createHeroSoundSystem } from './engine/sound/hero.js';
 import { createBlackHoleSoundSystem } from './engine/sound/blackHole.js';
@@ -797,6 +798,8 @@ export function createSimulation(container) {
   const heroSystem = createHeroModeSystem(ctx);
   register('heroMode', heroSystem);
   const { initHero, updateHero, resetHero, disposeHero } = heroSystem;
+  // Roger's rechargeable health and the one player-damage API (engine/health/).
+  register('health', createHealthSystem(ctx), { auto: true });
 
   // Co-op (engine/net/): the room, the guest's avatar and the host's
   // snapshots. Looks the hero up lazily; its init/reset/dispose run through
@@ -1108,6 +1111,7 @@ export function createSimulation(container) {
     // Hero Mode's follow, aim and death cameras, likewise before the shake.
     // Real time: aiming slows the world, never Roger's pursuer.
     updateHero(rawDt);
+    ctx.systems.health.updateHealth(rawDt);
     // Co-op: the guest's avatar and snapshots (host), or the host's world (peer).
     ctx.systems.net.updateNet(rawDt);
     // Hank Granite's scene holds the camera on him (engine/actionHero.js),

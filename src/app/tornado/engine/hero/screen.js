@@ -2,6 +2,14 @@
 import * as THREE from 'three';
 import { HERO } from './config.js';
 import { ENERGY } from '../player/energy.js';
+import { HEALTH } from '../health/config.js';
+
+/** Shortest real gap in milliseconds between two hit flashes, so the screen never flashes above about 3 Hz. */
+const FLASH_GAP_MS = 340;
+/** Real seconds the direction arrow stays up after a hit. */
+const ARROW_SECONDS = 1;
+/** Glow steps written to the DOM (1 / 20), so the style changes only a few times a second. */
+const GLOW_STEPS = 20;
 
 /**
  * ===========================================================================
@@ -19,6 +27,77 @@ import { ENERGY } from '../player/energy.js';
  */
 export function createHeroScreen(ctx, S, api) {
   const { Sim, container } = ctx;
+
+  /**
+   * The hit indicator's per-instance state: which of the two alternating
+   * animation classes the last flash used (swapping restarts a CSS animation
+   * without a forced reflow), when it ran, and where the arrow points.
+   * @type {{flip: boolean, flashedAt: number, arrowLeft: number, x: number, z: number, angle: string}}
+   */
+  const hurt = { flip: false, flashedAt: -Infinity, arrowLeft: 0, x: 0, z: 0, angle: '' };
+
+  /**
+   * Roger lost health but lives: a brief red vignette pulse (CSS, 0.2 s) and,
+   * when the attacker's position is known, an arrow toward it. Pulses are at
+   * least `FLASH_GAP_MS` apart (a hit window of 0.2 s must not strobe).
+   * @param {{position?: {x: number, z: number} | null}} hit the `playerHurt` event
+   * @returns {void}
+   */
+  function hurtFlash(hit) {
+    if (!S.hurt || S.state.overShown) return;
+    const now = performance.now();
+    const pulse = now - hurt.flashedAt >= FLASH_GAP_MS;
+    if (pulse) {
+      hurt.flashedAt = now;
+      hurt.flip = !hurt.flip;
+      S.hurt.classList.toggle('a', hurt.flip);
+      S.hurt.classList.toggle('b', !hurt.flip);
+    }
+    if (hit.position && S.hurtDir) {
+      hurt.x = hit.position.x;
+      hurt.z = hit.position.z;
+      hurt.arrowLeft = ARROW_SECONDS;
+      hurt.angle = '';
+      if (pulse) {
+        S.hurt.classList.toggle('da', hurt.flip);
+        S.hurt.classList.toggle('db', !hurt.flip);
+      }
+    }
+  }
+
+  /**
+   * Turns the arrow to the attacker as the view turns, while it is up;
+   * writes only when the angle changes.
+   * @param {number} rawDt real seconds since the last frame
+   * @returns {void}
+   */
+  function updateHurtArrow(rawDt) {
+    if (!S.hurtDir || hurt.arrowLeft <= 0) return;
+    hurt.arrowLeft -= rawDt;
+    const cam = Sim.three.camera;
+    cam.getWorldDirection(S.scratch);
+    const cl = Math.hypot(S.scratch.x, S.scratch.z) || 1;
+    const fx = S.scratch.x / cl;
+    const fz = S.scratch.z / cl;
+    const bx = hurt.x - cam.position.x;
+    const bz = hurt.z - cam.position.z;
+    const angle = Math.atan2(-fz * bx + fx * bz, fx * bx + fz * bz).toFixed(2);
+    if (angle !== hurt.angle) {
+      hurt.angle = angle;
+      S.hurtDir.style.setProperty('--a', `${angle}rad`);
+    }
+  }
+
+  /**
+   * Takes every hit indicator away (GAME OVER, Restart, Exit, reset).
+   * @returns {void}
+   */
+  function clearHurt() {
+    hurt.arrowLeft = 0;
+    hurt.flashedAt = -Infinity;
+    hurt.angle = '';
+    if (S.hurt) S.hurt.classList.remove('a', 'b', 'da', 'db', 'low');
+  }
 
   /**
    * @param {string} title
@@ -103,12 +182,19 @@ export function createHeroScreen(ctx, S, api) {
    * @param {number} radius
    * @param {string} title
    * @param {string} sub
+   * @param {string} [source] key into `HEALTH.damage`; goes through the health API as an instant kill (R-035)
    * @returns {void}
    */
-  function hitArea(x, z, radius, title, sub) {
+  function hitArea(x, z, radius, title, sub, source = 'explosion') {
     if (!S.Hero.active || !S.roger) return;
+    // A co-op guest inside the area is hit the same way (friendly fire, D4).
+    if (ctx.systems.net) {
+      ctx.systems.net.hitGuestsArea(x, z, radius, { source, instantKill: true, title, sub, position: { x, y: 0, z } });
+    }
     const p = S.roger.mesh.position;
-    if (Math.hypot(p.x - x, p.z - z) < radius) killRoger(title, sub);
+    if (Math.hypot(p.x - x, p.z - z) < radius) {
+      ctx.systems.health.damagePlayer({ source, instantKill: true, title, sub, position: { x, y: 0, z } });
+    }
   }
 
   /**
@@ -131,7 +217,10 @@ export function createHeroScreen(ctx, S, api) {
     if (!chasm) return;
     const p = S.roger.mesh.position;
     if (chasm.gapAt(p.x, p.z) > HERO.chasmMargin) {
-      killRoger('OVER THE EDGE', 'Roger fell into the chasm', 'fall');
+      ctx.systems.health.damagePlayer({
+        source: 'chasm', instantKill: true, title: 'OVER THE EDGE', sub: 'Roger fell into the chasm', kind: 'fall',
+        position: { x: p.x, y: 0, z: p.z }
+      });
     }
   }
 
@@ -181,6 +270,7 @@ export function createHeroScreen(ctx, S, api) {
       if (S.banner) S.banner.classList.remove('visible');
       S.state.bannerTimer = 0;
       if (S.hud) S.hud.classList.remove('visible');
+      clearHurt();
       if (document.pointerLockElement) document.exitPointerLock();
     }
   }
@@ -270,6 +360,8 @@ export function createHeroScreen(ctx, S, api) {
       g.rotateX(S.state.recoil * 0.12);
       g.updateMatrixWorld(true);
     }
+    // The Katana's blade (hero/katana/model.js) while it is the weapon in hand.
+    if (S.katanaRig) S.katanaRig.placeView(cam, S.weapons.current() === 'katana');
     S.weapons.placeView(cam, S.state.speed > 0 ? Math.sin(performance.now() * 0.0055) : 0);
   }
 
@@ -304,6 +396,41 @@ export function createHeroScreen(ctx, S, api) {
     const wname = S.hud.querySelector('.hero-wname');
     wname.textContent = S.weapons.hudLine();
     wname.style.color = S.weapons.hudColour();
+    // The HEALTH bar (engine/health): width, percentage, the glow level and
+    // the low state are each written only when they change, like the energy
+    // bar below; the glow's pulse itself is a CSS animation.
+    const health = ctx.systems.health;
+    if (health) {
+      const hp = Math.ceil(health.state('0').value);
+      const glow = (Math.round(health.glow('0') * GLOW_STEPS) / GLOW_STEPS).toFixed(2);
+      const shownHp = `${hp}|${glow}`;
+      if (S.hud.dataset.health !== shownHp) {
+        S.hud.dataset.health = shownHp;
+        /** @type {HTMLElement} */ (S.hud.querySelector('.hero-hbar i')).style.width = `${((hp / HEALTH.max) * 100).toFixed(0)}%`;
+        S.hud.querySelector('.hero-hpct').textContent = `${hp}%`;
+        const row = /** @type {HTMLElement} */ (S.hud.querySelector('.hero-health'));
+        row.style.setProperty('--glow', glow);
+        row.classList.toggle('glowing', Number(glow) > 0);
+        const low = hp <= HEALTH.max * HEALTH.lowThreshold;
+        row.classList.toggle('low', low);
+        if (S.hurt) S.hurt.classList.toggle('low', low && !S.state.overShown);
+      }
+    }
+    // The partner's small bar in co-op (the local bar above stays the large one).
+    const net = ctx.systems.net;
+    const partner = net && net.coopActive() ? net.players.get('1') : null;
+    const partnerRow = /** @type {HTMLElement} */ (S.hud.querySelector('.hero-partner'));
+    const partnerHp = partner && health ? (partner.state === 'up' ? Math.ceil(health.state('1').value) : 0) : -1;
+    if (S.hud.dataset.partner !== String(partnerHp)) {
+      S.hud.dataset.partner = String(partnerHp);
+      partnerRow.hidden = partnerHp < 0;
+      if (partnerHp >= 0) {
+        /** @type {HTMLElement} */ (partnerRow.querySelector('.hero-pbar i')).style.width = `${((partnerHp / HEALTH.max) * 100).toFixed(0)}%`;
+        partnerRow.querySelector('.hero-ppct').textContent = partner.state === 'up' ? `${partnerHp}%` : 'DOWN';
+        partnerRow.classList.toggle('low', partnerHp <= HEALTH.max * HEALTH.lowThreshold);
+      }
+    }
+    updateHurtArrow(rawDt);
     // The energy bar: ten segments (engine/player/energy.js), and the
     // abilities it pays for.
     // Each segment is filled as far as the level goes (the one being filled
@@ -380,5 +507,5 @@ export function createHeroScreen(ctx, S, api) {
     }
   }
 
-  return { showBanner, notify, flashMessage, killRoger, hitArea, announce, checkChasm, updateDeath, placeFollowCamera, placeAimCamera, placeDeathCamera, updateHud };
+  return { showBanner, notify, flashMessage, killRoger, hitArea, announce, checkChasm, updateDeath, hurtFlash, clearHurt, placeFollowCamera, placeAimCamera, placeDeathCamera, updateHud };
 }

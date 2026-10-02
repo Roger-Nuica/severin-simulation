@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { bannerHost } from '../utils/banners.js';
 import { FUEL_STATION_VARIANT } from './environment/fuelStation.js';
-import { setOffExplosivesAt } from './explosives.js';
+import { hitRogerAt, setOffExplosivesAt } from './explosives.js';
 import { BLAST_SIZE } from './player/energy.js';
 import { FUEL } from './fuelFire/config.js';
 import { createCarChain } from './fuelFire/chain.js';
@@ -75,6 +75,7 @@ import { createFuelLeakSound } from './fuelFire/sound.js';
  *   breach: (obj: SimObject) => void,
  *   igniteAt: (x: number, z: number, radius: number) => void,
  *   blowCarsNear: (x: number, z: number, depth: number) => number,
+ *   contactAt: (x: number, z: number) => boolean,
  *   stations: () => Station[],
  *   initFuelFire: () => void,
  *   updateFuelFire: (dt: number, rawDt: number) => void,
@@ -241,7 +242,9 @@ export function createFuelFireSystem(ctx) {
     for (let i = 0; i < FUEL.rings; i++) effects.ring(x, z, i * FUEL.ringGap);
     effects.flames(x, z, FUEL.puddleRadius, 90);
 
-    // Loose things thrown, people in the fireball killed (never Roger).
+    // Loose things thrown, people in the fireball killed (and Roger, within
+    // the same FUEL.killRadius).
+    hitRogerAt(ctx, x, z, FUEL.killRadius);
     /** @type {SimObject[]} */
     const people = [];
     sys.area.forEachInRadius({ x, z, radius: FUEL.throwRadius, targets: ['person', 'object'] }, (hit) => {
@@ -423,6 +426,26 @@ export function createFuelFireSystem(ctx) {
     sound.updateLeakSound(hiss, alarm, anyBurning, rawDt);
   }
 
+  /**
+   * Whether a point stands in a station's fire: on the forecourt within the
+   * fire's own radius (`FUEL.puddleRadius` while it burns, 0.7 of it while
+   * the spilt fuel burns on after the blast). Allocation-free.
+   * @param {number} x
+   * @param {number} z
+   * @returns {boolean}
+   */
+  function contactAt(x, z) {
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      const burning = s.phase === 'burning';
+      const embers = s.phase === 'gone' && s.smoke > FUEL.smokeSeconds * 0.6;
+      if (!burning && !embers) continue;
+      const reach = burning ? FUEL.puddleRadius : FUEL.puddleRadius * 0.7;
+      if (Math.hypot(x - s.forecourt.x, z - s.forecourt.z) <= reach) return true;
+    }
+    return false;
+  }
+
   /** @returns {void} */
   function resetFuelFire() {
     for (const s of list) if (s.hazard) ctx.systems.hazards.removeHazard(s.hazard);
@@ -447,7 +470,7 @@ export function createFuelFireSystem(ctx) {
   }
 
   return {
-    leak, breach, igniteAt, blowCarsNear, stations: () => list,
+    leak, breach, igniteAt, blowCarsNear, contactAt, stations: () => list,
     initFuelFire, updateFuelFire, resetFuelFire, disposeFuelFire
   };
 }

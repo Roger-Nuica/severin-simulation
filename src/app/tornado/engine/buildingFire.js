@@ -118,6 +118,7 @@ const FIRE = {
  *   igniteBuilding: (building: SimObject, level?: number) => boolean,
  *   igniteNear: (x: number, z: number, radius: number) => number,
  *   douse: (x: number, z: number, radius: number) => number,
+ *   contactAt: (x: number, z: number, reach: number) => boolean,
  *   isBurning: (building: SimObject) => boolean,
  *   burningCount: () => number,
  *   burning: () => SimObject[],
@@ -269,6 +270,28 @@ export function createBuildingFireSystem(ctx) {
       out++;
     }
     return out;
+  }
+
+  /**
+   * Whether a point stands in a live fire: inside a burning building's
+   * footprint (centre plus half its width and depth, as the flames spawn)
+   * grown by `reach`. A fire that has only just caught (under a quarter
+   * burn) or is dying down on the rubble does not count. Allocation-free.
+   * @param {number} x
+   * @param {number} z
+   * @param {number} reach metres around the footprint
+   * @returns {boolean}
+   */
+  function contactAt(x, z, reach) {
+    for (let i = 0; i < fires.length; i++) {
+      const fire = fires[i];
+      if (fire.level < 0.25 || !fire.building.mesh) continue;
+      const root = fire.building.mesh;
+      const fp = root.userData.footprint;
+      if (!fp) continue;
+      if (Math.abs(x - root.position.x) <= fp.width / 2 + reach && Math.abs(z - root.position.z) <= fp.depth / 2 + reach) return true;
+    }
+    return false;
   }
 
   /**
@@ -522,7 +545,7 @@ export function createBuildingFireSystem(ctx) {
   }
 
   return {
-    initBuildingFire, updateBuildingFire, igniteBuilding, igniteNear, douse,
+    initBuildingFire, updateBuildingFire, igniteBuilding, igniteNear, douse, contactAt,
     isBurning, burningCount, burning, resetBuildingFire, disposeBuildingFire
   };
 }

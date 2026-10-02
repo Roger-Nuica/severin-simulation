@@ -25,8 +25,8 @@ import { classifySwipe } from './slash.js';
  *    so a mere graze, whose cap would be larger than the silhouette, cuts
  *    nothing; and the crossing point must project near the drawn segment, so
  *    an alien elsewhere on the infinite plane is not cut. Every other kind in
- *    the line's way parries (the T-Rex accepts `blade` for the samurai, R-020,
- *    so it is never sent one, R-013).
+ *    the line's way parries and takes the table's chip, a plain `blade` hit
+ *    with no cut (D1; the T-Rex's samurai door reads it as a zero cut).
  *  - **The window.** One press-drag-release is one cut. While the mode stays
  *    on, the next press-drag-release is the next cut (blade.js decides when
  *    the mode ends). Pieces already lying about are cut first, so the halves
@@ -57,7 +57,7 @@ const PIECE_HEIGHT = 0;
 
 /**
  * @typedef {'none'|'miss'|'cut'} CutOutcome
- *   `none`: no line was drawn (the mode should end); `miss`: a line, but it
+ *   `none`: no line was drawn (nothing happens, the mode stays on); `miss`: a line, but it
  *   crossed nothing; `cut`: something was cut
  */
 
@@ -252,12 +252,12 @@ export function createKatanaBladeCut(ctx, env) {
     const pieces = env.pieces();
     const recut = pieces ? cutPieces(pieces) : 0;
     const result = targets.strikeAlong(reach, touches, CFG.bodyRadius, pieces ? pieces.takeOver : undefined, plane);
-    if (result.cut + recut === 0) return 'miss';
+    if (result.cut + result.people + recut === 0) return 'miss';
     if (sys.katanaSound) sys.katanaSound.playSlice();
     // A killing breaks Smooth Criminal's spell, as the other weapons' do.
     ctx.events.emit('rogerKill');
     const feel = env.feel();
-    if (feel) feel.cut(result.cut, recut, roger);
+    if (feel) feel.cut(result.cut, recut, roger, result.people);
     return 'cut';
   }
 

@@ -1,6 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
 import { bannerHost } from '../utils/banners.js';
+import { mergedHealth, fullHealth } from './health/enemyDamage.js';
 
 /**
  * ===========================================================================
@@ -309,6 +310,9 @@ export function createFujiwharaSystem(ctx) {
     ctx.tornadoes.retire(absorbed);
     ages.delete(absorbed);
     const s = survivor.Vortex;
+    // One funnel, one health value (R-004/R-006): the lower of the two; the retired one is made whole for its next spawn.
+    s.health = mergedHealth(s.health, absorbed.Vortex.health);
+    absorbed.Vortex.health = fullHealth('tornado');
     s.center.set(state.midX, 0, state.midZ);
     s.sizeMul = Math.max(s.sizeMul, MERGE.monsterSize);
     s.monster = true;

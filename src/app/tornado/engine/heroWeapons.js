@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { LIGHTING } from './lightingTuning.js';
 import { HOLE } from './player/blackHole.js';
+import { tableDamage, shipKindOf } from './health/enemyDamage.js';
 import { createBullets } from './hero/bullets.js';
 import { createFireGun } from './hero/fireGun.js';
 import { createKatanaSlash } from './hero/katana/slash.js';
@@ -31,11 +32,13 @@ import { createKatanaBladeCut } from './hero/katana/bladeCut.js';
  *    refilled for now). Every round is traced down the sights
  *    (heroMode.js traceAim) and flies there as a real bullet
  *    (hero/bullets.js: brass, a glowing tip, a tracer, a casing thrown out;
- *    Bullet Time hangs them in the air), and it hurts only two
- *    things: people, who die, and Terminators -- Roger's own pursuers and
+ *    Bullet Time hangs them in the air), and it hurts only three
+ *    things: people, who die, Terminators -- Roger's own pursuers and
  *    the squad (terminator.js bulletHit) -- which go down on the
- *    MINIGUN.terminatorHits-th round. Everything else stops the round and
- *    shrugs it off: buildings, cars, trees, aliens, ships, the funnel.
+ *    MINIGUN.terminatorHits-th round, and the hunter ships (the shared
+ *    register's hunterShip kind, a quarter of their hull a round).
+ *    Everything else stops the round and shrugs it off: buildings, cars,
+ *    trees, aliens, the UFO and the mothership, the funnel.
  *  - **Railgun**: the Lightning tile's strike (engine/strikeTargeting.js)
  *    in Roger's hands. Raised, a ring on the ground marks where the
  *    crosshair meets the town, as the Lightning tile's ring does under the
@@ -58,6 +61,8 @@ import { createKatanaBladeCut } from './hero/katana/bladeCut.js';
  */
 
 export const WEAPONS = ['rifle', 'minigun', 'railgun', 'fire', 'blackhole', 'katana'];
+/** The most a single frame's mouse movement may add to a first-person swipe, pixels (a pointer-lock spike is scaled down to it). */
+const SWIPE_FRAME_MAX_PX = 400;
 const WEAPON_NAMES = { rifle: 'PLASMA RIFLE', minigun: 'MINIGUN', railgun: 'RAILGUN', fire: 'FIRE GUN', blackhole: 'BLACK HOLE GUN', katana: 'KATANA' };
 // Each weapon's colour on the HUD's WEAPON line (the railgun is yellow now).
 const WEAPON_COLOURS = { rifle: '', minigun: '#e8c46a', railgun: '#ffd83a', fire: '#ff8a3a', blackhole: '#c99bff', katana: '#9fe8ff' };
@@ -103,9 +108,8 @@ const UP = new THREE.Vector3(0, 1, 0);
 /**
  * @typedef {Object} KatanaInput the Katana's swipe input (Subtask 2), read by
  *   the slash logic later; the numbers are the mouse's own movement, in pixels
- * @property {boolean} drawn right-click toggled it; third person, the phase stays 'running'
+ * @property {boolean} drawn out of the sheath on the back: set automatically while it is the weapon in hand (running or in first person)
  * @property {boolean} down the left button is held
- * @property {number} hold real seconds the button has been held (0 when up)
  * @property {number} pressX where the virtual cursor was when the button went down (the cut line's start)
  * @property {number} pressY
  * @property {number} swipeX mouse movement along x since the button went down
@@ -139,13 +143,14 @@ const UP = new THREE.Vector3(0, 1, 0);
  *   isHot: (kind: string) => boolean|null,
  *   bulletTime: (on: boolean) => void,
  *   hudColour: () => string,
- *   katanaToggle: () => boolean,
- *   katanaPress: () => boolean,
+ *   katanaDraw: () => boolean,
+ *   katanaPress: (centred?: boolean) => boolean,
  *   katanaRelease: () => KatanaRelease|null,
  *   katanaCancel: () => void,
- *   katanaLook: (dx: number, dy: number) => void,
+ *   katanaLook: (dx: number, dy: number, centred?: boolean) => void,
  *   katanaState: () => Readonly<KatanaInput>,
  *   guestFlame: (gun: {tick: number}, dt: number, muzzle: THREE.Vector3, dir: THREE.Vector3) => void,
+ *   katanaBladeToggle: () => boolean,
  *   katanaBlade: () => import('./hero/katana/blade.js').KatanaBlade,
  *   katanaBladeLine: () => Readonly<import('./hero/katana/bladeUi.js').BladeLine>
  * }}
@@ -178,7 +183,7 @@ export function createHeroWeapons(ctx, hero) {
   /** @type {{group: THREE.Group, muzzle: THREE.Object3D, flash: THREE.Mesh, pilot: THREE.Mesh}|null} */
   let fireView = null;
   /** @type {KatanaInput} */
-  const katana = { drawn: false, down: false, hold: 0, pressX: 0, pressY: 0, swipeX: 0, swipeY: 0, cursorX: 0, cursorY: 0 };
+  const katana = { drawn: false, down: false, pressX: 0, pressY: 0, swipeX: 0, swipeY: 0, cursorX: 0, cursorY: 0 };
   /** @type {ReturnType<typeof createKatanaPieces>|null} the cut halves (hero/katana/pieces.js), made on first use, disposed in endRun */
   let pieces = null;
   /**
@@ -188,8 +193,8 @@ export function createHeroWeapons(ctx, hero) {
   function ensurePieces() {
     if (!pieces) {
       pieces = createKatanaPieces(ctx, {
-        onCut: (from, to, normal) => {
-          ensureGoo().burst(from, to, normal);
+        onCut: (from, to, normal, human) => {
+          ensureGoo().burst(from, to, normal, human);
           feel.flash(from, to);
         }
       });
@@ -228,6 +233,10 @@ export function createHeroWeapons(ctx, hero) {
   const railPoint = new THREE.Vector3();
   let railHasPoint = false;
   const scratch = new THREE.Vector3();
+  // The hunter a landing round was aimed at, and where it lands: read by
+  // roundVisit below (set just before each lookup, never kept).
+  /** @type {{target: any, at: THREE.Vector3 | null, stopped: boolean}} */
+  const round = { target: null, at: null, stopped: false };
   const dir = new THREE.Vector3();
   const side = new THREE.Vector3();
   const lift = new THREE.Vector3();
@@ -527,7 +536,7 @@ export function createHeroWeapons(ctx, hero) {
       : w === 'railgun' ? ' · click to call a bolt down'
         : w === 'fire' ? ' · hold to burn · the only thing the Yeti fears'
           : w === 'blackhole' ? ` · ${HOLE.cost * 10}% energy a shot`
-            : w === 'katana' ? ' · RIGHT-CLICK to draw · click or swipe to cut · hold for Blade Mode' : '';
+            : w === 'katana' ? ' · drawn · RIGHT-CLICK for first person · click or swipe to cut · Q: Blade Mode' : '';
     hero.flashMessage(`${WEAPON_NAMES[w]}${extra}`);
   }
 
@@ -573,52 +582,37 @@ export function createHeroWeapons(ctx, hero) {
   // ---------------------------------------------------------------------
 
   /**
-   * Lets go of the pointer lock the drawn Katana asked for.
-   * @returns {void}
+   * Draws the Katana from the sheath on the back. Called each frame by
+   * hero/input.js while the Katana is the weapon in hand and Roger is on foot,
+   * upright and unfrozen. It asks for no pointer lock and touches no camera:
+   * the lock and the first-person view belong to enterAim/leaveAim
+   * (hero/plasma.js) alone. The virtual cursor starts at the middle of the window.
+   * @returns {boolean} whether it was drawn by this call (false: already out, or not in hand)
    */
-  function releaseKatanaLock() {
-    const canvas = Sim.three.renderer.domElement;
-    if (document.pointerLockElement === canvas) document.exitPointerLock();
-  }
-
-  /**
-   * Right-click with the Katana in hand: drawn, or put away. It stays in the
-   * follow camera (the phase is not touched); the pointer is locked while it
-   * is out and the virtual cursor starts at the middle of the window.
-   * @returns {boolean} whether it is drawn now
-   */
-  function katanaToggle() {
-    if (katana.drawn) {
-      katanaCancel();
-      return false;
-    }
-    if (current() !== 'katana') return false;
+  function katanaDraw() {
+    if (katana.drawn || current() !== 'katana') return false;
     katana.drawn = true;
     // The cut's shader variants are built now, not at the first cut.
     ensurePieces().prewarm();
     katana.cursorX = window.innerWidth / 2;
     katana.cursorY = window.innerHeight / 2;
-    try {
-      const request = Sim.three.renderer.domElement.requestPointerLock();
-      if (request && typeof request.then === 'function') {
-        // A lock granted after the Katana was already put away is let go at once.
-        request.then(() => { if (!katana.drawn) releaseKatanaLock(); }, () => {});
-      }
-    } catch {
-      // No lock (an embedding frame may not allow it): the mouse still moves the cursor.
-    }
     return true;
   }
 
   /**
-   * The left button goes down on the drawn Katana: the swipe and the hold
-   * clock start from zero.
+   * The left button goes down on the drawn Katana: the swipe starts from zero.
+   * @param {boolean} [centred] first person: start the swipe at the crosshair
    * @returns {boolean} whether it was taken (drawn and not already down)
    */
-  function katanaPress() {
+  function katanaPress(centred = false) {
     if (!katana.drawn || katana.down) return false;
     katana.down = true;
-    katana.hold = 0;
+    // First person: the swipe and the Blade Mode cut line start at the
+    // crosshair, the middle of the window.
+    if (centred) {
+      katana.cursorX = window.innerWidth / 2;
+      katana.cursorY = window.innerHeight / 2;
+    }
     katana.pressX = katana.cursorX;
     katana.pressY = katana.cursorY;
     katana.swipeX = 0;
@@ -627,14 +621,13 @@ export function createHeroWeapons(ctx, hero) {
   }
 
   /**
-   * Takes the press's swipe and hold and clears them, with no slash.
+   * Takes the press's swipe and clears it, with no slash.
    * @returns {KatanaRelease|null} null if no press was taken
    */
   function takeRelease() {
     if (!katana.down) return null;
-    const out = { dx: katana.swipeX, dy: katana.swipeY, hold: katana.hold };
+    const out = { dx: katana.swipeX, dy: katana.swipeY };
     katana.down = false;
-    katana.hold = 0;
     katana.swipeX = 0;
     katana.swipeY = 0;
     return out;
@@ -642,10 +635,10 @@ export function createHeroWeapons(ctx, hero) {
 
   /**
    * The left button comes up: Blade Mode, if it is on, takes the release and
-   * ends; otherwise a short press is a quick slash (a swipe picks its
-   * direction, a plain click runs the chain), and a press held past Blade
-   * Mode's threshold fires nothing.
-   * @returns {KatanaRelease|null} the swipe and the hold, or null if no press was taken
+   * keeps its window going (a cut, a miss, or a drag too short to be a line);
+   * otherwise any press is a quick slash (a swipe picks its direction, a plain
+   * click runs the chain), however long it was held.
+   * @returns {KatanaRelease|null} the swipe, or null if no press was taken
    */
   function katanaRelease() {
     const out = takeRelease();
@@ -654,35 +647,70 @@ export function createHeroWeapons(ctx, hero) {
   }
 
   /**
-   * Puts the Katana away and drops anything held: the wheel, Esc, a blur, a
-   * car, a daze, a freeze, death, the run ending.
+   * Puts the Katana away and drops anything held: the wheel, a blur, a car, a
+   * daze, a freeze, death, the run ending. It never touches the pointer lock
+   * (that is aim mode's, released by leaveAim).
    * @returns {void}
    */
   function katanaCancel() {
-    const wasDrawn = katana.drawn;
     katana.drawn = false;
     takeRelease();
     blade.cancel();
     bladeUi.clear();
     slash.cancel();
-    if (wasDrawn) releaseKatanaLock();
   }
 
   /**
    * The frame's mouse movement, handed on by hero/input.js (which is the one
    * place that drains the input's look, so it is not drained twice).
+   * In first person (`centred`) the movement only arrives here while the
+   * button is down (the look is frozen then): it is the swipe, and the
+   * virtual cursor is the crosshair plus the swipe, kept inside the window.
+   * A large pointer-lock delta is scaled down as a whole (its direction is
+   * kept) to SWIPE_FRAME_MAX_PX a frame.
    * @param {number} dx
    * @param {number} dy
+   * @param {boolean} [centred] first person: the cursor is anchored at the crosshair
    * @returns {void}
    */
-  function katanaLook(dx, dy) {
+  function katanaLook(dx, dy, centred = false) {
     if (!katana.drawn || (!dx && !dy)) return;
+    const size = Math.hypot(dx, dy);
+    if (centred && size > SWIPE_FRAME_MAX_PX) {
+      const k = SWIPE_FRAME_MAX_PX / size;
+      dx *= k;
+      dy *= k;
+    }
+    if (centred) {
+      if (katana.down) {
+        katana.swipeX += dx;
+        katana.swipeY += dy;
+        katana.cursorX = Math.min(window.innerWidth, Math.max(0, katana.pressX + katana.swipeX));
+        katana.cursorY = Math.min(window.innerHeight, Math.max(0, katana.pressY + katana.swipeY));
+      }
+      return;
+    }
     katana.cursorX = Math.min(window.innerWidth, Math.max(0, katana.cursorX + dx));
     katana.cursorY = Math.min(window.innerHeight, Math.max(0, katana.cursorY + dy));
     if (katana.down) {
       katana.swipeX += dx;
       katana.swipeY += dy;
     }
+  }
+
+  /**
+   * Q with the Katana in hand: Blade Mode on, or off if it is on already. It
+   * costs no energy and is not Time Slow. Only a drawn Katana on a Roger who
+   * can act begins it; leaving it is always allowed.
+   * @returns {boolean} whether Blade Mode is on afterwards
+   */
+  function katanaBladeToggle() {
+    if (blade.active()) {
+      blade.cancel();
+      bladeUi.clear();
+      return false;
+    }
+    return katana.drawn && current() === 'katana' && blade.enter();
   }
 
   /** @returns {Readonly<KatanaInput>} the live swipe state (one object, updated in place) */
@@ -731,6 +759,18 @@ export function createHeroWeapons(ctx, hero) {
   }
 
   /**
+   * Finds the hunter a round was aimed at among the live ones of the shared
+   * register (a downed or gone ship is no longer listed) and hits it.
+   * @param {any} e
+   * @param {{kind: string}} kind
+   * @returns {void}
+   */
+  function roundVisit(e, kind) {
+    if (e !== round.target || kind.kind !== 'hunterShip') return;
+    round.stopped = ctx.systems.enemies.hit(e, /** @type {any} */ (kind), { type: 'bullet', at: round.at });
+  }
+
+  /**
    * A round arriving where it was aimed: what it does there.
    * @param {{kind: string, obj: any, at: THREE.Vector3}} hit
    * @returns {void}
@@ -752,6 +792,25 @@ export function createHeroWeapons(ctx, hero) {
     } else if (hit.kind === 'samurai' && hit.obj && s.spaceship) {
       // One of Landing Support's samurai: only Roger can bring one down.
       if (s.spaceship.hitSamurai(hit.obj, 'bullet')) ctx.events.emit('rogerKill');
+    } else if (hit.kind === 'ship' && hit.obj && hit.obj.hunter) {
+      // A hunter ship only (the UFO, below, and the mothership carry no `hunter`). Rounds take time to arrive: the ship is looked up by
+      // identity now, and a downed or gone one is simply not found.
+      round.target = hit.obj.hunter;
+      round.at = at;
+      round.stopped = false;
+      s.enemies.each(roundVisit);
+      round.target = null;
+      round.at = null;
+      if (round.stopped) ctx.events.emit('rogerKill');
+    } else if (hit.kind === 'ship' && hit.obj && shipKindOf(hit.obj.name)) {
+      // The alien ship or the mothership (D1, D3): a round chips its hull by the table.
+      if (hit.obj.hit(tableDamage(/** @type {string} */ (shipKindOf(hit.obj.name)), { type: 'bullet' })) === 0) ctx.events.emit('rogerKill');
+    } else if (hit.kind === 'nuclear' && hit.obj && s.nuclear) {
+      // The reactor (D3): a round chips the containment.
+      s.nuclear.chipPlant(hit.obj, { type: 'bullet' });
+    } else if (hit.kind === 'tornado' && hit.obj && s.heroMode) {
+      // A funnel (D3): a round chips its health; at 0 it is neutralised.
+      s.heroMode.chipTornado(hit.obj, { type: 'bullet' });
     } else if (hit.kind === 'unit' && hit.obj && s.terminator) {
       const n = s.terminator.bulletHit(hit.obj, MINIGUN.terminatorHits);
       if (n > 0 && n < MINIGUN.terminatorHits) hero.flashMessage(`TERMINATOR HIT ${n} / ${MINIGUN.terminatorHits}`);
@@ -862,11 +921,8 @@ export function createHeroWeapons(ctx, hero) {
   function update(rawDt, aiming, cam, aimDir) {
     state.recoil = Math.max(0, state.recoil - rawDt * 5);
     state.railCooldown = Math.max(0, state.railCooldown - rawDt);
-    // The Katana's hold clock: real time, so Blade Mode's threshold does not
-    // stretch with Time Slow.
-    if (katana.down) katana.hold += rawDt;
-    // Blade Mode begins at the hold threshold and times itself out, both on real time.
-    blade.update(katana.drawn && katana.down ? katana.hold : 0, rawDt);
+    // Blade Mode times itself out on real time (it is begun by Q, katanaBladeToggle).
+    blade.update(rawDt);
     // The quick slash's cooldown, wind-up and lunge, on the same real clock.
     slash.update(rawDt);
     // Blade Mode's vignette, highlights and cut line follow the virtual cursor (real time).
@@ -965,7 +1021,7 @@ export function createHeroWeapons(ctx, hero) {
     if (w === 'minigun') return kind === 'person' || kind === 'terminator' || kind === 'unit' || kind === 'enemy';
     if (w === 'railgun' || w === 'blackhole') return kind !== 'sky';
     if (w === 'fire') return kind === 'person' || kind === 'enemy' || kind === 'building';
-    // The Katana has no crosshair in third person, so it never turns one red.
+    // The Katana's crosshair (first person, at the centre) never turns red.
     return null;
   }
 
@@ -1037,7 +1093,7 @@ export function createHeroWeapons(ctx, hero) {
   return {
     startRun, endRun, dispose, current, cycle, showView, triggerDown, triggerUp,
     placeView, update, hudLine, isHot, bulletTime,
-    katanaToggle, katanaPress, katanaRelease, katanaCancel, katanaLook, katanaState,
+    katanaDraw, katanaPress, katanaRelease, katanaCancel, katanaLook, katanaState, katanaBladeToggle,
     katanaBlade: () => blade,
     // Co-op guests' Fire Gun (engine/net/system.js): built on first use.
     guestFlame: (/** @type {{tick: number}} */ gun, /** @type {number} */ dt, /** @type {THREE.Vector3} */ muzzle, /** @type {THREE.Vector3} */ dir) => {

@@ -106,6 +106,8 @@ export function createMothershipSystem(ctx) {
     hull: 0,
     // Mega beams taken, for the smoke and fire it trails.
     damage: 0,
+    // Chip hits taken (a small spark on every fourth).
+    chips: 0,
     fallFrom: 0,
     timer: 0,
     dim: 0,
@@ -236,19 +238,30 @@ export function createMothershipSystem(ctx) {
   /**
    * One of Roger's shots on the hull.
    * @param {number} points of hull it takes (heroMode.js SHIP_DAMAGE)
-   * @param {THREE.Vector3} at
+   * @param {THREE.Vector3} [at] where; a chip may leave it out
    * @returns {number} the share of the hull left (0 when it goes down), or
    *   -1 when there was nothing left to hit
    */
   function hitByPlasma(points, at) {
     const heavy = points > 1;
-    ctx.systems.explosions.spawnImpactBurst(at, heavy ? 5 : 2);
+    // Under one point (D3: the minigun, fire gun and railgun chip the hull) it
+    // is a chip: no burst or shake, a spark on every fourth within the budget.
+    const chip = points < 1;
+    if (!chip) ctx.systems.explosions.spawnImpactBurst(at, heavy ? 5 : 2);
     if (!ship || state.phase === 'falling') return -1;
     state.hull = Math.max(0, state.hull - points);
     // Smoke off the hull (updateMothership) builds with the damage taken.
     state.damage = Math.ceil(((MOTHER.hull - state.hull) / MOTHER.hull) * 4);
-    ctx.systems.cues.playLargeExplosion({ priority: true, gain: heavy ? 1 : 0.6 });
-    ctx.systems.gamefeel.addShake(heavy ? 1 : 0.4, 0.5);
+    if (chip) {
+      state.chips++;
+      if (state.chips % 4 === 0 && state.hull > 0 && ctx.systems.caps.particleRoom() > 0) {
+        ctx.systems.explosions.spawnImpactBurst(at || ship.group.position, 0.4);
+      }
+      if (state.hull > 0) ctx.systems.cues.playLargeExplosion({ gain: 0.25 });
+    } else {
+      ctx.systems.cues.playLargeExplosion({ priority: true, gain: heavy ? 1 : 0.6 });
+      ctx.systems.gamefeel.addShake(heavy ? 1 : 0.4, 0.5);
+    }
     if (state.hull <= 0) shootDown();
     return state.hull / MOTHER.hull;
   }
@@ -401,7 +414,7 @@ export function createMothershipSystem(ctx) {
     if (ctx.systems.nuclear) ctx.systems.nuclear.hitArea(at.x, at.z, MOTHER.cutRadius, 'mothership');
     // Roger (engine/heroMode.js), on foot or in a car.
     if (ctx.systems.heroMode) {
-      ctx.systems.heroMode.hitArea(at.x, at.z, MOTHER.cutRadius, 'VAPORISED', 'The mothership\'s beam ran over Roger');
+      ctx.systems.heroMode.hitArea(at.x, at.z, MOTHER.cutRadius, 'VAPORISED', 'The mothership\'s beam ran over Roger', 'mothershipBeam');
     }
     // A copy: a person killed here is spliced out of Sim.objects on the spot.
     for (const obj of Sim.objects.slice()) {

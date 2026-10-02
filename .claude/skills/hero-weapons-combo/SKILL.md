@@ -26,7 +26,7 @@ Extend Hero Mode weapons through its existing wheel, input, trigger and HUD cont
 3. Wire its model/view and state into `createHeroWeapons()` and handle press, hold, release and per-frame updates in the existing dispatch. Reuse existing weapon helpers where appropriate (for example `createBullets()` or `createFireGun()`).
 4. Keep wheel input in `hero/input.js`; do not add a second keyboard or mouse listener for weapon selection. Ensure HUD text, aiming view, run start/end and reset state include the new weapon.
 5. For score-producing destruction, report the appropriate existing game-feel event before calling the shared score path. Do not make every hit a combo event: follow the event classification in `EVENTS`.
-6. Check each target's damage contract before connecting a weapon to it; this skill does not grant new enemy vulnerabilities.
+6. Check each target's damage contract before connecting a weapon to it. Add the weapon's column to `engine/health/damageTable.js` (every enemy gets a non-zero value, R-054) and its value against players to `HEALTH.damageToPlayer` (R-053); friendly fire is on, so a splash or a cone that can reach Roger or a co-op partner must go through `ctx.systems.health.damagePlayer` (see `health/friendlyFire.js`).
 
 ## Pitfalls / common mistakes
 

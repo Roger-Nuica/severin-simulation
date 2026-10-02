@@ -7,6 +7,7 @@ import { createVortexLook } from './vortex/look.js';
 import { createVortexShape } from './vortex/shape.js';
 import { createSubVortices } from './vortex/subVortices.js';
 import { createVortexParticles } from './vortex/particles.js';
+import { fullHealth } from './health/enemyDamage.js';
 export { BIRTH } from './vortex/config.js';
 
 /**
@@ -189,6 +190,9 @@ export function createVortexSystem(ctx, { index = 0, detail = 1 } = {}) {
     // the ground position to the merge instead of the wander path; monster
     // draws the extra particles allocated for a merged survivor.
     sizeMul: 1,
+    // Health (health/damageTable.js): chipped by Roger's weapons other than the
+    // katana, 0 neutralises it like a MEGA BEAM; a Fujiwhara merge keeps one value.
+    health: fullHealth('tornado'),
     // 0..1 wedge blend, written by engine/wedge.js and 0 (a no-op) otherwise:
     // how far the funnel's silhouette has been squared off into a wedge (see
     // WEDGE and wedgeFactorAt). Independent of sizeMul, which is how *big*

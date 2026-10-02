@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { bannerHost } from '../utils/banners.js';
 import { ALIENS, RAY_COLOURS } from './aliens/config.js';
+import { SHIP_DAMAGE } from './hero/config.js';
 import { createAlienModels } from './aliens/models.js';
 import { createAlienShip } from './aliens/ship.js';
 import { createAlienAbduction } from './aliens/abduction.js';
@@ -63,7 +64,7 @@ export { ALIEN_SKIN_GLOW } from './aliens/config.js';
  *
  * Roger (engine/heroMode.js) is a target and a threat. Crew within
  * ALIENS.rogerSight of him on foot go after him: they close in to grab him
- * (within ALIENS.meleeReach it is over) and shoot at where he stood when the
+ * (within HEALTH.melee.contactReach one touch costs him 34) and shoot at where he stood when the
  * gun came up -- moving dodges a ray, standing still does not. The ship, and
  * the hunters below, lock a tracking laser on him within ALIENS.laserRange:
  * its foot starts off to one side and crawls after him slower than he can
@@ -301,7 +302,9 @@ export function createAliensSystem(ctx) {
   function initAliens() {
     // In the shared register of enemies (engine/enemies.js): the crew on the
     // ground, killed by the plasma rifle, lightning, the T-Rex's flames or a
-    // samurai's sword (engine/spaceship/samurai.js).
+    // samurai's sword (engine/spaceship/samurai.js). Anything else (the
+    // minigun, an EMP) chips its one point of health (D1,
+    // health/damageTable.js) and `defeat` burns it when that is used up.
     alienKind = {
       kind: 'alien',
       list: targets,
@@ -315,6 +318,10 @@ export function createAliensSystem(ctx) {
         else api.plasmaKill(alien, hit.at || alien.root.position);
         return true;
       },
+      defeat: (alien, hit) => {
+        api.plasmaKill(alien, hit.at || alien.root.position);
+        return alien.phase !== 'patrol' && alien.phase !== 'escort';
+      },
       // The black hole: gone, with no fire of its own.
       consume: (alien) => {
         for (const a of S.abductees) if (a.escorts) a.escorts = a.escorts.filter(e => e !== alien);
@@ -324,8 +331,8 @@ export function createAliensSystem(ctx) {
       }
     };
     ctx.systems.enemies.registerKind(alienKind);
-    // The ship and the hunter ships, for the black hole
-    // (engine/effects/consumables.js): gone, with no crash of their own.
+    // The ship, for the black hole (engine/effects/consumables.js): gone,
+    // with no crash of its own.
     ctx.systems.consumables.register({
       kind: 'ufo',
       list: () => (S.ship && S.state.phase !== 'idle' && S.state.phase !== 'wrecked' ? [S.ship] : []),
@@ -351,10 +358,30 @@ export function createAliensSystem(ctx) {
         S.state.phase = 'gone';
       }
     });
-    ctx.systems.consumables.register({
+    // The hunter ships, in the shared register too (engine/enemies.js): every
+    // weapon but the katana hurts them, through the one hitHunter (waves.js).
+    // The four it always answered to are in `accepts`; the rest (an EMP) chip
+    // the hull's health (D1, health/damageTable.js) and `defeat` downs the ship.
+    // No `hitbox` on purpose: the rifle and minigun already aim at them
+    // through shipTargets (a 'ship' hit in hero/plasma.js traceAim), and a
+    // hitbox would make traceAim see each hunter twice. The black hole takes
+    // them from here too (consume and object), so there is no separate
+    // consumables entry: a second one would hold each hunter twice.
+    ctx.systems.enemies.registerKind({
       kind: 'hunterShip',
       list: () => S.hunters.filter(h => h.phase === 'arriving' || h.phase === 'hunting'),
       position: (h) => h.group.position,
+      accepts: ['plasma', 'bullet', 'bolt', 'fire'],
+      damage: (h, hit) => {
+        /** @type {number} */
+        const points = hit.type === 'plasma'
+          ? (hit.mega ? SHIP_DAMAGE.mega : SHIP_DAMAGE.normal)
+          : ALIENS.hunterHit[/** @type {'bullet'|'bolt'|'fire'} */ (hit.type)];
+        const at = hit.at ? S.scratch.set(hit.at.x, hit.at.y === undefined ? h.group.position.y : hit.at.y, hit.at.z) : h.group.position;
+        // 0 only when the hull is gone; -1 (already downed) is not a kill.
+        return api.hitHunter(h, points, at) === 0;
+      },
+      defeat: (h) => api.hitHunter(h, h.hull, h.group.position) === 0,
       object: (h) => h.group,
       consume: (h) => api.removeHunter(h)
     });
@@ -438,7 +465,8 @@ export function createAliensSystem(ctx) {
       const foot = glowMesh(footGeo, c.splash);
       foot.visible = false;
       Sim.three.scene.add(group, foot);
-      return { group, core, glow, foot, active: false, timer: 0, cooldown: 2, fx: 0, fz: 0 };
+      // `source` keys the health damage table; `struck` is the once-per-burst re-arm flag.
+      return { group, core, glow, foot, active: false, timer: 0, cooldown: 2, fx: 0, fz: 0, source: colour === 'green' ? 'ufoTracker' : 'hunterTracker', struck: false };
     };
     S.shipTracker = tracker('green');
     S.hunterTrackers = [];
@@ -473,11 +501,20 @@ export function createAliensSystem(ctx) {
   }
 
   /**
-   * Roger, if Hero Mode is on and he can be got at (heroMode.js rogerTarget).
-   * @returns {{x: number, z: number, onFoot: boolean}|null}
+   * Who a hunter at (x, z) goes for: in co-op the nearest player who is up
+   * (net.pickTarget, with their `id`); otherwise Roger, if Hero Mode is on
+   * and he can be got at (heroMode.js rogerTarget).
+   * @param {number} [x] hunter x, to choose among co-op players
+   * @param {number} [z] hunter z
+   * @returns {{x: number, z: number, onFoot: boolean, id?: string}|null}
    */
-  function heroTarget() {
+  function heroTarget(x, z) {
     const hero = ctx.systems.heroMode;
+    const net = ctx.systems.net;
+    if (net && ctx.Hero && ctx.Hero.active && x !== undefined && z !== undefined) {
+      const coop = net.pickTarget(x, z);
+      if (coop) return coop;
+    }
     return hero ? hero.rogerTarget() : null;
   }
 

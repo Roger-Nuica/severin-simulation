@@ -60,7 +60,7 @@ const STEM_FADE_SECONDS = 5;
  * @property {THREE.Color} ringColour
  * @property {{colour: string, peak: number, hold: number, seconds: number}} flash
  * @property {string} event gamefeel.js event name
- * @property {{title: string, sub: string}} heroKill
+ * @property {{title: string, sub: string, source?: string}} heroKill
  * @property {(previous: number, radius: number) => void} [onFront]
  */
 
@@ -93,7 +93,7 @@ export const MOTHERSHIP_CRASH_BLAST = {
   ringColour: new THREE.Color(2.2, 1.3, 0.5),
   flash: { colour: '#ffe7c0', peak: 0.8, hold: 0.25, seconds: 2.2 },
   event: 'mothershipCrash',
-  heroKill: { title: 'CRUSHED', sub: 'The mothership came down on Roger' }
+  heroKill: { title: 'CRUSHED', sub: 'The mothership came down on Roger', source: 'explosion' }
 };
 
 /**
@@ -308,7 +308,7 @@ export function createMegaBlastSystem(ctx) {
     if (previous < cfg.killRadius) {
       const reach = Math.min(r, cfg.killRadius);
       if (ctx.systems.aliens) ctx.systems.aliens.boltKill(at.x, at.z, reach);
-      if (ctx.systems.heroMode) ctx.systems.heroMode.hitArea(at.x, at.z, reach, cfg.heroKill.title, cfg.heroKill.sub);
+      if (ctx.systems.heroMode) ctx.systems.heroMode.hitArea(at.x, at.z, reach, cfg.heroKill.title, cfg.heroKill.sub, cfg.heroKill.source);
     }
     if (cfg.onFront) cfg.onFront(previous, r);
   }

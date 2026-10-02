@@ -247,7 +247,10 @@ export function createVolcanoSystem(ctx) {
     for (const person of people) sys.people.explodePerson(person);
     const roger = sys.heroMode && sys.heroMode.rogerTarget();
     if (roger && Math.hypot(roger.x - at.x, roger.z - at.z) < VOLCANO.killRadius * 0.8) {
-      sys.heroMode.killRoger('LAVA BOMB', 'A lava bomb came down on Roger');
+      sys.health.damagePlayer({
+        source: 'lavaBomb', instantKill: true, title: 'LAVA BOMB', sub: 'A lava bomb came down on Roger',
+        position: { x: at.x, y: 0, z: at.z }
+      });
     }
   }
 

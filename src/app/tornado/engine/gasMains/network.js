@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { GAS, SEAM_VERTEX, SEAM_FRAGMENT } from './config.js';
 import { BLAST_SIZE } from '../player/energy.js';
+import { hitRogerAt } from '../explosives.js';
 /** @typedef {import('./config.js').Segment} Segment */
 /** @typedef {import('./config.js').Main} Main */
 
@@ -365,6 +366,8 @@ export function createGasNetwork(ctx, S, api) {
       }
     }
     ctx.systems.buildingFire.igniteNear(segment.x, segment.z, GAS.ruptureRadius * 0.7);
+    // Roger inside the fireball (the same reach as the fires it starts).
+    hitRogerAt(ctx, segment.x, segment.z, GAS.ruptureRadius * 0.7);
   }
 
   /**

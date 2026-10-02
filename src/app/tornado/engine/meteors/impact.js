@@ -82,7 +82,7 @@ export function createMeteorImpact(ctx, S, api) {
     }
     // Roger too, in Hero Mode, on foot or in a car.
     if (ctx.systems.heroMode) {
-      ctx.systems.heroMode.hitArea(at.x, at.z, METEOR.killRadius, 'HIT BY A METEOR', 'A meteor came down on Roger');
+      ctx.systems.heroMode.hitArea(at.x, at.z, METEOR.killRadius, 'HIT BY A METEOR', 'A meteor came down on Roger', 'meteor');
     }
 
     // Throws everything loose, away from the point of impact.

@@ -211,6 +211,21 @@ export function createLavanadoSystem(ctx) {
   }
 
   /**
+   * Whether a point stands in the erupting funnel's footprint, the same
+   * reach the funnel uses to pick lava up (health: lava contact, Subtask 11).
+   * @param {number} x
+   * @param {number} z
+   * @returns {boolean}
+   */
+  function contactAt(x, z) {
+    if (!erupting()) return false;
+    const ground = ctx.systems.vortex.funnelRadiusAt(0) * Vortex.group.scale.x * LAVA.reach;
+    const dx = x - Vortex.center.x;
+    const dz = z - Vortex.center.z;
+    return dx * dx + dz * dz <= ground * ground;
+  }
+
+  /**
    * How molten the ground under the funnel is, 0..1. The earthquake's vents
    * and calderas are the only molten ground there is, so this is a scan of
    * them against the funnel's own footprint.
@@ -510,5 +525,5 @@ export function createLavanadoSystem(ctx) {
     scars.length = 0;
   }
 
-  return { initLavanado, updateLavanado, erupting, resetLavanado, disposeLavanado };
+  return { initLavanado, updateLavanado, erupting, contactAt, resetLavanado, disposeLavanado };
 }

@@ -1,4 +1,5 @@
 // @ts-check
+import { fullHealth, healthAfter, tableDamage } from './health/enemyDamage.js';
 /**
  * ===========================================================================
  * SECTION EN — Enemies
@@ -11,15 +12,32 @@
  *
  *   list()                 its enemies alive now
  *   position(e)            where one is ({x, z}, world units)
- *   accepts                the kinds of damage it answers to
+ *   accepts                the kinds of damage it answers to: its weaknesses
+ *                          and old rules, handled by its own `damage`
  *   damage(e, hit)         one hit: {type, amount?, at?, mega?}; returns
  *                          whether it was stopped (killed, knocked down)
+ *   defeat(e, hit)         optional: takes it down through its normal kill
+ *                          path when its health is used up (see below)
  *
  * Kinds of damage: 'plasma' (the rifle; mega for the mega beam), 'bullet'
  * (the minigun), 'bolt' (lightning, the railgun), 'emp', 'fire', 'freeze',
  * 'gravity' (the black hole), 'cleanse' (Mr. Proper), 'blade' (a samurai's
- * sword, Landing Support: `amount` is the cut). A hit of a kind an
- * enemy does not accept does nothing to it.
+ * sword, Landing Support: `amount` is the cut; the Katana's blow on a kind
+ * that is not an alien carries no cut).
+ *
+ * Health (decision D1: every weapon hurts every enemy; the old immunities
+ * became weaknesses). Each enemy has the health of engine/health/damageTable.js
+ * and every hit on it, whatever the weapon, takes the table's damage for that
+ * (weapon, kind) off it. The health lives in this register, per instance
+ * (a WeakMap), so an owner keeps its own state. A hit of a kind in `accepts`
+ * still reaches the owner's `damage` exactly as before (stun, knockdown,
+ * kill): the weaknesses are unchanged. A hit of a kind NOT in `accepts` is no
+ * longer ignored: it chips the health, with no effect of its own and no
+ * particles; when the health reaches 0 the owner's `defeat` takes the enemy
+ * down through its normal kill path, which scores it once. A hit of a
+ * kind with no weapon column ('freeze', 'gravity', 'cleanse') does nothing
+ * to a kind that does not accept it. The black hole stays an outright kill
+ * through `consume`.
  *
  * Besides their owners' own state, enemies can be in a few states every
  * system shares (setState): 'frozen' (for a time), 'disintegrated' and
@@ -52,6 +70,9 @@
  * @property {(e: any) => {x: number, z: number, radius: number, top: number}} [hitbox]
  *   a kind with one can be aimed at and hit by Roger's rifle and minigun
  *   (hero/plasma.js traceAim), as a standing cylinder
+ * @property {(e: any, hit: Hit) => boolean} [defeat] its health is used up:
+ *   take it down through the owner's normal kill path (scoring once, a no-op
+ *   if it is already down); returns whether it was stopped
  * @property {(e: any) => void} [consume] taken by the black hole: the owner
  *   takes it out of play quietly, with no death of its own
  *   (engine/effects/consumables.js; without one it is frozen and hidden)
@@ -80,6 +101,12 @@ export function createEnemyRegistry(ctx) {
   const registered = new Map();
   /** @type {Map<any, {frozen: number, disintegrated: boolean, absorbed: boolean}>} */
   let states = new Map();
+  /**
+   * The health each enemy has left, per instance, set at its first hit. A
+   * WeakMap: an enemy nobody holds any more takes its entry with it.
+   * @type {WeakMap<object, number>}
+   */
+  let healths = new WeakMap();
 
   /**
    * @param {EnemyKind} kind
@@ -120,15 +147,25 @@ export function createEnemyRegistry(ctx) {
   }
 
   /**
-   * One hit on one enemy, if it answers to that kind of damage.
+   * One hit on one enemy (D1, see the header). A kind the owner accepts goes
+   * to its `damage` unchanged; every hit with a table value, accepted or
+   * not, also takes health, and an enemy out of health is taken down by the
+   * owner's `defeat` (once: it is then no longer listed, and `defeat` is a
+   * no-op on one that is down). No allocation per hit.
    * @param {any} e
    * @param {EnemyKind} kind
    * @param {Hit} h
    * @returns {boolean} whether it was stopped
    */
   function hit(e, kind, h) {
-    if (!kind.accepts.includes(h.type)) return false;
-    return kind.damage(e, h);
+    const accepted = kind.accepts.includes(h.type);
+    const damage = kind.defeat ? tableDamage(kind.kind, h) : 0;
+    if (!accepted && damage <= 0) return false;
+    let stopped = accepted ? kind.damage(e, h) : false;
+    if (stopped || damage <= 0 || !kind.defeat) return stopped;
+    const left = healthAfter(healths.has(e) ? /** @type {number} */ (healths.get(e)) : fullHealth(kind.kind), damage);
+    healths.set(e, left);
+    return left <= 0 ? kind.defeat(e, h) : false;
   }
 
   /**
@@ -175,6 +212,7 @@ export function createEnemyRegistry(ctx) {
   /** @returns {void} */
   function resetEnemies() {
     states = new Map();
+    healths = new WeakMap();
   }
 
   return { registerKind, kinds, each, count, hit, setState, getState, updateEnemies, resetEnemies };

@@ -2,9 +2,13 @@ name: Coder Plan Subtask (Guarded)
 
 on:
   schedule:
-    # GitHub cron is UTC. Run at both adjacent UTC hours and gate to 03:00
-    # Europe/Bucharest so the schedule stays correct across DST changes.
-    - cron: "0 0,1 * * *"
+    # GitHub cron is UTC.
+    # Two separate entries, because github.event.schedule holds the exact cron
+    # string that fired. The gate below selects the one that corresponds to
+    # 03:00 Europe/Bucharest, including DST.
+    - cron: "0 0 * * *"
+    - cron: "0 1 * * *"
+
   workflow_dispatch:
     inputs:
       plan_file:
@@ -15,48 +19,96 @@ on:
           - PLAN_katana_subtasks.md
           - PLAN_coop.md
         default: PLAN_katana_subtasks.md
+
       subtask:
-        description: "One exact subtask number to run (not a comma-separated list)"
-        required: true
+        description: "Optional exact subtask number. Leave empty to run the first dependency-ready incomplete subtask."
+        required: false
         type: string
-        default: "14"
+        default: ""
+
       branch_name:
-        description: "Optional isolated work branch; leave empty to derive it from the plan"
+        description: "Optional new branch name; leave empty for an automatic unique branch"
         required: false
         type: string
         default: ""
 
 concurrency:
-  group: coder-plan-${{ inputs.plan_file || 'katana-subtasks' }}
+  group: coder-plan-${{ inputs.plan_file || 'PLAN_katana_subtasks.md' }}
   cancel-in-progress: false
 
 jobs:
   run-coder:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+
     permissions:
       contents: write
       pull-requests: write
       id-token: write
+
     steps:
       - name: Gate schedule to 03:00 Europe/Bucharest
         id: schedule_gate
         env:
           EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
         run: |
+          set -euo pipefail
+
           if [[ "$EVENT_NAME" != "schedule" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "scheduled=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          local_hour="$(TZ=Europe/Bucharest date +%H)"
-          if [[ "$local_hour" == "03" ]]; then
+
+          # Determine which UTC hour corresponds to 03:00 Bucharest today.
+          # On the DST fall-back day, 03:00 can occur twice; select the first.
+          expected_utc_hour="$(
+          python3 <<'PY'
+          from datetime import datetime, timezone
+          from zoneinfo import ZoneInfo
+
+          zone = ZoneInfo("Europe/Bucharest")
+          today = datetime.now(zone).date()
+          local_target = datetime(today.year, today.month, today.day, 3, 0, 0)
+
+          candidates = []
+          for fold in (0, 1):
+              aware = local_target.replace(tzinfo=zone, fold=fold)
+              utc = aware.astimezone(timezone.utc)
+
+              # Keep only real local times. This excludes nonexistent DST times.
+              back = utc.astimezone(zone).replace(tzinfo=None)
+              if back == local_target:
+                  candidates.append(utc)
+
+          if not candidates:
+              # 03:00 does not exist on the DST spring-forward date.
+              print("none")
+          else:
+              print(min(candidates).hour)
+          PY
+          )"
+
+          if [[ "$expected_utc_hour" == "none" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "scheduled=true" >> "$GITHUB_OUTPUT"
+            echo "03:00 Europe/Bucharest does not exist today because of DST; skipping."
+            exit 0
+          fi
+
+          expected_schedule="0 ${expected_utc_hour} * * *"
+
+          echo "Triggered cron: $SCHEDULE"
+          echo "Expected cron:  $expected_schedule"
+
+          if [[ "$SCHEDULE" == "$expected_schedule" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "scheduled=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "scheduled=true" >> "$GITHUB_OUTPUT"
-            echo "Not 03:00 Europe/Bucharest; skipping this UTC schedule tick."
+            echo "This is the adjacent UTC cron tick; skipping."
           fi
 
       - name: Validate plan and branch inputs
@@ -67,34 +119,53 @@ jobs:
           PLAN_INPUT: ${{ inputs.plan_file }}
           SUBTASK_INPUT: ${{ inputs.subtask }}
           BRANCH_INPUT: ${{ inputs.branch_name }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
+
           if [[ "$EVENT_NAME" == "schedule" ]]; then
             plan_file="PLAN_katana_subtasks.md"
             requested_subtask=""
-            branch_name="auto/katana-subtasks"
+            run_all="false"
+            branch_name="auto/katana-subtasks-run-${RUN_ID}-${RUN_ATTEMPT}"
           else
             plan_file="$PLAN_INPUT"
             requested_subtask="$SUBTASK_INPUT"
+
             case "$plan_file" in
-              PLAN_katana_subtasks.md|PLAN_coop.md) ;;
-              *) echo "Unsupported plan path: $plan_file" >&2; exit 1 ;;
+              PLAN_katana_subtasks.md|PLAN_coop.md)
+                ;;
+              *)
+                echo "Unsupported plan path: $plan_file" >&2
+                exit 1
+                ;;
             esac
-            if [[ ! "$requested_subtask" =~ ^[0-9]+$ ]]; then
-              echo "Enter exactly one numeric subtask number." >&2
+
+            if [[ -n "$requested_subtask" && ! "$requested_subtask" =~ ^[0-9]+$ ]]; then
+              echo "Subtask must be empty or contain exactly one numeric subtask number." >&2
               exit 1
             fi
+
+            if [[ -z "$requested_subtask" ]]; then
+              run_all="true"
+            else
+              run_all="false"
+            fi
+
             if [[ -n "$BRANCH_INPUT" ]]; then
               branch_name="$BRANCH_INPUT"
               git check-ref-format --branch "$branch_name"
             else
               slug="${plan_file#PLAN_}"
               slug="${slug%.md}"
-              branch_name="auto/$slug"
+              branch_name="auto/${slug}-run-${RUN_ID}-${RUN_ATTEMPT}"
             fi
           fi
+
           printf 'plan_file=%s\n' "$plan_file" >> "$GITHUB_OUTPUT"
           printf 'requested_subtask=%s\n' "$requested_subtask" >> "$GITHUB_OUTPUT"
+          printf 'run_all=%s\n' "$run_all" >> "$GITHUB_OUTPUT"
           printf 'branch_name=%s\n' "$branch_name" >> "$GITHUB_OUTPUT"
 
       - name: Checkout default branch
@@ -104,7 +175,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
 
-      - name: Create or resume isolated work branch
+      - name: Create new isolated branch from default branch
         id: branch
         if: steps.schedule_gate.outputs.run == 'true'
         env:
@@ -112,62 +183,148 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
+
           git config user.name "coder-auto-bot"
           git config user.email "coder-auto-bot@users.noreply.github.com"
+
           git fetch origin "$DEFAULT_BRANCH"
+
           if git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; then
-            git fetch origin "$BRANCH_NAME"
-            git switch --track -c "$BRANCH_NAME" "origin/$BRANCH_NAME"
-          else
-            git switch -c "$BRANCH_NAME" "origin/$DEFAULT_BRANCH"
+            echo "Branch already exists: $BRANCH_NAME" >&2
+            echo "This workflow requires a new branch for every run." >&2
+            exit 1
           fi
 
-      - name: Select exactly one dependency-ready subtask
+          git switch -c "$BRANCH_NAME" "origin/$DEFAULT_BRANCH"
+
+      - name: Select approved dependency-ready subtasks
         id: select
         if: steps.schedule_gate.outputs.run == 'true'
         env:
           PLAN_FILE: ${{ steps.target.outputs.plan_file }}
           REQUESTED_SUBTASK: ${{ steps.target.outputs.requested_subtask }}
+          RUN_ALL: ${{ steps.target.outputs.run_all }}
           IS_SCHEDULED: ${{ steps.schedule_gate.outputs.scheduled }}
         run: |
           node <<'NODE'
           const fs = require('node:fs');
+
           const planPath = process.env.PLAN_FILE;
           const text = fs.readFileSync(planPath, 'utf8');
-          const headings = [...text.matchAll(/^- \[([ x])\](?: DONE)? \*\*Subtask (\d+)[^\n]*$/gm)];
+
+          const headings = [
+            ...text.matchAll(/^- \[([ x])\](?: DONE)? \*\*Subtask (\d+)[^\n]*$/gm),
+          ];
+
           const tasks = new Map();
+          const taskOrder = [];
+
           for (let i = 0; i < headings.length; i++) {
             const match = headings[i];
             const end = i + 1 < headings.length ? headings[i + 1].index : text.length;
             const block = text.slice(match.index, end);
             const depsLine = block.match(/^\s+-?\s*Depends on:\s*(.*)$/mi);
-            const deps = depsLine ? (depsLine[1].match(/\d+/g) || []).map(Number) : [];
-            tasks.set(Number(match[2]), { done: match[1] === 'x', deps });
+            const deps = depsLine
+              ? (depsLine[1].match(/\d+/g) || []).map(Number)
+              : [];
+
+            const id = Number(match[2]);
+
+            tasks.set(id, {
+              done: match[1] === 'x',
+              deps,
+            });
+
+            taskOrder.push(id);
           }
+
+          if (tasks.size === 0) {
+            throw new Error(`No subtask headings were found in ${planPath}`);
+          }
+
           const scheduled = process.env.IS_SCHEDULED === 'true';
-          let id;
+          const runAll = process.env.RUN_ALL === 'true';
+          const requested = process.env.REQUESTED_SUBTASK;
+          let selected = [];
+
+          // Scheduled runs remain intentionally restricted to Katana 14 and 15.
           if (scheduled) {
-            id = [14, 15].find(candidate => tasks.has(candidate) && !tasks.get(candidate).done);
+            const id = [14, 15].find(id => tasks.has(id) && !tasks.get(id).done);
+
             if (!id) {
-              fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `No scheduled Katana subtask remains in ${planPath} (schedule covers 14 and 15 only).\n`);
+              fs.appendFileSync(
+                process.env.GITHUB_STEP_SUMMARY,
+                `No scheduled Katana subtask remains in ${planPath}. Schedule covers only subtasks 14 and 15.\n`,
+              );
               fs.appendFileSync(process.env.GITHUB_OUTPUT, 'run=false\n');
               process.exit(0);
             }
+
+            const incomplete = tasks.get(id).deps.filter(dep => !tasks.get(dep)?.done);
+
+            if (incomplete.length > 0) {
+              throw new Error(
+                `Scheduled subtask ${id} has incomplete dependencies: ${incomplete.join(', ')}`,
+              );
+            }
+
+            selected = [id];
+          } else if (!runAll) {
+            const id = Number(requested);
+            const task = tasks.get(id);
+
+            if (!task) {
+              throw new Error(`Subtask ${id} was not found in ${planPath}`);
+            }
+
+            if (task.done) {
+              fs.appendFileSync(
+                process.env.GITHUB_STEP_SUMMARY,
+                `Subtask ${id} is already marked DONE in ${planPath}; nothing to run.\n`,
+              );
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, 'run=false\n');
+              process.exit(0);
+            }
+
+            const incomplete = task.deps.filter(dep => !tasks.get(dep)?.done);
+
+            if (incomplete.length > 0) {
+              throw new Error(
+                `Subtask ${id} has incomplete dependencies: ${incomplete.join(', ')}`,
+              );
+            }
+
+            selected = [id];
           } else {
-            id = Number(process.env.REQUESTED_SUBTASK);
+            // One subtask per run: the first incomplete task, in plan order,
+            // whose dependencies are all done.
+            const id = taskOrder.find(
+              candidate =>
+                !tasks.get(candidate).done &&
+                tasks.get(candidate).deps.every(dep => tasks.get(dep)?.done),
+            );
+
+            if (id === undefined) {
+              fs.appendFileSync(
+                process.env.GITHUB_STEP_SUMMARY,
+                `No dependency-ready incomplete subtasks were found in ${planPath}.\n`,
+              );
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, 'run=false\n');
+              process.exit(0);
+            }
+
+            selected = [id];
           }
-          const task = tasks.get(id);
-          if (!task) throw new Error(`Subtask ${id} not found in ${planPath}`);
-          if (task.done) {
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Subtask ${id} is already marked complete in ${planPath}; nothing to run.\n`);
-            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'run=false\n');
-            process.exit(0);
-          }
-          const incomplete = task.deps.filter(dep => !tasks.get(dep)?.done);
-          if (scheduled && incomplete.length) {
-            throw new Error(`Scheduled subtask ${id} has incomplete dependencies: ${incomplete.join(', ')}`);
-          }
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `run=true\nsubtask=${id}\n`);
+
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `run=true\nsubtasks=${selected.join(',')}\n`,
+          );
+
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            `Selected subtasks from ${planPath}: ${selected.join(', ')}\n`,
+          );
           NODE
 
       - name: Set up Node
@@ -197,35 +354,69 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_args: --max-turns 40
+
+          # Required for an autonomous GitHub runner.
+          # Without this, Claude can inspect files but may deny edits and commands.
+          claude_args: --max-turns 40 --permission-mode bypassPermissions
+
+          # Makes it possible to see the actual reason if Claude stops or is blocked.
+          show_full_output: true
+
           prompt: |
             Use the Coder role in .claude/agents/coder.md and the coder-plan-run
             workflow in .claude/skills/coder-plan-run/SKILL.md.
 
-            Implement ONLY subtask ${{ steps.select.outputs.subtask }} from
-            ${{ steps.target.outputs.plan_file }}. This workflow dispatch handles
-            one subtask per Coder run; do not batch or advance to another task.
-            Verify its dependencies and acceptance criteria before editing.
+            Implement ONLY subtask ${{ steps.select.outputs.subtasks }} from
+            ${{ steps.target.outputs.plan_file }}. This workflow handles exactly
+            one subtask per Coder run. Do not batch tasks and do not advance to
+            another subtask.
 
-            Follow every fixed safety gate in
-            .claude/skills/full-autonomous-run/SKILL.md. Read the applicable
-            .claude/rules.md entries and relevant SKILL.md files. Treat runtime
-            code as the source of truth for implemented values. Stop and record
-            BLOCKED if a decision gate or unresolved approval is encountered;
-            PLAN_coop.md Subtask 1 is a clarification/approval gate, not permission
-            to invent the ten listed Co-op decisions or implement later subtasks.
+            Verify all dependencies and acceptance criteria before editing.
 
-            Do not raise existing caps or modify unrelated files. Mark the selected
-            plan subtask [x] DONE only after its acceptance criteria and focused
-            checks pass. Write STATUS_AUTO_RUN.md with the selected task number,
-            status (DONE, STOPPED, or BLOCKED), changed files, checks and results,
-            and any decision needed. Keep the completion note to 3-4 bullets.
+            Follow every fixed safety gate in:
+            .claude/skills/full-autonomous-run/SKILL.md
 
-            Run npm run lint and npm run build before marking DONE. If either fails,
-            report the exact failure and do not leave this subtask marked DONE.
-            Do not claim browser/manual visual checks on this headless runner.
+            Read applicable .claude/rules.md entries and relevant SKILL.md files.
+            Treat runtime code as the source of truth for implemented values.
+
+            Stop and record BLOCKED if a decision gate or unresolved approval is
+            encountered. PLAN_coop.md Subtask 1 is a clarification/approval gate,
+            not authorization to invent the ten listed Co-op decisions or to
+            implement later subtasks.
+
+            Do not raise existing caps. Do not modify unrelated files.
+
+            Mark a selected plan subtask as [x] DONE only after that specific subtask's
+            acceptance criteria and focused checks pass.
+
+            Write STATUS_AUTO_RUN.md containing:
+            - selected task number;
+            - status: DONE, STOPPED, or BLOCKED;
+            - changed files;
+            - checks run and their results;
+            - any decision still needed.
+
+            Keep the completion note to 3-4 bullets.
+
+            Run npm run lint and npm run build before marking DONE.
+            If either fails, report the exact failure and do not leave the subtask
+            marked DONE.
+
+            Do not claim browser or manual visual checks on this headless runner.
             Katana subtask 16 contains manual acceptance checks and must remain
-            incomplete unless every required manual check has actually been run.
+            incomplete unless every required manual check was actually performed.
+
+      - name: Show Claude changes
+        if: steps.schedule_gate.outputs.run == 'true' && steps.select.outputs.run == 'true'
+        run: |
+          echo "Git working tree after Claude:"
+          git status --short
+
+          if [[ -f STATUS_AUTO_RUN.md ]]; then
+            echo ""
+            echo "STATUS_AUTO_RUN.md:"
+            cat STATUS_AUTO_RUN.md
+          fi
 
       - name: Run lint
         id: lint
@@ -243,22 +434,46 @@ jobs:
         if: steps.schedule_gate.outputs.run == 'true' && steps.select.outputs.run == 'true' && (steps.lint.outcome == 'failure' || steps.build.outcome == 'failure')
         env:
           PLAN_FILE: ${{ steps.target.outputs.plan_file }}
-          SUBTASK: ${{ steps.select.outputs.subtask }}
+          SUBTASK: ${{ steps.select.outputs.subtasks }}
           LINT_OUTCOME: ${{ steps.lint.outcome }}
           BUILD_OUTCOME: ${{ steps.build.outcome }}
         run: |
           node <<'NODE'
           const fs = require('node:fs');
+
           const planPath = process.env.PLAN_FILE;
           const id = process.env.SUBTASK;
           const plan = fs.readFileSync(planPath, 'utf8');
-          const heading = new RegExp(`^- \\[x\\](?: DONE)? \\*\\*Subtask ${id}\\b[^\\n]*$`, 'm');
+
+          const heading = new RegExp(
+            `^- \\[x\\](?: DONE)? \\*\\*Subtask ${id}\\b[^\\n]*$`,
+            'm',
+          );
+
           const match = plan.match(heading);
-          if (match) fs.writeFileSync(planPath, plan.replace(heading, match[0].replace(/^- \[x\](?: DONE)?/, '- [ ]')));
+
+          if (match) {
+            const updated = plan.replace(
+              heading,
+              match[0].replace(/^- \[x\](?: DONE)?/, '- [ ]'),
+            );
+            fs.writeFileSync(planPath, updated);
+          }
+
           const failures = [];
-          if (process.env.LINT_OUTCOME === 'failure') failures.push('npm run lint failed');
-          if (process.env.BUILD_OUTCOME === 'failure') failures.push('npm run build failed');
-          fs.appendFileSync('STATUS_AUTO_RUN.md', `\n## Subtask ${id} validation gate\n- Status: BLOCKED\n- Reason: ${failures.join('; ')}. The subtask is not marked DONE.\n`);
+
+          if (process.env.LINT_OUTCOME === 'failure') {
+            failures.push('npm run lint failed');
+          }
+
+          if (process.env.BUILD_OUTCOME === 'failure') {
+            failures.push('npm run build failed');
+          }
+
+          fs.appendFileSync(
+            'STATUS_AUTO_RUN.md',
+            `\n## Subtask ${id} validation gate\n- Status: BLOCKED\n- Reason: ${failures.join('; ')}. The subtask is not marked DONE.\n`,
+          );
           NODE
 
       - name: Commit run results
@@ -267,36 +482,54 @@ jobs:
         env:
           PLAN_FILE: ${{ steps.target.outputs.plan_file }}
           BRANCH_NAME: ${{ steps.target.outputs.branch_name }}
+          SUBTASK: ${{ steps.select.outputs.subtasks }}
         run: |
           set -euo pipefail
+
           git add -A
+
           if git diff --cached --quiet; then
-            echo "No changes to commit."
+            echo "No changes were produced by the Coder run."
             echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            git diff --cached --check
-            git commit -m "Auto-run: ${PLAN_FILE} subtask ${{ steps.select.outputs.subtask }}"
-            git push origin "$BRANCH_NAME"
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+
+            {
+              echo "## Automated Coder run"
+              echo ""
+              echo "- Subtask: ${SUBTASK}"
+              echo "- Result: no repository changes were produced"
+              echo "- No branch was pushed and no PR was created"
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            exit 0
           fi
 
-      - name: Create or update pull request
+          git diff --cached --check
+          git commit -m "Auto-run: ${PLAN_FILE} subtasks ${SUBTASK}"
+          git push --set-upstream origin "$BRANCH_NAME"
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create pull request
         if: steps.schedule_gate.outputs.run == 'true' && steps.select.outputs.run == 'true' && steps.commit.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH_NAME: ${{ steps.target.outputs.branch_name }}
           PLAN_FILE: ${{ steps.target.outputs.plan_file }}
-          SUBTASK: ${{ steps.select.outputs.subtask }}
+          SUBTASK: ${{ steps.select.outputs.subtasks }}
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          pr_number="$(gh pr list --head "$BRANCH_NAME" --json number --jq '.[0].number // empty')"
-          body="Automated Coder run for ${PLAN_FILE}, subtask ${SUBTASK}. Review STATUS_AUTO_RUN.md and all changes before merging. Safety gates and unresolved approvals are not bypassed."
-          if [[ -n "$pr_number" ]]; then
-            gh pr edit "$pr_number" --body "$body"
-          else
-            gh pr create \
-              --title "Auto-run: ${PLAN_FILE} subtask ${SUBTASK}" \
-              --body "$body" \
-              --base "$BASE_BRANCH" \
-              --head "$BRANCH_NAME"
-          fi
+          set -euo pipefail
+
+          body="$(cat <<EOF
+          Automated Coder run for \`${PLAN_FILE}\`, subtasks \`${SUBTASK}\`.
+
+          Please review \`STATUS_AUTO_RUN.md\`, the implementation, and all checks
+          before merging. Safety gates and unresolved approvals are not bypassed.
+          EOF
+          )"
+
+          gh pr create \
+            --title "Auto-run: ${PLAN_FILE} subtasks ${SUBTASK}" \
+            --body "$body" \
+            --base "$BASE_BRANCH" \
+            --head "$BRANCH_NAME"

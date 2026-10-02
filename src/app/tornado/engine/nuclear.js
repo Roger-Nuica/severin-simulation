@@ -7,6 +7,7 @@ import { createPlantCharger } from './nuclear/charger.js';
 import { createMutationQueue } from './nuclear/mutation.js';
 import { createTrefoilTexture, createWallTexture } from './nuclear/textures.js';
 import { createNuclearPanel } from './nuclear/panel.js';
+import { chipTarget } from './health/enemyDamage.js';
 
 /**
  * ===========================================================================
@@ -130,7 +131,7 @@ const NUCLEAR_BLAST = {
   ringColour: new THREE.Color(2.6, 2.3, 1.3),
   flash: { colour: '#ffffff', peak: 0.97, hold: 0.6, seconds: 3.6 },
   event: 'nuke',
-  heroKill: { title: 'VAPORISED', sub: 'Roger was too close to the reactor' }
+  heroKill: { title: 'VAPORISED', sub: 'Roger was too close to the reactor', source: 'nuke' }
 };
 
 /**
@@ -141,6 +142,8 @@ const NUCLEAR_BLAST = {
  *   nearestIntact: (x: number, z: number) => Object|null,
  *   shipHit: (plant: Object, at: THREE.Vector3) => void,
  *   megaHit: (plant: Object) => void,
+ *   chipPlant: (plant: Object, hit: {type: string}) => boolean,
+ *   chipAt: (x: number, z: number, radius: number, hit: {type: string}) => void,
  *   hitArea: (x: number, z: number, radius: number, cause: string) => void,
  *   aimTargets: () => {x: number, z: number, radius: number, top: number, plant: Object}[],
  *   markers: () => {plants: {x: number, z: number, standing: boolean}[], rings: {x: number, z: number, radius: number}[]},
@@ -440,7 +443,7 @@ export function createNuclearSystem(ctx) {
       meltdownPlant(plant, 'the alien ships');
       return;
     }
-    showBanner(`${plant.name} HIT`, `The aliens are shooting the reactor · containment ${plant.hull}/${NUCLEAR.hull}`);
+    showBanner(`${plant.name} HIT`, `The aliens are shooting the reactor · containment ${Math.ceil(plant.hull)}/${NUCLEAR.hull}`);
   }
 
   /**
@@ -450,6 +453,39 @@ export function createNuclearSystem(ctx) {
    */
   function megaHit(plant) {
     meltdownPlant(plant, 'Roger\'s mega beam');
+  }
+
+  /**
+   * Any of Roger's weapons but the MEGA BEAM and the katana on the reactor
+   * (D3, health/damageTable.js): a chip of the containment, quiet, with no
+   * burst. It shares the hull the alien ships' five hits take, so the two add
+   * up; at 0 it goes critical like any other breach. The katana's cell is 0.
+   * @param {Object} plant
+   * @param {{type: string}} hit
+   * @returns {boolean} whether it brought the containment down
+   */
+  function chipPlant(plant, hit) {
+    if (plant.phase !== 'standing') return false;
+    const left = chipTarget('nuclearPlant', plant.hull, hit);
+    plant.hull = left.health;
+    if (!left.spent) return false;
+    meltdownPlant(plant, 'Roger\'s weapons');
+    return true;
+  }
+
+  /**
+   * `chipPlant` for every plant whose site is within `radius` of (x, z): the
+   * fire gun's cone and a railgun bolt.
+   * @param {number} x
+   * @param {number} z
+   * @param {number} radius
+   * @param {{type: string}} hit
+   * @returns {void}
+   */
+  function chipAt(x, z, radius, hit) {
+    for (const plant of plants) {
+      if (plant.phase === 'standing' && Math.hypot(plant.x - x, plant.z - z) < radius + plant.radius) chipPlant(plant, hit);
+    }
   }
 
   /**
@@ -804,7 +840,7 @@ export function createNuclearSystem(ctx) {
   }
 
   return {
-    initNuclear, updateNuclear, nearestIntact, shipHit, megaHit, hitArea, aimTargets, markers, meltdown, terminalNear,
+    initNuclear, updateNuclear, nearestIntact, shipHit, megaHit, chipPlant, chipAt, hitArea, aimTargets, markers, meltdown, terminalNear,
     resetNuclear, disposeNuclear
   };
 }

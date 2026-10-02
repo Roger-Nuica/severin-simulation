@@ -1,6 +1,8 @@
 // @ts-check
 import * as THREE from 'three';
 import { HERO } from './config.js';
+import { createTouchState } from '../health/melee.js';
+import { stepTelegraph, cancelTelegraph, applyTelegraph } from '../terminator/telegraph.js';
 
 /**
  * ===========================================================================
@@ -50,6 +52,8 @@ export function createHeroPursuers(ctx, S, api) {
       heading: Math.atan2(r.x - px, r.z - pz),
       cycle: 0,
       stagger: 0,
+      touch: createTouchState(),
+      touchClock: 0,
       heavy: false,
       /** @type {'hunting'|'seizing'|'falling'|'down'|'gone'} */
       state: 'hunting',
@@ -290,13 +294,34 @@ export function createHeroPursuers(ctx, S, api) {
   }
 
   /**
-   * @returns {boolean} whether a machine on its feet (not knocked flat or
-   *   staggering) is close enough to have him
+   * Each machine on its feet (not knocked flat or staggering) that closes to
+   * `HEALTH.melee.telegraphRange` winds up, and strikes for 50 if Roger is
+   * within `contactReach` as the wind-up ends, then waits out its 3 s cooldown.
+   * The pose (raised arm, eye flare) is written here, after `updatePursuer`.
+   * The cooldown clock is world time, so Time Slow stretches it like the
+   * machines' own movement.
+   * @param {number} worldDt seconds of world time since the last frame
+   * @returns {boolean} whether a touch landed this frame
    */
-  function caughtByPursuer() {
-    const r = S.roger.mesh.position;
-    return huntingPursuers().some(unit => unit.p.stagger <= 0
-      && Math.hypot(unit.root.position.x - r.x, unit.root.position.z - r.z) < HERO.catchRadius);
+  function touchByPursuers(worldDt) {
+    const rogerAt = S.roger.mesh.position;
+    const sub = S.state.phase === 'dazed' ? 'Caught while he was reeling' : 'The Terminator caught Roger';
+    let landed = false;
+    for (const unit of S.pursuers) {
+      const m = unit.p;
+      if (m.state !== 'hunting') { cancelTelegraph(m); applyTelegraph(unit, m, unit.eyeBase); continue; }
+      m.touchClock += worldDt;
+      // Co-op: the same nearest player it chases (net.pickTarget), touched
+      // through `damagePlayer(targetId)`; Roger alone otherwise.
+      const coop = ctx.systems.net ? ctx.systems.net.pickTarget(unit.root.position.x, unit.root.position.z) : null;
+      const r = coop || rogerAt;
+      const id = coop ? coop.id : '0';
+      const d = Math.hypot(unit.root.position.x - r.x, unit.root.position.z - r.z);
+      const hit = stepTelegraph(ctx, m, d, m.stagger > 0, unit.root.position, id === '0' ? sub : `A Terminator caught Player ${id}`, id);
+      if (hit) landed = true;
+      applyTelegraph(unit, m, unit.eyeBase);
+    }
+    return landed;
   }
 
   /**
@@ -325,7 +350,10 @@ export function createHeroPursuers(ctx, S, api) {
     if (S.state.spawnShield > 0) return;
     ctx.systems.empCharge.arcAround(r, 3);
     ctx.systems.powerArcSound.playZap(1);
-    api.killRoger('ELECTROCUTED', 'An EMP wave went through Roger');
+    ctx.systems.health.damagePlayer({
+      source: 'empWave', instantKill: true, title: 'ELECTROCUTED', sub: 'An EMP wave went through Roger',
+      position: { x, y: 0, z }
+    });
   }
 
   /**
@@ -337,6 +365,7 @@ export function createHeroPursuers(ctx, S, api) {
     const m = unit.p;
     m.state = 'seizing';
     m.timer = 0;
+    cancelTelegraph(m);
     m.stagger = 0;
     m.heavy = false;
     unit.root.rotation.x = 0;
@@ -439,5 +468,5 @@ export function createHeroPursuers(ctx, S, api) {
     if (S.state.burstTimer <= 0) S.burst.visible = false;
   }
 
-  return { spawnPursuer, spawnPursuers, removePursuer, removePursuers, huntingPursuers, pursuerBulletHit, megaKillPursuer, knockdownPursuer, clearAhead, updatePursuer, updatePursuers, caughtByPursuer, empSweep, startPursuerDeath, updatePursuerDeath, pursuerDown, updateBurst };
+  return { spawnPursuer, spawnPursuers, removePursuer, removePursuers, huntingPursuers, pursuerBulletHit, megaKillPursuer, knockdownPursuer, clearAhead, updatePursuer, updatePursuers, touchByPursuers, empSweep, startPursuerDeath, updatePursuerDeath, pursuerDown, updateBurst };
 }

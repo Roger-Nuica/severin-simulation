@@ -1,6 +1,8 @@
 // @ts-check
 import * as THREE from 'three';
 import { createTrexFlames } from '../trex/flames.js';
+import { ALIENS } from '../aliens/config.js';
+import { tableDamage, shipKindOf } from '../health/enemyDamage.js';
 
 /**
  * ===========================================================================
@@ -112,6 +114,27 @@ export function createFireGun(ctx, hero) {
   }
 
   /**
+   * Is a point in the air inside the cone, by the real (3D) angle? The flat
+   * test cannot tell a hunter ship hovering ~26 m up from the ground under
+   * it, so a flame pointed at the street would burn it. No allocation.
+   * @param {THREE.Vector3} origin
+   * @param {THREE.Vector3} dir unit aim direction
+   * @param {THREE.Vector3} q the target's position
+   * @param {number} radius
+   * @returns {boolean}
+   */
+  function inCone3D(origin, dir, q, radius) {
+    const dx = q.x - origin.x;
+    const dy = q.y - origin.y;
+    const dz = q.z - origin.z;
+    const len = Math.hypot(dx, dy, dz);
+    if (len > FIRE_GUN.range + radius) return false;
+    if (len < 3 + radius) return true;
+    const cos = (dx * dir.x + dy * dir.y + dz * dir.z) / len;
+    return Math.acos(Math.min(1, Math.max(-1, cos))) < FIRE_GUN.halfAngle + radius / len;
+  }
+
+  /**
    * What the flame has reached, burning.
    * @param {THREE.Vector3} dir
    * @returns {void}
@@ -131,14 +154,18 @@ export function createFireGun(ctx, hero) {
     });
     for (const person of people) ctx.systems.people.explodePerson(person);
     let killed = people.length > 0;
-    // Every enemy that answers to fire: the aliens, the Yeti, the clones.
+    // Every enemy in the cone (D1: every weapon hurts every enemy; the register
+    // applies the table's damage per tick, the old weaknesses unchanged).
     /** @type {{e: any, kind: any, at: {x: number, z: number}}[]} */
     const found = [];
     ctx.systems.enemies.each((e, kind) => {
-      if (!kind.accepts.includes('fire')) return;
       const q = kind.position(e);
-      const radius = kind.hitbox ? kind.hitbox(e).radius : 1;
-      if (inCone(r.x, r.z, dir, q.x, q.z, radius)) found.push({ e, kind, at: q });
+      const hunter = kind.kind === 'hunterShip';
+      // A hunter has no hitbox: its radius is its disc (as shipTargets and boltAt).
+      const radius = hunter ? 15 * ALIENS.hunterScale : kind.hitbox ? kind.hitbox(e).radius : 1;
+      // A hunter ship hovers high above the ground: it needs the 3D test.
+      const inside = hunter ? inCone3D(r, dir, q, radius) : inCone(r.x, r.z, dir, q.x, q.z, radius);
+      if (inside) found.push({ e, kind, at: q });
     });
     for (const f of found) {
       if (ctx.systems.enemies.hit(f.e, f.kind, { type: 'fire', at: f.at })) killed = true;
@@ -148,6 +175,36 @@ export function createFireGun(ctx, hero) {
     if (support) {
       for (const box of support.samuraiTargets()) {
         if (inCone(r.x, r.z, dir, box.x, box.z, 0.5) && support.hitSamurai(box.unit, 'fire')) killed = true;
+      }
+    }
+    // The alien ship (the UFO is not in the register): a chip of its hull per
+    // tick (D1), seen as a disc in 3D like a hunter.
+    if (ctx.systems.aliens) {
+      for (const ship of ctx.systems.aliens.shipTargets()) {
+        if (ship.name === 'UFO' && inCone3D(r, dir, ship, ship.radius) && ship.hit(tableDamage('ufo', { type: 'fire' })) === 0) killed = true;
+      }
+    }
+    // The mothership (D3): the same chip, seen as its disc in 3D.
+    const mother = ctx.systems.mothership && ctx.systems.mothership.shipTarget();
+    if (mother && shipKindOf(mother.name) && inCone3D(r, dir, mother, mother.radius) && mother.hit(tableDamage('mothership', { type: 'fire' })) === 0) killed = true;
+    // The reactors in the cone chip their containment (D3); a funnel in it
+    // loses health, and at 0 is neutralised (Hero Mode only).
+    if (ctx.systems.nuclear) {
+      let last = null;
+      for (const part of ctx.systems.nuclear.aimTargets()) {
+        // One chip per plant per tick, however many of its buildings are in the cone.
+        if (part.plant !== last && inCone(r.x, r.z, dir, part.x, part.z, part.radius)) {
+          last = part.plant;
+          ctx.systems.nuclear.chipPlant(part.plant, { type: 'fire' });
+        }
+      }
+    }
+    if (ctx.systems.heroMode) {
+      for (const { Vortex } of ctx.tornadoes.active) {
+        if (Vortex.neutralized || Vortex.birth < 0.5) continue;
+        if (inCone(r.x, r.z, dir, Vortex.center.x, Vortex.center.z, Sim.params.radius * (Vortex.sizeMul || 1) * 0.9)) {
+          ctx.systems.heroMode.chipTornado(Vortex, { type: 'fire' });
+        }
       }
     }
     if (killed) ctx.events.emit('rogerKill');

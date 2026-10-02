@@ -50,6 +50,20 @@ test('event validation', () => {
   assert.equal(validateEvent({ type: 'event', v: V, id: 1, kind: 'score', data: { s: 'x'.repeat(2000) } }).error, 'size');
 });
 
+test('snapshot hp field is optional and validated (older hosts omit it)', () => {
+  assert.equal(validateSnapshot(snap()).ok, true);
+  assert.equal(validateSnapshot(snap({ hp: [[0, 100, 0], [1, 42.5, 3.2]] })).ok, true);
+  for (const bad of [{ hp: 'x' }, { hp: [[0, 100]] }, { hp: [[0, 100, 0, 9]] }, { hp: [[0, -1, 0]] }, { hp: [[0, 100, -2]] }, { hp: [[0, NaN, 0]] }]) {
+    assert.equal(validateSnapshot(snap(bad)).ok, false, JSON.stringify(bad));
+  }
+  // The players row keeps its nine columns: a longer row fails the strict width check.
+  assert.equal(validateSnapshot(snap({ players: [[0, 1, 2, 0, 0, 0, 100, -1, -1, 80]] })).ok, false);
+});
+
+test('playerDamage is a replicable event', () => {
+  assert.equal(validateEvent({ type: 'event', v: V, id: 1, kind: 'playerDamage', data: { id: 1, source: 'blackHole', amount: 100 } }).ok, true);
+});
+
 test('worst-case snapshot (every kind at the per-kind cap) fits the frame limit', async () => {
   const { LIMITS } = await import('../src/app/tornado/engine/net/protocol.js');
   const rows = (n, w) => Array.from({ length: n }, (_, i) => [i, -123.45, 234.56, 3.14, 1, 4, 100, -1, -1].slice(0, w));

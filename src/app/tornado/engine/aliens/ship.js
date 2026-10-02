@@ -300,25 +300,37 @@ export function createAlienShip(ctx, S, api) {
         ctx.systems.people.explodePerson(person);
       }
     }
-    if (ctx.systems.heroMode) ctx.systems.heroMode.hitArea(at.x, at.z, reach * 0.5, 'CRUSHED', 'A falling ship came down on Roger');
+    if (ctx.systems.heroMode) ctx.systems.heroMode.hitArea(at.x, at.z, reach * 0.5, 'CRUSHED', 'A falling ship came down on Roger', 'fallingShip');
     setOffExplosivesAt(ctx, at.x, at.z, reach * 0.6);
     damage.addDamageScore(score);
   }
 
   /**
    * One of Roger's plasma shots on the ship.
+   * A hit of under one point (D1, health/damageTable.js: the minigun, the
+   * fire gun and the railgun's bolts chip its 6 hull) is a chip: no burst of
+   * its own, a small spark on every fourth within the particle budget, and a
+   * quiet cue, as for the hunters (waves.js hitHunter).
    * @param {number} points of hull it takes (heroMode.js SHIP_DAMAGE)
-   * @param {THREE.Vector3} at
+   * @param {THREE.Vector3} [at] where; a chip may leave it out (the ship's own position)
    * @returns {number} the share of the hull left (0 when it goes down), or
    *   -1 when there was nothing left to hit
    */
   function hitShip(points, at) {
     const heavy = points > 1;
-    ctx.systems.explosions.spawnImpactBurst(at, heavy ? 3 : 1.4);
+    const chip = points < 1;
+    if (!chip) ctx.systems.explosions.spawnImpactBurst(/** @type {THREE.Vector3} */ (at), heavy ? 3 : 1.4);
     if (!S.ship || S.state.phase === 'wrecked') return -1;
     S.state.hull = Math.max(0, S.state.hull - points);
     S.state.damage++;
-    ctx.systems.cues.playLargeExplosion({ priority: true, gain: heavy ? 1 : 0.6 });
+    if (chip) {
+      if (S.state.damage % 4 === 0 && S.state.hull > 0 && ctx.systems.caps.particleRoom() > 0) {
+        ctx.systems.explosions.spawnImpactBurst(at || S.ship.group.position, 0.4);
+      }
+      if (S.state.hull > 0) ctx.systems.cues.playLargeExplosion({ gain: 0.25 });
+    } else {
+      ctx.systems.cues.playLargeExplosion({ priority: true, gain: heavy ? 1 : 0.6 });
+    }
     if (S.state.hull <= 0) {
       S.state.crashing = true;
       api.stopTracker(S.shipTracker);
@@ -330,7 +342,7 @@ export function createAlienShip(ctx, S, api) {
   /**
    * What Roger's sights can hit in the air: the ship and the hunters, each as
    * an upright disc.
-   * @returns {{x: number, y: number, z: number, radius: number, bottom: number, top: number, name: string, hit: (points: number, at: THREE.Vector3) => number}[]}
+   * @returns {{x: number, y: number, z: number, radius: number, bottom: number, top: number, name: string, hit: (points: number, at?: THREE.Vector3) => number}[]}
    */
   function shipTargets() {
     const out = [];
@@ -343,7 +355,7 @@ export function createAlienShip(ctx, S, api) {
       const p = hunter.group.position;
       const s = ALIENS.hunterScale;
       out.push({
-        x: p.x, y: p.y, z: p.z, radius: 15 * s, bottom: p.y + 0.5 * s, top: p.y + 7 * s, name: 'HUNTER SHIP',
+        x: p.x, y: p.y, z: p.z, radius: 15 * s, bottom: p.y + 0.5 * s, top: p.y + 7 * s, name: 'HUNTER SHIP', hunter,
         hit: (points, at) => api.hitHunter(hunter, points, at)
       });
     }

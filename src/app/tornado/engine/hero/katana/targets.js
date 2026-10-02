@@ -1,5 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
+import { PERSON } from '../../scale.js';
+import { IMPACT_SCORE } from '../../damage/config.js';
 
 /**
  * ===========================================================================
@@ -14,17 +16,32 @@ import * as THREE from 'three';
  *    `exiting`, is cuttable. The hit goes through the alien adapter
  *    (aliens.js) as a `blade` hit carrying `cut`, which reaches the additive
  *    `sliceKill` (aliens/crew.js). `blade` is never sent to any other kind:
- *    the T-Rex accepts it for the samurai (R-020), the Katana must not use
- *    that door.
+ *    the T-Rex accepts it for the samurai (R-020): the Katana's non-alien
+ *    blow carries no `cut` and no `amount`, so that owner reads it as a
+ *    zero cut and the register applies the table chip instead.
  *  - Every other registered kind in reach (the Terminator squad, the
  *    pursuers, T-Rex, Yeti, Patient Zero and clones, anything added later)
- *    parries: the clang and a few sparks, and no change at all to its state.
+ *    parries: the clang and a few sparks. Since decision D1 (every weapon
+ *    hurts every enemy) the blow is also a plain `blade` hit with no `cut`
+ *    through the register, which chips the enemy's health by the weapon
+ *    x enemy table (engine/health/damageTable.js: 0.6 of 30 on a
+ *    Terminator, 0.8 of 40 on the T-Rex, and so on). Where that is a kill
+ *    the owner's normal kill path runs and scores it once. The sparks stay
+ *    the one pooled burst at its smallest: a chip adds no particles.
  *  - The samurai (friendly support, Q11) are ignored: no parry, no damage.
- *    The UFO, hunter ships and mothership are not in the register of
- *    enemies, so they are never found here.
+ *    The hunter ships are in the register (they take the guns), but hover
+ *    26 m up and the blade never touches them: no parry, no damage. The UFO
+ *    and mothership are not in the register, so they are never found here;
+ *    nor are the nuclear plant and the tornadoes (D3: the katana does nothing
+ *    to them, the table's three zero cells), so the blade passes through.
  *
- * Presentation only: no score is added here (the base kill is scored once,
- * inside sliceKill, by damage.addDamageScore, R-027), and no `accepts` list
+ *  - People (civilians) are cut too, through the people owner's own additive
+ *    `eachCuttable` / `slicePerson` (they are not in the register): they are
+ *    never sent `blade`, never parry, and use their own 1.8 m height samples
+ *    (R-024). Each is scored once here at the person-kill value
+ *    (damage/config.js IMPACT_SCORE) through damage.addDamageScore.
+ *
+ * Aliens are scored by sliceKill (R-027), and no `accepts` list
  * is read or changed. The search walks the register once, with preallocated
  * result arrays and one reusable visitor, so it allocates nothing per call
  * (R-044: up to 150 mutated aliens).
@@ -34,9 +51,12 @@ import * as THREE from 'three';
 const ALIEN_RADIUS = 0.35;
 /** The alien stands 1.4 m: feet, middle and head are tested against the blade's height (R-024). */
 const ALIEN_SAMPLES = [0, 0.7, 1.4];
+/** A person's half-width and height samples (feet, middle, head), metres (R-024). */
+const PERSON_RADIUS = PERSON.width / 2;
+const PERSON_SAMPLES = [0, PERSON.height / 2, PERSON.height];
 const DEFAULT_RADIUS = 0.6;
-/** Registry kind names that are never targets (Q11). */
-const IGNORED_KINDS = new Set(['samurai']);
+/** Registry kind names that are never targets (Q11; the hunter ships, Subtask 8). */
+const IGNORED_KINDS = new Set(['samurai', 'hunterShip']);
 /** The phases of an alien a blade can cut (Q6). */
 const CUTTABLE_PHASES = new Set(['patrol', 'escort', 'exiting']);
 /** The enemy capacity the register allows (R-048), the size of the result arrays. */
@@ -65,6 +85,7 @@ const SPARK_STRENGTH = 0.4;
 /**
  * @typedef {Object} StrikeResult
  * @property {number} cut how many aliens were cut
+ * @property {number} people how many people were cut
  * @property {boolean} parried whether the blade met something it must not cut
  */
 
@@ -116,6 +137,21 @@ export function reachesStack(r, p) {
 }
 
 /**
+ * Whether the blade's height reaches a person: as `reachesStack`, with the
+ * person's own height samples.
+ * @param {Reach} r with `y` set
+ * @param {{x: number, y: number, z: number}} p the person's root
+ * @returns {boolean}
+ */
+export function reachesPerson(r, p) {
+  const ground = Math.hypot(p.x - r.x, p.z - r.z);
+  const by = r.y === undefined ? 0 : r.y;
+  let gap = Infinity;
+  for (let i = 0; i < PERSON_SAMPLES.length; i++) gap = Math.min(gap, Math.abs(p.y + PERSON_SAMPLES[i] - by));
+  return Math.hypot(ground, gap) <= r.reach + PERSON_RADIUS;
+}
+
+/**
  * @param {Object} ctx
  * @returns {{
  *   find: (r: Reach) => {cuttable: any[], cuttableCount: number, parryable: any[], parryCount: number},
@@ -142,6 +178,12 @@ export function createKatanaTargets(ctx) {
   /** The registry kind of each parryable thing, parallel to `parryable`. */
   /** @type {any[]} */
   const parryKinds = new Array(MAX_RESULTS);
+  /**
+   * Reused plain blade hit for the non-alien kinds (no cut, no amount), so a
+   * strike does not allocate per enemy.
+   * @type {{type: 'blade', at: {x: number, y: number, z: number}}}
+   */
+  const bladeHit = { type: 'blade', at: { x: 0, y: 1, z: 0 } };
   /** Reused hit, so a strike does not allocate per alien. */
   /** @type {{type: 'blade', at: {x: number, y: number, z: number}, cut: {takeOver?: (root: THREE.Object3D, plane?: CutPlaneLike, skin?: THREE.Material) => void, plane?: CutPlaneLike}}} */
   const hit = { type: 'blade', at: { x: 0, y: 1, z: 0 }, cut: {} };
@@ -188,6 +230,38 @@ export function createKatanaTargets(ctx) {
   }
 
   /**
+   * The people owner's visitor (people.eachCuttable), created once. A cheap
+   * box reject first, since up to 420 people are walked per search (R-003).
+   * A person's entry in `cuttableKinds` is null: there is no registry kind.
+   * @param {any} person
+   * @returns {void}
+   */
+  function visitPerson(person) {
+    const p = person.mesh.position;
+    const range = query.reach + PERSON_RADIUS;
+    if (Math.abs(p.x - query.x) > range || Math.abs(p.z - query.z) > range) return;
+    if (!inReach(query, p.x, p.z, PERSON_RADIUS)) return;
+    if (query.y !== undefined && !reachesPerson(query, p)) return;
+    if (found.cuttableCount < MAX_RESULTS) {
+      cuttableKinds[found.cuttableCount] = null;
+      cuttable[found.cuttableCount++] = person;
+    }
+  }
+
+  /**
+   * Cuts one person: out through the people owner, scored once.
+   * @param {any} person
+   * @param {((root: THREE.Object3D, plane?: CutPlaneLike, skin?: THREE.Material) => void)|undefined} onRoot
+   * @param {CutPlaneLike|undefined} plane
+   * @returns {boolean}
+   */
+  function cutPerson(person, onRoot, plane) {
+    if (!ctx.systems.people.slicePerson(person, onRoot, plane)) return false;
+    ctx.systems.damage.addDamageScore(IMPACT_SCORE);
+    return true;
+  }
+
+  /**
    * Everything in reach this frame. The arrays are reused by the next call.
    * @param {Reach} r
    * @returns {{cuttable: any[], cuttableCount: number, parryable: any[], parryCount: number}}
@@ -199,6 +273,7 @@ export function createKatanaTargets(ctx) {
     sparkDist = Infinity;
     ctx.systems.enemies.each(visit);
     if (ctx.systems.aliens) ctx.systems.aliens.eachCuttable(visitAlien);
+    if (ctx.systems.people) ctx.systems.people.eachCuttable(visitPerson);
     return found;
   }
 
@@ -219,6 +294,22 @@ export function createKatanaTargets(ctx) {
   }
 
   /**
+   * The blade's blow on a non-alien enemy (D1): a plain `blade` hit through
+   * the register, which applies the table's damage. Never sent to an alien,
+   * a hunter ship or a samurai (they are cut, or ignored, elsewhere).
+   * @param {any} enemy
+   * @param {any} kind
+   * @returns {void}
+   */
+  function bladeStrike(enemy, kind) {
+    const p = kind.position(enemy);
+    bladeHit.at.x = p.x;
+    bladeHit.at.y = 1.0;
+    bladeHit.at.z = p.z;
+    ctx.systems.enemies.hit(enemy, kind, bladeHit);
+  }
+
+  /**
    * One slash landing: every cuttable alien in reach is cut (through the
    * register, so the owner's own rules apply), and if anything else was in
    * reach the blade parries once. Scoring happens in the owner.
@@ -232,10 +323,18 @@ export function createKatanaTargets(ctx) {
   function strike(r, onRoot, plane) {
     const f = find(r);
     let cutCount = 0;
+    let peopleCount = 0;
     hit.cut.takeOver = onRoot;
     hit.cut.plane = plane;
     for (let i = 0; i < f.cuttableCount; i++) {
       const alien = f.cuttable[i];
+      if (cuttableKinds[i] === null) {
+        const q = alien.mesh.position;
+        if (plane) plane.point.set(q.x, q.y + PERSON.height / 2, q.z);
+        if (cutPerson(alien, onRoot, plane)) peopleCount++;
+        f.cuttable[i] = null;
+        continue;
+      }
       const p = alien.root.position;
       hit.at.x = p.x;
       hit.at.y = 1.0;
@@ -249,9 +348,13 @@ export function createKatanaTargets(ctx) {
     const parried = f.parryCount > 0;
     if (parried) {
       parry(sparkAt.x, sparkAt.y, sparkAt.z);
-      for (let i = 0; i < f.parryCount; i++) f.parryable[i] = null;
+      for (let i = 0; i < f.parryCount; i++) {
+        bladeStrike(f.parryable[i], parryKinds[i]);
+        f.parryable[i] = null;
+        parryKinds[i] = null;
+      }
     }
-    return { cut: cutCount, parried };
+    return { cut: cutCount, people: peopleCount, parried };
   }
 
   /**
@@ -270,11 +373,18 @@ export function createKatanaTargets(ctx) {
   function strikeAlong(r, touches, bodyRadius, onRoot, plane) {
     const f = find(r);
     let cutCount = 0;
+    let peopleCount = 0;
     hit.cut.takeOver = onRoot;
     hit.cut.plane = plane;
     for (let i = 0; i < f.cuttableCount; i++) {
       const alien = f.cuttable[i];
       f.cuttable[i] = null;
+      if (cuttableKinds[i] === null) {
+        // A person (no registry kind): the line must pass through their own height.
+        const q = alien.mesh.position;
+        if (alien.mesh.parent && touches(q.x, q.y, q.z, PERSON.height, bodyRadius) && cutPerson(alien, onRoot, plane)) peopleCount++;
+        continue;
+      }
       // An alien that died or changed phase meanwhile is skipped by the owner too.
       if (!isCuttablePhase(alien)) continue;
       const p = alien.root.position;
@@ -291,15 +401,16 @@ export function createKatanaTargets(ctx) {
       const kind = parryKinds[i];
       const p = kind.position(f.parryable[i]);
       const radius = kind.hitbox ? kind.hitbox(f.parryable[i]).radius : DEFAULT_RADIUS;
-      if (!parried && touches(p.x, 0, p.z, 2.0, radius)) {
+      if (touches(p.x, 0, p.z, 2.0, radius)) {
+        if (!parried) sparkAt.set(p.x, 1.0, p.z);
         parried = true;
-        sparkAt.set(p.x, 1.0, p.z);
+        bladeStrike(f.parryable[i], kind);
       }
       f.parryable[i] = null;
       parryKinds[i] = null;
     }
     if (parried) parry(sparkAt.x, sparkAt.y, sparkAt.z);
-    return { cut: cutCount, parried };
+    return { cut: cutCount, people: peopleCount, parried };
   }
 
   return { find, strike, strikeAlong, parry };

@@ -13,7 +13,8 @@ import * as THREE from 'three';
 // The two options' shared rules: easy to tweak, on request.
 export const SUPPORT = {
   cooldown: 60,            // seconds before an option can be used again (each its own)
-  stay: 120,               // seconds the samurai stay, from the last one down the ramp
+  stay: 120,               // seconds the samurai stay at most, from the last one down the ramp
+  clearGrace: 6,           // seconds with no hostile in the ring after which the squad stands down early
   coverage: 100,           // metres: the samurai's guard radius round the drop point (ring A)
   markerBound: 280,        // how far from the centre the marker may go
   watchHold: 7             // seconds the camera holds on the drop zone after its 1 s glide
@@ -38,7 +39,7 @@ export const SHIP = {
   bannerSeconds: 3,
   lightPeak: 300,
   lightDistance: 110,
-  // Leaving: up and away once the squad is aboard.
+  // Leaving: up and away once the ramp is empty.
   leaveSeconds: 4.5,
   leaveHeight: 420,
   // The colours: black lacquer and gold, a crimson glow underneath.

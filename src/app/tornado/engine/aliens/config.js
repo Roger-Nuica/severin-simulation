@@ -99,7 +99,6 @@ export const ALIENS = {
   // Roger (engine/heroMode.js).
   rogerSight: 45,          // crew this near him go for him
   huntSpeed: 6,
-  meleeReach: 1,           // within this, they have him
   rayHitRadius: 1,         // of where the ray was aimed, for it to hit him
   // The ships' tracking laser.
   laserRange: 100,
@@ -124,6 +123,11 @@ export const ALIENS = {
   hunterShootRange: 60,
   hunterShotEvery: [1.6, 2.8],
   hunterHull: 4,             // hull points, as shipHull: one mega beam, or four shots
+  // Hull points a hunter loses to each weapon besides the plasma rifle, whose
+  // 1 (normal) and 5 (mega) stay in heroMode.js SHIP_DAMAGE: a minigun round,
+  // a railgun or Lightning bolt, and one tick of the fire gun. The katana
+  // (blade), the EMP and the freeze are not accepted at all.
+  hunterHit: { bullet: 0.25, bolt: 2, fire: 0.5 },
   hunterGlow: new THREE.Color(2.4, 0.3, 0.22),
   // The nuclear plants (engine/nuclear.js): every alien ship goes for them
   // while any is standing -- five hits bring one down. The hunters stand
@@ -188,6 +192,8 @@ export const UP = new THREE.Vector3(0, 1, 0);
  * @property {number} [danceTime] seconds into its dance
  * @property {Object|null} [target] who it is going for (crew.js currentTarget)
  * @property {number} [retarget] seconds until it looks for a nearer target
+ * @property {import('../health/melee.js').TouchState} [touch] its melee cooldown (health/melee.js)
+ * @property {number} [touchClock] world seconds it has hunted Roger, the clock of `touch`
  * @property {boolean} [locked] its ray is aimed at where Roger stood (crew.js huntRoger)
  * @property {number} [lockX]
  * @property {number} [lockZ]

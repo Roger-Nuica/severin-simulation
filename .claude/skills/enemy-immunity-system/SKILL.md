@@ -14,8 +14,9 @@ Route new area-effect damage through the enemy registry and preserve each enemy 
 ## How it works
 
 - An owner registers an `EnemyKind` with `kind`, `list()`, `position(e)`, `accepts`, and `damage(e, hit)` (`enemies.js:22-47, 59-60`). `registerKind()` stores the owner adapter by kind (`enemies.js:75-83`).
-- `enemies.hit(e, kind, hit)` first checks `kind.accepts.includes(hit.type)`; rejected types never reach `damage`. Accepted means only that the owner's handler runs; it does not imply a kill (`enemies.js:114-124`).
+- `enemies.hit(e, kind, hit)` checks `kind.accepts.includes(hit.type)`; types the owner does not accept never reach `damage` but still take table chip damage. Accepted means only that the owner's handler runs; it does not imply a kill (`enemies.js:114-124`).
 - The current concrete contracts differ: aliens accept `plasma`, `bolt`, `fire` and `blade` (`aliens.js:297-306`); Terminators accept `plasma`, `bullet`, `bolt` and `emp` and branch on type/mega status (`terminator.js:148-164`); the Cyber Yeti accepts `fire` and `emp`, where fire deals damage and EMP stuns (`yeti.js:386-399`).
+- Weakness model: `accepts` means "handled by the owner's weakness path". `enemies.hit` also applies the weapon x enemy table (`engine/health/damageTable.js`, R-054) to every hit and calls the owner's optional `defeat(e, hit)` at 0 health, so a hit the owner does not accept chips health instead of being ignored. Every new kind needs a health value and a table row (no zero cell except the Katana against plant, mothership and tornado).
 - Existing direct weapon hits may still call their owning systems directly. The registry is the shared adapter used by area effects and abilities; black-hole capture uses the separate `consume` callback where registered (`enemies.js:25-27, 35-37`). Do not force those distinct paths into a false universal damage route.
 - `caps.canSpawn(kind)` enforces `CAPS.enemies = 160` across registered kinds and the per-kind Patient Zero clone limit of 50 (`perf/caps.js:24-27, 66-83`).
 
@@ -29,7 +30,8 @@ Route new area-effect damage through the enemy registry and preserve each enemy 
 
 ## Pitfalls / common mistakes
 
-- Do not add a hit type globally just because one enemy should accept it; update only the owner contract required by the approved task.
+- Do not add a hit type globally just because one enemy should accept it; update only the owner contract required by the approved task. Do not widen `accepts` to give a weapon an effect: put the value in the table.
+- Do not make an enemy or disaster damage a samurai (`PLAYER_WEAPONS_ONLY`).
 - Do not treat acceptance as lethal damage: Terminator plasma can knock down, Yeti EMP stuns without hurting, and the fire handler is the Yeti's damage path.
 - Do not route every existing weapon through the registry when the code intentionally calls an owner directly.
 - Do not implement black-hole swallowing as ordinary damage; capture/consumption is a separate path.

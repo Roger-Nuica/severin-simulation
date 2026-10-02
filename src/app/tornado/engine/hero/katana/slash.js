@@ -2,7 +2,6 @@
 import * as THREE from 'three';
 import { HERO } from '../config.js';
 import { createKatanaTargets } from './targets.js';
-import { KATANA_BLADE } from './config.js';
 
 /**
  * ===========================================================================
@@ -17,7 +16,8 @@ import { KATANA_BLADE } from './config.js';
  *    horizontal, vertical, which starts over after CHAIN_IDLE seconds idle.
  *  - What it touches: everything inside REACH metres and a forward arc, found
  *    by targets.js (a stacked three-point height test, R-024). Aliens are cut
- *    through the register; every other kind only parries. The strike lands
+ *    through the register; every other kind parries and takes the table's
+ *    chip (a plain `blade` hit, D1: see targets.js). The strike lands
  *    STRIKE_DELAY seconds after the press, at the blade's strike (the
  *    model's wind-up), not at the press.
  *  - The auto-lunge: during that wind-up Roger slides up to LUNGE_MAX metres
@@ -103,7 +103,6 @@ const ALIEN_CHEST = 0.7;
  * @typedef {Object} KatanaRelease
  * @property {number} dx swipe movement along x, pixels
  * @property {number} dy swipe movement along y, pixels
- * @property {number} hold real seconds held
  */
 
 /**
@@ -201,7 +200,7 @@ export function createKatanaSlash(ctx, env) {
   }
 
   /**
-   * The nearest cuttable alien in front, for the lunge.
+   * The nearest cuttable alien or civilian in front, for the lunge.
    * @param {THREE.Vector3} p Roger
    * @param {number} h his heading
    * @returns {boolean} whether there is one; if so `pending.dir*` points at it
@@ -219,8 +218,10 @@ export function createKatanaSlash(ctx, env) {
     let best = Infinity;
     for (let i = 0; i < f.cuttableCount; i++) {
       const a = f.cuttable[i];
-      const dx = a.root.position.x - p.x;
-      const dz = a.root.position.z - p.z;
+      // An alien stands at its `root`, a civilian at its `mesh` (no registry kind).
+      const at = a.root ? a.root.position : a.mesh.position;
+      const dx = at.x - p.x;
+      const dz = at.z - p.z;
       const d = Math.hypot(dx, dz);
       if (d < best) {
         best = d;
@@ -237,7 +238,7 @@ export function createKatanaSlash(ctx, env) {
   }
 
   /**
-   * The blade lands: the cut aliens go through the register, the rest parry.
+   * The blade lands: the cut aliens go through the register, the rest parry and are chipped.
    * @returns {void}
    */
   function land() {
@@ -260,12 +261,12 @@ export function createKatanaSlash(ctx, env) {
     // `cut.point` is re-aimed at each alien by the strike, so the landing is kept first.
     landedAt.copy(cut.point);
     const result = targets.strike(reach, pieces ? pieces.takeOver : undefined, cut);
-    if (result.cut > 0 || recut > 0) {
+    if (result.cut > 0 || result.people > 0 || recut > 0) {
       if (ctx.systems.katanaSound) ctx.systems.katanaSound.playSlice();
       // A killing breaks Smooth Criminal's spell, as the other weapons' do.
       ctx.events.emit('rogerKill');
       const feel = env.feel ? env.feel() : null;
-      if (feel) feel.cut(result.cut, recut, landedAt);
+      if (feel) feel.cut(result.cut, recut, landedAt, result.people);
     }
   }
 
@@ -297,9 +298,8 @@ export function createKatanaSlash(ctx, env) {
    * @returns {boolean} whether a slash started
    */
   function release(r) {
-    // Blade Mode (blade.js, offered the release first by heroWeapons.js) owns
-    // a press held this long: it fires no quick slash here.
-    if (r.hold >= KATANA_BLADE.holdSeconds) return false;
+    // Blade Mode (blade.js, offered the release first by heroWeapons.js) takes
+    // the release while it is on, so a quick slash is only ever made outside it.
     const rig = env.rig();
     if (!rig || !env.canAct() || cooldown > 0 || pending.active || rig.isSlashing()) return false;
 

@@ -39,6 +39,8 @@ export const KATANA_PIECES = {
   restSpeed: 0.08,
   /** The glowing cut face: the alien's inner teal-green, over 1 so it blooms. */
   capColour: [0.2, 1.5, 0.9],
+  /** The cut face of a person (rgb, may exceed 1 like capColour). */
+  bloodCapColour: [1.3, 0.12, 0.1],
   /** The detail group's faint glow (guns, eyes, hat): the shared colour of its emissive. */
   detailEmissive: 0x0a1c10
 };
@@ -80,6 +82,9 @@ export const KATANA_GOO = {
   /** Alien green, not red: the brightest and the darkest of the droplets (rgb, 0 to 1). */
   colourBright: [0.5, 1.0, 0.22],
   colourDark: [0.16, 0.55, 0.1],
+  /** A person's blood is red: the same two bounds (rgb, 0 to 1). */
+  bloodBright: [0.85, 0.06, 0.05],
+  bloodDark: [0.35, 0.02, 0.02],
   /** Drip sources a cut makes (half on each side of the cut), and how long each drips, seconds. */
   dripSources: 8,
   dripLife: [1.2, 2.2],
@@ -154,13 +159,11 @@ export const KATANA_BLADE = {
   holdId: 'bladeMode',
   /** World time scale while Blade Mode lasts. */
   holdScale: 0.1,
-  /** Real seconds the button is held before Blade Mode begins. */
-  holdSeconds: 0.25,
   /** Real seconds Blade Mode lasts at most. */
   maxSeconds: 4,
   /** Cuts in one Blade Mode window; the mode ends after the last. */
   maxCuts: 3,
-  /** A drag shorter than this, in pixels, is "no line": letting go of it leaves Blade Mode. */
+  /** A drag shorter than this, in pixels, is "no line": letting go of it does nothing (the mode stays on). */
   minLinePx: 24,
   /**
    * How near the cut plane must pass to the alien's body axis, metres. Under

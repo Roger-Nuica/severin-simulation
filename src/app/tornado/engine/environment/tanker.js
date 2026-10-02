@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { bannerHost } from '../../utils/banners.js';
 import { firstBlockAhead, roadBlockAt } from './blockers.js';
-import { setOffExplosivesAt } from '../explosives.js';
+import { hitRogerAt, setOffExplosivesAt } from '../explosives.js';
 import { BLAST_SIZE } from '../player/energy.js';
 
 /**
@@ -398,6 +398,8 @@ export function createTankerSystem(ctx) {
     // (engine/gasMains.js): the fire runs off down the road from here -- and
     // the chemical works goes too if it is in reach (engine/explosives.js).
     setOffExplosivesAt(ctx, at.x, at.z, TANKER.fireRadius * 0.6);
+    // Roger inside that same reach is caught in the fireball.
+    hitRogerAt(ctx, at.x, at.z, TANKER.fireRadius * 0.6);
 
     // Throws everything loose nearby, away from the blast.
     for (const obj of Sim.objects) {

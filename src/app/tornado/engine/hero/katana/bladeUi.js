@@ -216,7 +216,7 @@ export function createKatanaBladeUi(ctx, env) {
     if (p) p.bladeVignette = on ? 1 : 0;
 
     // The press point, recorded by the press itself (heroWeapons.katanaPress),
-    // since Blade Mode begins a hold later and the cut reads the same point.
+    // since the cut reads the same point when the button comes up.
     if (input.down) {
       drawn.x0 = input.pressX;
       drawn.y0 = input.pressY;

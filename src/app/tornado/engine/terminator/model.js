@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { T800 } from './config.js';
+import { createTouchState } from '../health/melee.js';
 /** @typedef {import('./config.js').Unit} Unit */
 
 /**
@@ -130,7 +131,9 @@ export function createTerminatorModel(ctx, S, api) {
       ignore: null,
       ignoreTimer: 0,
       foe: null,
-      strikeTimer: 0
+      strikeTimer: 0,
+      touch: createTouchState(),
+      touchClock: 0
     };
   }
 

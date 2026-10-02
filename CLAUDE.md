@@ -21,7 +21,7 @@ npm run start
 npm run lint
 ```
 
-This project does not currently include a real automated test suite. Validation is primarily through lint and production build checks.
+The project has a small automated suite: `npm test` runs `node --test` over `tests/*.test.mjs` (health, melee, damage table, enemy routing, friendly fire, protocol, co-op rules and relay). It covers pure logic, not the browser simulation, so validation is still lint, production build and manual checks.
 
 ## AGENT WORKFLOW
 

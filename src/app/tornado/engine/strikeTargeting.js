@@ -1,6 +1,8 @@
 // @ts-check
 import * as THREE from 'three';
 import { setOffExplosivesAt } from './explosives.js';
+import { ALIENS } from './aliens/config.js';
+import { tableDamage } from './health/enemyDamage.js';
 
 /**
  * ===========================================================================
@@ -24,6 +26,8 @@ import { setOffExplosivesAt } from './explosives.js';
  *    lit up, convulsing, charred and falling (electricStorm.js electrocute);
  *  - any of the aliens' crew it lands on or beside burns (aliens.js
  *    boltKill);
+ *  - a hunter ship it lands under (inside its disc, seen from above) takes
+ *    a bolt's worth of hull through the enemy register (hunterShip);
  *  - a Terminator it lands on shorts out as if an EMP had reached it
  *    (terminator.js / heroMode.js empSweep);
  *  - trees are blown out of the ground, cars flipped, power lines faulted,
@@ -86,7 +90,7 @@ export function createStrikeTargetingSystem(ctx) {
     lastX: 0,
     lastZ: 0
   };
-  /** @type {{x: number, z: number, delay: number}[]} bolts queued by volleys */
+  /** @type {{x: number, z: number, delay: number, roger?: boolean}[]} bolts queued by volleys, or by Roger's railgun (roger) */
   const queue = [];
   /** @type {{mesh: THREE.Mesh, age: number}[]} */
   const scorches = [];
@@ -96,6 +100,8 @@ export function createStrikeTargetingSystem(ctx) {
   let scorchGeo = null;
   /** @type {HTMLButtonElement|null} */
   let button = null;
+  /** @type {any} the register's hunterShip kind, found on the first bolt */
+  let hunterKind = null;
   const point = new THREE.Vector3();
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
@@ -200,14 +206,14 @@ export function createStrikeTargetingSystem(ctx) {
    * One bolt landing, and everything it does there.
    * @param {number} x
    * @param {number} z
-   * @param {boolean} [rail] Roger's railgun bolt (a tamer flash)
+   * @param {boolean} [roger] Roger's own railgun bolt: a tamer flash, and a hunter it stops is his kill
    * @returns {void}
    */
-  function strike(x, z, rail = false) {
+  function strike(x, z, roger = false) {
     const s = ctx.systems;
     const at = new THREE.Vector3(x, 0, z);
     const power = STRIKE.power[0] + Math.random() * (STRIKE.power[1] - STRIKE.power[0]);
-    s.lightning.strikeAt(at, power, rail);
+    s.lightning.strikeAt(at, power, roger);
     s.explosions.spawnImpactBurst(new THREE.Vector3(x, 0.8, z), 0.7);
     const { damageFromImpact, addDamageScore } = s.damage;
 
@@ -248,6 +254,52 @@ export function createStrikeTargetingSystem(ctx) {
     if (s.aliens) {
       const burnt = s.aliens.boltKill(x, z, STRIKE.alienRadius);
       if (burnt) addDamageScore(STRIKE.score * burnt);
+    }
+
+    // The hunter ships: a bolt lands on the ground, so a hunter overhead is
+    // hit by its disc seen from above, not the crew's 5 m. One hit each.
+    // (The T-Rex and Patient Zero accept 'bolt' but are never sent one here.)
+    if (s.enemies) {
+      if (!hunterKind) hunterKind = s.enemies.kinds().find((/** @type {{kind: string}} */ k) => k.kind === 'hunterShip') || null;
+      if (hunterKind) {
+        const reach = 15 * ALIENS.hunterScale;
+        for (const h of hunterKind.list()) {
+          const p = hunterKind.position(h);
+          if (Math.hypot(p.x - x, p.z - z) < reach && s.enemies.hit(h, hunterKind, { type: 'bolt', at: { x, z } }) && roger) {
+            // Only a hit that downs it: breaks Smooth Criminal's spell, as the minigun's does.
+            ctx.events.emit('rogerKill');
+          }
+        }
+      }
+    }
+
+    // The alien ship (the UFO is not in the register): a bolt landing under it
+    // chips its hull by the table (D1), seen as its disc from above.
+    if (s.aliens) {
+      for (const ship of s.aliens.shipTargets()) {
+        if (ship.name === 'UFO' && Math.hypot(ship.x - x, ship.z - z) < ship.radius && ship.hit(tableDamage('ufo', { type: 'bolt' })) === 0 && roger) {
+          ctx.events.emit('rogerKill');
+        }
+      }
+    }
+
+    // The mothership (D3): the same chip as the UFO's, by its disc from above.
+    const mother = s.mothership && s.mothership.shipTarget();
+    if (mother && Math.hypot(mother.x - x, mother.z - z) < mother.radius && mother.hit(tableDamage('mothership', { type: 'bolt' })) === 0 && roger) {
+      ctx.events.emit('rogerKill');
+    }
+    // Roger's railgun only (the Lightning tile's strikes leave the reactors and
+    // funnels as they were): a bolt chips the reactor it lands on, and a funnel.
+    if (roger) {
+      if (s.nuclear) s.nuclear.chipAt(x, z, STRIKE.faultRadius, { type: 'bolt' });
+      if (s.heroMode) {
+        for (const { Vortex } of ctx.tornadoes.active) {
+          if (Vortex.neutralized || Vortex.birth < 0.5) continue;
+          if (Math.hypot(Vortex.center.x - x, Vortex.center.z - z) < Sim.params.radius * (Vortex.sizeMul || 1) * 0.9) {
+            s.heroMode.chipTornado(Vortex, { type: 'bolt' });
+          }
+        }
+      }
     }
 
     // The Terminators: a bolt on one is an EMP to it.
@@ -299,9 +351,9 @@ export function createStrikeTargetingSystem(ctx) {
     for (let i = queue.length - 1; i >= 0; i--) {
       queue[i].delay -= dt;
       if (queue[i].delay > 0) continue;
-      const { x, z, rail } = queue[i];
+      const { x, z, roger } = queue[i];
       queue.splice(i, 1);
-      strike(x, z, rail);
+      strike(x, z, roger === true);
     }
 
     if (state.on && reticle) {
@@ -336,7 +388,7 @@ export function createStrikeTargetingSystem(ctx) {
    * @returns {void}
    */
   function boltAt(x, z) {
-    queue.push({ x, z, delay: 0, rail: true });
+    queue.push({ x, z, delay: 0, roger: true });
   }
 
   /**
@@ -352,6 +404,7 @@ export function createStrikeTargetingSystem(ctx) {
   function resetStrikeTargeting() {
     setTargeting(false);
     queue.length = 0;
+    hunterKind = null;
     state.hum = 0;
     for (const entry of scorches) entry.mesh.visible = false;
   }

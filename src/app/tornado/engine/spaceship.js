@@ -33,7 +33,8 @@ export { buildSaucer } from './spaceship/config.js';
  *    from the nose camera, steered a little with W A S D, and goes off --
  *    the tanker's explosion at twice the reach and a ring of fire sweeping
  *    out, destroying everything inside it.
- * Each has its own SUPPORT.cooldown; one squad at a time. Enter does nothing
+ * Each has its own SUPPORT.cooldown; one squad at a time. The ship leaves as
+ * soon as the squad is down; the squad stays on the ground on its own clock. Enter does nothing
  * here any more (the old ride-it-down landing, its hover and its Space/Enter
  * drop, is gone; so is double-clicking the ground for a spot).
  *
@@ -75,7 +76,7 @@ export function createSpaceshipSystem(ctx) {
   // reads and writes it as S.
   const S = {
     state: {
-      /** @type {'idle'|'descending'|'deploying'|'unloading'|'guarding'|'boarding'|'retracting'|'leaving'} the samurai ship */
+      /** @type {'idle'|'descending'|'deploying'|'unloading'|'retracting'|'leaving'} the samurai ship (the squad is separate: squad, guarding) */
       phase: 'idle',
       t: 0,
       timer: 0,
@@ -83,8 +84,14 @@ export function createSpaceshipSystem(ctx) {
       brakeY: 0,
       spawned: 0,
       exitTimer: 0,
-      // Seconds of the squad's stay left.
+      // The squad, independent of the ship: alive from the call until it ends
+      // (clearSquad); guarding once the last is down the ramp.
+      squad: false,
+      guarding: false,
+      // Seconds of the squad's stay left, and how long no hostile has been
+      // inside the coverage ring.
       stay: 0,
+      clearFor: 0,
       bannerTimer: 0,
       time: 0
     },
@@ -214,12 +221,13 @@ export function createSpaceshipSystem(ctx) {
       object: (s) => s.group,
       big: true,
       consume: () => {
-        api.recall();
-        api.clearSquad();
+        // Still unloading: the squad is aboard with it and goes too. Once
+        // the squad is on the ground it carries on without the ship.
+        if (!S.state.guarding) api.clearSquad();
         api.removeShip();
         S.state.phase = 'idle';
-        S.cooldown.samurai = SUPPORT.cooldown;
         ctx.systems.spaceshipSound.fadeOutSpaceshipSound();
+        api.finishSupport();
       }
     });
   }
@@ -273,7 +281,7 @@ export function createSpaceshipSystem(ctx) {
   function updateSupportWorld(dt) {
     if (!S.group || dt <= 0) return;
     api.updateShip(dt);
-    api.updateSquad(dt);
+    api.updateSquad(dt); // independent of the ship: free when there is no squad
   }
 
   /**

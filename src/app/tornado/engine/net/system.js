@@ -4,11 +4,15 @@ import { createRelayClient } from './client.js';
 import { createInputGate } from './inputGate.js';
 import { createSnapshotBuffer } from './interp.js';
 import { createEventEmitter, createEventDeduper } from './events.js';
-import { createPlayerRegistry, REVIVE } from './players.js';
+import { createPlayerRegistry, REVIVE, FRIENDLY_FIRE } from './players.js';
 import { PROTOCOL_VERSION, LIMITS, WEAPONS } from './protocol.js';
 import { HERO } from '../hero/config.js';
 import { HOLE } from '../player/blackHole.js';
 import { ENERGY } from '../player/energy.js';
+import { IMPACT_SCORE } from '../damage/config.js';
+import { HEALTH } from '../health/config.js';
+import { glowLevel } from '../health/state.js';
+import { mayHurtPlayer, splashAmount } from '../health/friendlyFire.js';
 
 /**
  * ===========================================================================
@@ -92,6 +96,10 @@ export function createNetSystem(ctx) {
     lastMission: '',
     peerScore: 0,
     peerRow: /** @type {number[]|null} */ (null),
+    /** Latest synced health per player id: value, seconds since last damage, receipt time (ms). */
+    peerHp: /** @type {Map<number, {v: number, since: number, at: number}>} */ (new Map()),
+    hudHtml: '',
+    hurtFlip: false,
     peerMission: /** @type {{id: string, value: number, goal: number, left: number}|null} */ (null),
     /** @type {THREE.Group|null} */
     proxyRoot: null,
@@ -195,6 +203,8 @@ export function createNetSystem(ctx) {
     S.tick = 0;
     S.peerScore = 0;
     S.peerRow = null;
+    S.peerHp.clear();
+    S.hudHtml = '';
     S.peerMission = null;
     clearProxies();
     if (wasPeer) restorePeerView();
@@ -382,13 +392,101 @@ export function createNetSystem(ctx) {
   function removeSeatEffects(_id) { void _id; }
 
   /**
+   * Tells a guest it was hurt (host only): the discrete `playerDamage` event
+   * the guest turns into its hit flash, arrow and sound through the same
+   * `playerHurt` path Roger uses. Roger himself needs no event.
+   * @param {string} id Guest id.
+   * @param {string} source Key into `HEALTH.damage`.
+   * @param {number} amount Points lost (a kill reports the full bar).
+   * @param {{x: number, z: number}|null} [position] Where the hit came from.
+   * @returns {void}
+   */
+  function notifyDamage(id, source, amount, position) {
+    if (id === '0' || !coopActive()) return;
+    /** @type {{id: number, source: string, amount: number, x?: number, z?: number}} */
+    const data = { id: Number(id), source: String(source).slice(0, 24), amount: Math.round(amount) };
+    if (position && Number.isFinite(position.x) && Number.isFinite(position.z)) {
+      data.x = Math.round(position.x);
+      data.z = Math.round(position.z);
+    }
+    sendEvent('playerDamage', data, id);
+  }
+
+  /**
+   * Whether one player's weapon may hurt another in this run (D4).
+   * @param {string} shooterId @param {string} targetId
+   * @returns {boolean}
+   */
+  const mayHurt = (shooterId, targetId) => mayHurtPlayer(shooterId, targetId, { coop: coopActive(), friendlyFire: FRIENDLY_FIRE });
+
+  /**
+   * An area event (explosion, ship crash, black hole zone) reaching the
+   * guests: every guest inside the radius takes the same request Roger would,
+   * through the one health API (host only; the API ignores a downed guest).
+   * @param {number} x @param {number} z @param {number} radius
+   * @param {import('../health/system.js').DamageRequest} request
+   * @returns {void}
+   */
+  function hitGuestsArea(x, z, radius, request) {
+    if (!coopActive() || !ctx.systems.health) return;
+    for (const p of players.list()) {
+      if (p.id === '0' || Math.hypot(p.x - x, p.z - z) >= radius) continue;
+      ctx.systems.health.damagePlayer({ ...request, targetId: p.id });
+    }
+  }
+
+  /**
+   * Roger's blast (plasma, mega) reaching a guest: falling away with
+   * distance like his own self-hit, only when friendly fire allows it.
+   * @param {{x: number, y: number, z: number}} at
+   * @param {number} radius
+   * @param {string} weapon A `HEALTH.damageToPlayer` key.
+   * @returns {void}
+   */
+  function splashGuests(at, radius, weapon) {
+    if (!coopActive() || !ctx.systems.health) return;
+    for (const p of players.list()) {
+      if (p.id === '0' || !mayHurt('0', p.id)) continue;
+      const amount = splashAmount(weapon, Math.hypot(p.x - at.x, p.z - at.z), radius);
+      if (amount <= 0) continue;
+      ctx.systems.health.damagePlayer({ source: 'friendlyFire', amount, type: 'blast', position: at, targetId: p.id, title: 'FRIENDLY FIRE', sub: "Caught in Roger's blast" });
+    }
+  }
+
+  /**
+   * A guest's shot against the other players: the first one whose body the
+   * ray crosses within `maxT` (the enemy it struck, if nearer) takes the
+   * weapon's `damageToPlayer` value. Past the muzzle guard only.
+   * @param {import('./players.js').Player} shooter
+   * @param {number} dx @param {number} dy @param {number} dz Unit direction.
+   * @param {number} maxT
+   * @param {string} weapon A `HEALTH.damageToPlayer` key.
+   * @returns {void}
+   */
+  function shootPlayers(shooter, dx, dy, dz, maxT, weapon) {
+    if (!ctx.systems.health) return;
+    const hx = Math.hypot(dx, dz) || 1e-6;
+    for (const p of players.list()) {
+      if (p.id === shooter.id || !mayHurt(shooter.id, p.id)) continue;
+      const t = ((p.x - shooter.x) * dx + (p.z - shooter.z) * dz) / (hx * hx);
+      if (t < HEALTH.friendlyFire.muzzleGuard || t > maxT) continue;
+      const py = EYE + dy * t;
+      if (py < 0 || py > 1.9 || Math.hypot(shooter.x + dx * t - p.x, shooter.z + dz * t - p.z) > 0.5) continue;
+      ctx.systems.health.damagePlayer({
+        source: 'friendlyFire', amount: /** @type {Record<string, number>} */ (HEALTH.damageToPlayer)[weapon], type: 'ray',
+        position: { x: shooter.x, y: 0, z: shooter.z }, targetId: p.id, title: 'FRIENDLY FIRE', sub: `Shot by Player ${shooter.id}`
+      });
+    }
+  }
+
+  /**
    * heroMode.killRoger asks first. In co-op, while a teammate is still up,
    * Roger goes down instead of dying.
    * @param {string} [kind]
    * @returns {boolean} true: handled (do not die)
    */
   function interceptRogerDeath(kind = '') {
-    if (S.bypass || !coopActive() || kind === 'fall') return false;
+    if (S.bypass || !coopActive()) return false;
     const roger = players.get('0');
     if (!roger) return false;
     if (roger.state !== 'up') return true;
@@ -480,13 +578,15 @@ export function createNetSystem(ctx) {
       // Down: lying flat; revived: upright.
       a.obj.mesh.rotation.x = p.state === 'up' ? 0 : -Math.PI / 2 + 0.1;
       a.obj.mesh.visible = p.state !== 'dead' && !p.seat;
-      // Hunters catching a guest: the same reach the pursuers have on Roger.
-      if (p.state === 'up' && dt > 0 && caughtBy(p)) catchPlayer(p.id, 'DOWN', `Player ${p.id} was caught`);
+      // Hunters now hurt a guest through the health API (melee touches, rays),
+      // which calls catchPlayer at 0 health; there is no instant catch here.
     }
 
     const { revived, died } = players.update(dt);
     for (const id of revived) {
       if (id === '0') h.setCoopDown(false);
+      // Back up with full health (the registry gave the REVIVE.shield).
+      if (ctx.systems.health) ctx.systems.health.revivePlayer(id);
       sendEvent('playerRevived', { id: Number(id) });
       say(`Player ${id} revived.`);
     }
@@ -525,19 +625,6 @@ export function createNetSystem(ctx) {
     if (!q) return;
     players.leaveSeat(left.handoff);
     q.x = pose.x + 2.5; q.z = pose.z;
-  }
-
-  /** @param {import('./players.js').Player} p @returns {boolean} */
-  function caughtBy(p) {
-    let caught = false;
-    const reach = HERO.catchRadius;
-    ctx.systems.enemies.each((/** @type {any} */ e, /** @type {any} */ kind) => {
-      if (caught || (kind.kind !== 'terminator' && kind.kind !== 'pursuer')) return;
-      if (e.p && e.p.stagger > 0) return;
-      const q = kind.position(e);
-      if (Math.hypot(q.x - p.x, q.z - p.z) < reach + 0.4) caught = true;
-    });
-    return caught;
   }
 
   /** @param {import('./players.js').Player} p @param {import('./protocol.js').PlayerInput} input @param {number} dt */
@@ -624,6 +711,8 @@ export function createNetSystem(ctx) {
       a.cd = w.cooldown;
       const hit = scan(p, input, w.range);
       if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: EYE + dy * hit.t, z: oz + dz * hit.t } })) credit(KILL_SCORE, p.id);
+      // Friendly fire (D4): the partner in the line of fire, if nearer than the enemy hit.
+      shootPlayers(p, dx, dy, dz, hit ? hit.t : w.range, w.type);
     } else if (name === 'katana') {
       a.cd = KATANA.cooldown;
       // A cut in front of the guest: the nearest enemy inside the arc takes a blade hit.
@@ -642,6 +731,35 @@ export function createNetSystem(ctx) {
       if (target) {
         const t = /** @type {{e: any, kind: any, q: {x: number, z: number}}} */ (target);
         if (ctx.systems.enemies.hit(t.e, t.kind, { type: 'blade', amount: 1, at: { x: t.q.x, z: t.q.z } })) credit(KILL_SCORE, p.id);
+      }
+      // Friendly fire (D4): the partner inside the same arc.
+      for (const q of players.list()) {
+        if (q.id === p.id || !mayHurt(p.id, q.id) || Math.hypot(q.x - ox, q.z - oz) > KATANA.reach) continue;
+        const off = Math.atan2(q.x - ox, q.z - oz) - input.yaw;
+        if (Math.abs(Math.atan2(Math.sin(off), Math.cos(off))) > KATANA.halfAngle) continue;
+        ctx.systems.health.damagePlayer({
+          source: 'friendlyFire', amount: HEALTH.damageToPlayer.blade, type: 'melee', position: { x: ox, y: 0, z: oz },
+          targetId: q.id, title: 'FRIENDLY FIRE', sub: `Cut down by Player ${p.id}`
+        });
+      }
+      // People are not in the registry: the nearest standing civilian in the
+      // same arc is killed through the people owner (as the host's blade
+      // does) and credited at the person-kill value. `blade` is sent to no kind.
+      /** @type {any} */
+      let person = null;
+      let bestPerson = KATANA.reach;
+      ctx.systems.people.eachCuttable((/** @type {any} */ c) => {
+        const q = c.mesh.position;
+        const d = Math.hypot(q.x - ox, q.z - oz);
+        if (d > bestPerson) return;
+        const off = Math.atan2(q.x - ox, q.z - oz) - input.yaw;
+        if (Math.abs(Math.atan2(Math.sin(off), Math.cos(off))) > KATANA.halfAngle) return;
+        person = c;
+        bestPerson = d;
+      });
+      if (person) {
+        ctx.systems.people.explodePerson(person);
+        credit(IMPACT_SCORE, p.id);
       }
     } else if (name === 'blackhole') {
       a.cd = HOLE_COOLDOWN;
@@ -671,6 +789,7 @@ export function createNetSystem(ctx) {
     const h = hero();
     const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
     const r2 = (/** @type {number} */ v) => Math.round(v * 100) / 100;
+    const r1 = (/** @type {number} */ v) => Math.round(v * 10) / 10;
     const rows = {
       players: /** @type {number[][]} */ ([]),
       tornadoes: /** @type {number[][]} */ ([]),
@@ -708,6 +827,14 @@ export function createNetSystem(ctx) {
       pushShip(m.ship);
       for (const hv of m.hunters) { const v = hv; pushShip(v); }
     }
+    const hp = /** @type {number[][]} */ ([]);
+    const health = ctx.systems.health;
+    if (health) {
+      for (const p of players.list()) {
+        const st = health.state(p.id);
+        hp.push([Number(p.id), r1(st.value), r1(st.sinceLastDamage)]);
+      }
+    }
     const driving = h.drivingCar();
     if (driving && rows.vehicles.length < cap) {
       rows.vehicles.push([9000, r2(clamp(driving.mesh.position.x)), r2(clamp(driving.mesh.position.z)), r2(driving.mesh.rotation.y), r2(driving.speed)]);
@@ -721,7 +848,7 @@ export function createNetSystem(ctx) {
     }
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
-      score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows
+      score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp
     };
   }
 
@@ -732,6 +859,13 @@ export function createNetSystem(ctx) {
   /** @param {any} msg */
   function peerMessage(msg) {
     if (msg.type === 'snapshot') {
+      if (Array.isArray(msg.hp)) {
+        const at = performance.now();
+        for (const r of msg.hp) {
+          const e = S.peerHp.get(r[0]);
+          if (e) { e.v = r[1]; e.since = r[2]; e.at = at; } else S.peerHp.set(r[0], { v: r[1], since: r[2], at });
+        }
+      }
       buffer.push(msg, performance.now() / 1000);
       return;
     }
@@ -752,6 +886,16 @@ export function createNetSystem(ctx) {
       case 'notice': say(String(d.text || '')); break;
       case 'playerDown': say(Number(d.id) === Number(S.myId) ? 'You are down — your teammate can revive you.' : `Player ${d.id} is down.`); break;
       case 'playerRevived': say(Number(d.id) === Number(S.myId) ? 'You were revived.' : `Player ${d.id} revived.`); break;
+      case 'playerDamage':
+        // The guest's own hit: the same flash, arrow and sound as Roger's.
+        if (Number(d.id) !== Number(S.myId)) break;
+        ctx.events.emit('playerHurt', { amount: Number(d.amount) || 0, position: Number.isFinite(d.x) && Number.isFinite(d.z) ? { x: d.x, y: 0, z: d.z } : null });
+        if (S.hud) {
+          S.hurtFlip = !S.hurtFlip;
+          S.hud.classList.toggle('hurt-a', S.hurtFlip);
+          S.hud.classList.toggle('hurt-b', !S.hurtFlip);
+        }
+        break;
       case 'gameOver': say('GAME OVER — everyone is down.'); break;
       case 'mission': S.peerMission = { id: String(d.id), value: Number(d.value), goal: Number(d.goal), left: Number(d.left) }; break;
       case 'score': if (Number(d.id) === Number(S.myId)) say(`+${Number(d.points) || 0}`); break;
@@ -880,12 +1024,42 @@ export function createNetSystem(ctx) {
     drawHud();
   }
 
+  /**
+   * One synced health bar for the guest HUD. The glow is derived here from
+   * the synced `sinceLastDamage` plus the time since it arrived (glow itself
+   * is never sent), in steps so the markup only changes when it must.
+   * @param {number} id Player id.
+   * @param {string} label Text before the bar.
+   * @param {boolean} small True for the partner's bar.
+   * @param {boolean} out True while the player is down or dead (bar shown empty).
+   * @param {number} now performance.now() in ms.
+   * @returns {string} The bar's markup ('' when no health has arrived yet).
+   */
+  function hpBar(id, label, small, out, now) {
+    const e = S.peerHp.get(id);
+    if (!e) return '';
+    const since = e.since + (now - e.at) / 1000;
+    const value = out ? 0 : e.v;
+    const glow = out ? 0 : Math.round(glowLevel({ value, sinceLastDamage: since, refilling: value < HEALTH.max && since >= HEALTH.timers.regenDelay, invuln: 0, lastSource: null }, HEALTH) * 5) / 5;
+    const hp = Math.ceil(value);
+    const low = hp <= HEALTH.max * HEALTH.lowThreshold;
+    return `<div class="coop-hp${small ? ' small' : ''}${low ? ' low' : ''}${glow > 0 ? ' glowing' : ''}" style="--glow:${glow.toFixed(1)}">${label}<span class="coop-hbar"><i style="width:${((hp / HEALTH.max) * 100).toFixed(0)}%"></i></span><span class="coop-hpct">${out ? 'DOWN' : `${hp}%`}</span></div>`;
+  }
+
   function drawHud() {
     if (!S.hud) return;
     const row = S.peerRow;
     const state = row ? (row[4] === 0 ? 'UP' : row[4] === 1 ? 'DOWN — wait for a revive' : 'DEAD') : '…';
     const ms = S.peerMission;
-    S.hud.innerHTML = `<b>PLAYER ${S.myId}</b> · ${state}<br>WEAPON ${WEAPONS[S.weapon] || ''} · ENERGY ${row ? row[6] : 100}%<br>SCORE ${S.peerScore.toLocaleString()}${ms ? `<br>MISSION ${ms.id}: ${ms.value}/${ms.goal}` : ''}<br><small>WASD move · mouse look (click to lock) · click fire · wheel weapon · E teleport · F revive</small>`;
+    const me = Number(S.myId);
+    const now = performance.now();
+    let bars = hpBar(me, 'HEALTH ', false, !!row && row[4] !== 0, now);
+    for (const id of S.peerHp.keys()) {
+      if (id !== me) bars += hpBar(id, `P${id} `, true, false, now);
+    }
+    const html = `<b>PLAYER ${S.myId}</b> · ${state}${bars}WEAPON ${WEAPONS[S.weapon] || ''} · ENERGY ${row ? row[6] : 100}%<br>SCORE ${S.peerScore.toLocaleString()}${ms ? `<br>MISSION ${ms.id}: ${ms.value}/${ms.goal}` : ''}<br><small>WASD move · mouse look (click to lock) · click fire · wheel weapon · E teleport · F revive</small>`;
+    // Written only on change, so the bar's glow animation is not restarted every frame.
+    if (html !== S.hudHtml) { S.hudHtml = html; S.hud.innerHTML = html; }
   }
 
   // ---------------------------------------------------------------------
@@ -1031,6 +1205,7 @@ export function createNetSystem(ctx) {
   return {
     initNet, updateNet, resetNet, disposeNet,
     pickTarget, catchPlayer, interceptRogerDeath, coopActive,
+    notifyDamage, hitGuestsArea, splashGuests,
     /** For tests and the HUD. */
     players, role: () => S.role, seed: () => S.seed
   };

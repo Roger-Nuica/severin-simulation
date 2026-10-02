@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { ALIENS } from '../aliens/config.js';
 import { alienRampLength } from '../aliens/models.js';
 import { SUPPORT } from './config.js';
+import { fullHealth, healthAfter, tableDamage } from '../health/enemyDamage.js';
 import { SAMURAI, buildSamuraiKit, buildSamurai, disposeSamuraiKit } from './samuraiModel.js';
 
 /**
@@ -34,14 +35,17 @@ import { SAMURAI, buildSamuraiKit, buildSamurai, disposeSamuraiKit } from './sam
  *    (hitSamurai / hitSamuraiArea / aimTargets, called from the rifle, the
  *    minigun, the railgun, the Fire Gun, the Black Hole Gun and the Rocket
  *    Strike), and kill them.
- *  - **Leaving** after SUPPORT.stay seconds (or when none is left): back
- *    to the ramp foot, up it, aboard, and the ship goes (descent.js).
+ *  - **Standing down** on its own clock once the last is down the ramp
+ *    (beginGuard; the ship has already left, descent.js): when no hostile has
+ *    been in the coverage for SUPPORT.clearGrace seconds, or SUPPORT.stay
+ *    seconds have passed, or none is left, the squad is cleared (clearSquad)
+ *    and the cooldown starts (once the ship has gone too).
  */
 
 /**
  * @typedef {Object} Samurai
  * @property {import('./samuraiModel.js').SamuraiRig} rig
- * @property {'exiting'|'guard'|'hunt'|'toRamp'|'climbing'|'aboard'|'caught'|'dying'|'dead'} phase
+ * @property {'exiting'|'guard'|'hunt'|'caught'|'dying'|'dead'} phase
  * @property {number} timer
  * @property {number} heading
  * @property {number} cycle walk cycle
@@ -51,7 +55,7 @@ import { SAMURAI, buildSamuraiKit, buildSamurai, disposeSamuraiKit } from './sam
  * @property {number} slashClock seconds to its next cut
  * @property {number} swing seconds into the cut, or -1
  * @property {boolean} cutDone this cut has landed
- * @property {number} hits rounds taken
+ * @property {number} health what is left of SAMURAI health (health/damageTable.js)
  * @property {number} gx its guard post
  * @property {number} gz
  * @property {number} postTimer seconds to a new post
@@ -73,6 +77,11 @@ export function createSamuraiSquad(ctx, S, api) {
   /** @type {Map<any, number>} how many of the squad are on each target */
   const claims = new Map();
   const scratch = new THREE.Vector3();
+  let hostileSeen = false;
+  /** Allocation-free probe for hostilesInCoverage (one closure per squad). */
+  const markHostile = (/** @type {any} */ e, /** @type {any} */ kind) => {
+    if (hostilePosition(e, kind)) hostileSeen = true;
+  };
 
   /** @returns {void} */
   function initSquad() {
@@ -91,10 +100,10 @@ export function createSamuraiSquad(ctx, S, api) {
 
   /**
    * @param {Samurai} u
-   * @returns {boolean} on its feet in the town (exiting, guarding, hunting, going back)
+   * @returns {boolean} on its feet in the town (exiting, guarding, hunting)
    */
   function onGround(u) {
-    return u.phase === 'exiting' || u.phase === 'guard' || u.phase === 'hunt' || u.phase === 'toRamp' || u.phase === 'climbing';
+    return u.phase === 'exiting' || u.phase === 'guard' || u.phase === 'hunt';
   }
 
   /**
@@ -110,7 +119,7 @@ export function createSamuraiSquad(ctx, S, api) {
     units.push({
       rig, phase: 'exiting', timer: 0, heading: Math.atan2(S.dir.x, S.dir.z), cycle: Math.random() * 6,
       slot: index, target: null, retarget: Math.random() * SAMURAI.retarget, slashClock: 0, swing: -1, cutDone: false,
-      hits: 0, gx: S.drop.x, gz: S.drop.z, postTimer: 0, pitch: 0.85 + Math.random() * 0.3
+      health: fullHealth('samurai'), gx: S.drop.x, gz: S.drop.z, postTimer: 0, pitch: 0.85 + Math.random() * 0.3
     });
   }
 
@@ -280,6 +289,27 @@ export function createSamuraiSquad(ctx, S, api) {
   }
 
   /**
+   * The one test of what the squad counts as hostile: answers to 'blade',
+   * not absorbed, inside the coverage ring.
+   * @param {any} e
+   * @param {any} kind
+   * @returns {{x: number, z: number}|null} its position, or null if it does not count
+   */
+  function hostilePosition(e, kind) {
+    if (!kind.accepts.includes('blade')) return null;
+    if (ctx.systems.enemies.getState(e, 'absorbed')) return null;
+    const q = kind.position(e);
+    return Math.hypot(q.x - S.drop.x, q.z - S.drop.z) > SUPPORT.coverage ? null : q;
+  }
+
+  /** @returns {boolean} whether any hostile is inside the coverage ring now */
+  function hostilesInCoverage() {
+    hostileSeen = false;
+    ctx.systems.enemies.each(markHostile);
+    return hostileSeen;
+  }
+
+  /**
    * The best target for this one: the nearest hostile in the coverage, with
    * those the squad is already on counting as farther.
    * @param {Samurai} u
@@ -291,10 +321,8 @@ export function createSamuraiSquad(ctx, S, api) {
     let best = null;
     let bestScore = Infinity;
     ctx.systems.enemies.each((e, kind) => {
-      if (!kind.accepts.includes('blade')) return;
-      if (ctx.systems.enemies.getState(e, 'absorbed')) return;
-      const q = kind.position(e);
-      if (Math.hypot(q.x - S.drop.x, q.z - S.drop.z) > SUPPORT.coverage) return;
+      const q = hostilePosition(e, kind);
+      if (!q) return;
       // A giant takes the whole squad; anything else, one or two.
       const big = radiusOf(kind, e) > 2;
       const score = Math.hypot(q.x - p.x, q.z - p.z) + (big ? 0 : 14 * (claims.get(e) || 0));
@@ -346,36 +374,20 @@ export function createSamuraiSquad(ctx, S, api) {
    */
   function updateUnit(u, dt) {
     const p = u.rig.root.position;
-    if (u.phase === 'exiting' || u.phase === 'climbing') {
-      // Down the ramp from the hatch (or back up it), at a walk.
+    if (u.phase === 'exiting') {
+      // Down the ramp from the hatch, at a walk.
       u.timer += dt;
       const t = Math.min(1, u.timer / rampSeconds());
-      if (u.phase === 'exiting') p.lerpVectors(S.rampTop, S.rampFoot, t);
-      else p.lerpVectors(S.rampFoot, S.rampTop, t);
+      p.lerpVectors(S.rampTop, S.rampFoot, t);
       p.y += 0.2;
-      u.heading = Math.atan2(S.dir.x, S.dir.z) + (u.phase === 'climbing' ? Math.PI : 0);
+      u.heading = Math.atan2(S.dir.x, S.dir.z);
       u.rig.root.rotation.y = u.heading;
       pose(u, ALIENS.walkSpeed, dt);
       if (t < 1) return;
-      if (u.phase === 'climbing') {
-        u.phase = 'aboard';
-        u.rig.root.visible = false;
-        return;
-      }
       u.phase = 'guard';
       p.y = 0;
       pickPost(u);
       if (Math.random() < SAMURAI.shoutChance) shout(u);
-      return;
-    }
-    if (u.phase === 'toRamp') {
-      if (u.swing >= 0) u.swing = -1;
-      const moved = moveTo(u, S.rampFoot.x, S.rampFoot.z, SAMURAI.runSpeed, dt);
-      pose(u, moved / Math.max(dt, 1e-4), dt);
-      if (Math.hypot(p.x - S.rampFoot.x, p.z - S.rampFoot.z) < 0.6) {
-        u.phase = 'climbing';
-        u.timer = 0;
-      }
       return;
     }
     if (u.phase === 'dying') {
@@ -480,9 +492,52 @@ export function createSamuraiSquad(ctx, S, api) {
    * @returns {void}
    */
   function updateSquad(dt) {
-    if (!units.length || dt <= 0) return;
-    for (const u of units) updateUnit(u, dt);
-    units = units.filter(u => u.phase !== 'dead');
+    if (dt <= 0) return;
+    if (units.length) {
+      for (const u of units) updateUnit(u, dt);
+      units = units.filter(u => u.phase !== 'dead');
+    }
+    if (S.state.guarding) updateGuard(dt);
+  }
+
+  /**
+   * The last one is down the ramp: the squad's own clock starts.
+   * @returns {void}
+   */
+  function beginGuard() {
+    S.state.guarding = true;
+    S.state.stay = SUPPORT.stay;
+    S.state.clearFor = 0;
+  }
+
+  /**
+   * The stay and the all-clear. Ends the squad when none is left standing
+   * (once the fallen have sunk), when the stay runs out, or when no hostile
+   * has been in the ring for SUPPORT.clearGrace seconds.
+   * @param {number} dt the world's
+   * @returns {void}
+   */
+  function updateGuard(dt) {
+    S.state.stay -= dt;
+    if (standing() === 0) {
+      if (!units.length) endSquad();
+      return;
+    }
+    S.state.clearFor = hostilesInCoverage() ? 0 : S.state.clearFor + dt;
+    if (S.state.stay <= 0 || S.state.clearFor >= SUPPORT.clearGrace) {
+      S.state.stay = 0;
+      endSquad();
+      api.showBanner('SAMURAI SUPPORT', 'The squad stands down');
+    }
+  }
+
+  /**
+   * The squad done: cleared, and the cooldown started if the ship has gone.
+   * @returns {void}
+   */
+  function endSquad() {
+    clearSquad();
+    api.finishSupport();
   }
 
   // ---------------------------------------------------------------------
@@ -494,24 +549,6 @@ export function createSamuraiSquad(ctx, S, api) {
     let n = 0;
     for (const u of units) if (u.phase !== 'dying' && u.phase !== 'dead' && u.phase !== 'caught') n++;
     return n;
-  }
-
-  /** @returns {boolean} every one still standing is back aboard */
-  function allAboard() {
-    return units.every(u => u.phase === 'aboard' || u.phase === 'dying' || u.phase === 'dead' || u.phase === 'caught');
-  }
-
-  /**
-   * Time to go: everyone on the ground back to the ramp.
-   * @returns {void}
-   */
-  function recall() {
-    for (const u of units) {
-      if (u.phase !== 'guard' && u.phase !== 'hunt') continue;
-      setTarget(u, null);
-      u.phase = 'toRamp';
-      u.swing = -1;
-    }
   }
 
   /**
@@ -530,16 +567,21 @@ export function createSamuraiSquad(ctx, S, api) {
   }
 
   /**
-   * One of Roger's weapons on one of them: the minigun takes
-   * SAMURAI.bulletHits rounds, anything else one.
+   * One of Roger's weapons on one of them, by the weapon x enemy table
+   * (health/damageTable.js, D1): the minigun round takes a third of its 3
+   * health (SAMURAI.bulletHits rounds), a rifle shot, a bolt or a rocket
+   * blast all of it, and fire a small chip per tick. Only Roger's weapons
+   * call this: enemies and disasters never do, so they cannot kill one.
    * @param {Samurai} u
    * @param {string} type 'plasma' | 'bullet' | 'bolt' | 'fire' | 'blast'
    * @returns {boolean} whether it went down
    */
   function hitSamurai(u, type) {
     if (!u || !onGround(u)) return false;
-    if (type === 'bullet' && ++u.hits < SAMURAI.bulletHits) {
-      ctx.systems.explosions.spawnImpactBurst(scratch.copy(u.rig.root.position).setY(1.2), 0.15);
+    u.health = healthAfter(u.health, tableDamage('samurai', { type }));
+    if (u.health > 0) {
+      // A minigun round keeps its small spark; fire and the rest add no particles.
+      if (type === 'bullet') ctx.systems.explosions.spawnImpactBurst(scratch.copy(u.rig.root.position).setY(1.2), 0.15);
       return false;
     }
     kill(u, type);
@@ -589,6 +631,7 @@ export function createSamuraiSquad(ctx, S, api) {
    * @returns {void}
    */
   function removeUnit(u) {
+    if (u.phase === 'dead') return; // already freed (a black-hole take, then a clear)
     if (u.target) setTarget(u, null);
     u.phase = 'dead';
     Sim.three.scene.remove(u.rig.root);
@@ -600,6 +643,8 @@ export function createSamuraiSquad(ctx, S, api) {
     for (const u of units) removeUnit(u);
     units = [];
     claims.clear();
+    S.state.squad = false;
+    S.state.guarding = false;
   }
 
   /** @returns {THREE.Vector3[]} where they are, for the minimap */
@@ -615,7 +660,7 @@ export function createSamuraiSquad(ctx, S, api) {
   }
 
   return {
-    initSquad, spawnUnit, rampSeconds, updateSquad, standing, allAboard, recall,
+    initSquad, spawnUnit, rampSeconds, updateSquad, standing, beginGuard, hostilesInCoverage,
     aimTargets, hitSamurai, hitSamuraiArea, clearSquad, squadPositions, disposeSquad
   };
 }

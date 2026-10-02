@@ -1,6 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
 import { ALIEN_SKIN_GLOW, ALIENS } from './config.js';
+import { createTouchState } from '../health/melee.js';
 
 /**
  * ===========================================================================
@@ -221,6 +222,8 @@ export function createAlienModels(ctx, S, api) {
       tz: 0,
       pause: 0,
       rayTimer: 1 + Math.random() * 2,
+      touch: createTouchState(),
+      touchClock: 0,
       knockTimer: 0,
       knockX: 0,
       knockZ: 0,

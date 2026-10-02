@@ -1647,6 +1647,62 @@ body.ship-cutscene .minimap {
 .hero-hud.low .hero-cell i { background: #ff8a6a; box-shadow: 0 0 8px rgba(255, 110, 70, 0.8); }
 .hero-hud.low .hero-cellpct { color: #ff8a6a; }
 .hero-hud .hero-arrow { display: inline-block; color: #ffb627; font-size: 14px; }
+/* The HEALTH bar (engine/health): green, red when low. While it regenerates
+   it glows, the pulse growing with --glow (0 to 1, set by updateHud); the
+   glow ends at once on damage because --glow drops to 0. Hidden with the
+   rest of the HUD under the GAME OVER card. */
+.hero-hud .hero-health { --glow: 0; }
+.hero-hud .hero-hbar { background: rgba(120, 255, 150, 0.18); }
+.hero-hud .hero-hbar i {
+  background: #6dffa0; box-shadow: 0 0 6px rgba(80, 255, 140, 0.6);
+  transition: width 0.2s ease-out, background-color 0.2s ease-out;
+}
+.hero-hud .hero-hpct { color: #6dffa0; min-width: 3.2em; }
+.hero-hud .hero-health.low .hero-hbar i { background: #ff4a3a; box-shadow: 0 0 8px rgba(255, 60, 40, 0.9); }
+.hero-hud .hero-health.low .hero-hpct { color: #ff6a5a; }
+.hero-hud .hero-partner { font-size: 10px; opacity: 0.85; }
+.hero-hud .hero-partner[hidden] { display: none; }
+.hero-hud .hero-partner .hero-pbar { width: 60px; }
+.hero-hud .hero-partner.low .hero-hbar i { background: #ff4a3a; box-shadow: 0 0 8px rgba(255, 60, 40, 0.9); }
+.hero-hud .hero-partner.low .hero-hpct { color: #ff6a5a; }
+.hero-hud .hero-health.glowing .hero-hbar {
+  animation: hero-health-glow calc(1.1s - var(--glow) * 0.6s) ease-in-out infinite alternate;
+}
+@keyframes hero-health-glow {
+  from { box-shadow: 0 0 calc(2px + var(--glow) * 4px) rgba(120, 255, 170, calc(var(--glow) * 0.4)); }
+  to { box-shadow: 0 0 calc(4px + var(--glow) * 12px) rgba(160, 255, 200, calc(0.2 + var(--glow) * 0.8)); }
+}
+/* Hit flash, low-health vignette and damage direction (hero/screen.js
+   hurtFlash). Pure CSS: the pulse is 0.2 s (R-046) and peaks at 40% so it is
+   never a harsh flash; hurtFlash swaps a/b (and da/db) so an animation
+   restarts without a reflow and keeps pulses at least 0.34 s apart. Below the
+   GAME OVER card (z 30), cleared by clearHurt. */
+.hero-hurt { position: fixed; inset: 0; z-index: 12; pointer-events: none; }
+.hero-hurt i { position: absolute; inset: 0; opacity: 0; }
+.hero-hurt-flash { background: radial-gradient(ellipse at center, rgba(255, 0, 0, 0) 45%, rgba(220, 20, 10, 0.75) 100%); }
+.hero-hurt-low {
+  background: radial-gradient(ellipse at center, rgba(255, 0, 0, 0) 55%, rgba(170, 10, 5, 0.55) 100%);
+}
+.hero-hurt.low .hero-hurt-low { animation: hero-hurt-breathe 1.6s ease-in-out infinite alternate; }
+.hero-hurt.a .hero-hurt-flash { animation: hero-hurt-pulse-a 0.2s ease-out; }
+.hero-hurt.b .hero-hurt-flash { animation: hero-hurt-pulse-b 0.2s ease-out; }
+.hero-hurt-dir {
+  --a: 0rad;
+  position: absolute; left: 50%; top: 50%; margin: -0.5em 0 0 -0.5em; width: 1em; height: 1em;
+  font-size: 30px; line-height: 1; text-align: center; color: #ff3b2a; opacity: 0;
+  text-shadow: 0 0 8px rgba(255, 40, 20, 0.9);
+  transform: rotate(var(--a)) translateY(-26vh);
+}
+.hero-hurt.da .hero-hurt-dir { animation: hero-hurt-dir-a 1s ease-out; }
+.hero-hurt.db .hero-hurt-dir { animation: hero-hurt-dir-b 1s ease-out; }
+@keyframes hero-hurt-pulse-a { from { opacity: 0.4; } to { opacity: 0; } }
+@keyframes hero-hurt-pulse-b { from { opacity: 0.4; } to { opacity: 0; } }
+@keyframes hero-hurt-dir-a { from { opacity: 0.9; } to { opacity: 0; } }
+@keyframes hero-hurt-dir-b { from { opacity: 0.9; } to { opacity: 0; } }
+@keyframes hero-hurt-breathe { from { opacity: 0.45; } to { opacity: 0.9; } }
+@media (prefers-reduced-motion: reduce) {
+  .hero-hurt.low .hero-hurt-low { animation: none; opacity: 0.7; }
+}
 /* The energy bar (engine/player/energy.js): ten segments of 10%, each
    filled as far as the level goes. */
 .hero-hud .hero-ebar { display: inline-flex; gap: 2px; }
@@ -1998,6 +2054,21 @@ body.ship-cutscene .minimap {
   color: #e8eef7; font: 12px/1.5 system-ui, sans-serif; max-width: 320px;
 }
 .coop-hud.visible { display: block; }
+/* Guest HUD health bars: the local bar large, the partner's small. The glow
+   reuses the HEALTH bar's keyframes; hurt-a/hurt-b restart the hit pulse. */
+.coop-hp { display: flex; align-items: center; gap: 6px; margin: 2px 0; --glow: 0; }
+.coop-hbar { flex: 1; height: 10px; border-radius: 3px; background: rgba(120, 255, 150, 0.18); overflow: hidden; }
+.coop-hbar i { display: block; height: 100%; background: #6dffa0; transition: width 0.2s ease-out, background-color 0.2s ease-out; }
+.coop-hpct { color: #6dffa0; min-width: 3.2em; text-align: right; }
+.coop-hp.small { font-size: 10px; opacity: 0.85; }
+.coop-hp.small .coop-hbar { height: 5px; flex: 0 0 60px; }
+.coop-hp.low .coop-hbar i { background: #ff4a3a; }
+.coop-hp.low .coop-hpct { color: #ff6a5a; }
+.coop-hp.glowing .coop-hbar { animation: hero-health-glow calc(1.1s - var(--glow) * 0.6s) ease-in-out infinite alternate; }
+.coop-hud.hurt-a { animation: coop-hurt-a 0.2s ease-out; }
+.coop-hud.hurt-b { animation: coop-hurt-b 0.2s ease-out; }
+@keyframes coop-hurt-a { from { box-shadow: 0 0 0 3px rgba(255, 40, 30, 0.9); } to { box-shadow: 0 0 0 0 rgba(255, 40, 30, 0); } }
+@keyframes coop-hurt-b { from { box-shadow: 0 0 0 3px rgba(255, 40, 30, 0.9); } to { box-shadow: 0 0 0 0 rgba(255, 40, 30, 0); } }
 .coop-toast {
   position: fixed; left: 50%; top: 14%; transform: translateX(-50%); z-index: 31;
   padding: 8px 14px; border-radius: 8px; background: rgba(12, 16, 24, 0.85);

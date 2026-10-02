@@ -193,10 +193,10 @@ test('single-player compatibility: one player down is game over, none registered
   assert.equal(r.gameOver(), true);
 });
 
-test('friendly fire is disabled', () => {
+test('friendly fire is on (decision D4): partners can hurt each other, never self through this policy', () => {
   const r = createPlayerRegistry();
-  assert.equal(r.canDamagePlayer('0', '1'), false);
-  assert.equal(r.canDamagePlayer('1', '0'), false);
+  assert.equal(r.canDamagePlayer('0', '1'), true);
+  assert.equal(r.canDamagePlayer('1', '0'), true);
   assert.equal(r.canDamagePlayer('0', '0'), false);
 });
 
