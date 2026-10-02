@@ -52,6 +52,8 @@ The damage system is split by responsibility:
 
 Scoring is centralized in `engine/damage.js`; `gamefeel.js` owns combo and visual impact timing.
 
+A Katana cut calls `gamefeel.event('slice', at)` (a combo event with a small shake) immediately before one `damage.addDamageScore`, so the chain extends and the score is multiplied once. Multi-cut (50) and extra-piece (20) bonuses go through the same path. The hit-stop is a 0.065 s real-time world hold with its own id, `katanaHitStop`, so it never releases Time Slow or Bullet Time.
+
 ## Immunity and exclusions
 
 Some entities are intentionally resistant or excluded:

@@ -9,11 +9,11 @@ Add, modify, disable, or remove a disaster by following the existing disaster-sy
 
 **SAVES:** Prevents incomplete disaster changes such as a removed panel button with a still-running update, missing Reset cleanup, stale Doomsday references, or effects that exceed shared caps.
 
-**CÂND SE FOLOSEȘTE:** Whenever a task creates a new disaster, changes an existing disaster's behavior, makes one unavailable, or removes one from the game.
+**WHEN TO USE:** Whenever a task creates a new disaster, changes an existing disaster's behavior, makes one unavailable, or removes one from the game.
 
-**SURSĂ:** `src/app/tornado/TornadoSimulator.js`; `src/app/tornado/tornadoEngine.js`; `src/app/tornado/engine/lifecycle.js`; example systems `src/app/tornado/engine/electricStorm.js`, `src/app/tornado/engine/earthquake.js`, and `src/app/tornado/engine/downburst.js`; `src/app/tornado/engine/doomsday.js`; `src/app/tornado/engine/perf/caps.js`; `.claude/rules.md`; `GAME_DESIGN.md`.
+**SOURCE:** `src/app/tornado/TornadoSimulator.js`; `src/app/tornado/tornadoEngine.js`; `src/app/tornado/engine/lifecycle.js`; example systems `src/app/tornado/engine/electricStorm.js`, `src/app/tornado/engine/earthquake.js`, and `src/app/tornado/engine/downburst.js`; `src/app/tornado/engine/doomsday.js`; `src/app/tornado/engine/perf/caps.js`; `.claude/rules.md`; `GAME_DESIGN.md`.
 
-## Cum funcționează în acest repository
+## How it works in this repository
 
 - Disaster buttons are declared in the `Disasters` section of `TornadoSimulator.js`, using IDs such as `btn-electric`, `btn-earthquake`, and `btn-downburst`. System init methods bind handlers to `ctx.signal`; stateful controls also synchronize button state such as `aria-pressed`, `active`, and `disabled`.
 - Disaster factories are imported and registered in `tornadoEngine.js`. Registration order matters because systems access each other through `ctx.systems`.
@@ -21,7 +21,7 @@ Add, modify, disable, or remove a disaster by following the existing disaster-sy
 - Existing systems expose their own trigger/state APIs. For example, Doomsday calls `ctx.systems.earthquake.triggerEarthquake()` and `ctx.systems.electricStorm.setElectric(true)`; minimap, collision, environment, and other systems may also read a disaster's API.
 - Disasters that emit particles use shared pools and `ctx.systems.caps`; a local pool capacity does not replace the shared `particleRoom()` / `trackPool()` contract.
 
-## Cum se extinde
+## How to extend it
 
 ### Add a disaster
 
@@ -47,7 +47,7 @@ Add, modify, disable, or remove a disaster by following the existing disaster-sy
 3. Remove or disable only the owned integration points. Preserve shared systems and APIs still used by other disasters. For a temporary disable, prefer the existing feature flag or availability pattern if one exists; do not delete the implementation unless removal is approved.
 4. Remove stale documentation and test/benchmark references, and verify no dangling imports, button IDs, event listeners, or consumer calls remain.
 
-## Gărzi de siguranță
+## Safety guards
 
 Apply `.claude/rules.md` and the fixed safety gates in `.claude/skills/full-autonomous-run/SKILL.md` to every disaster change. Stop and report instead of proceeding if:
 

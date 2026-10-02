@@ -1,6 +1,6 @@
 # Tornado Simulator — Gameplay Design
 
-Acest document descrie experiența de gameplay. Pentru valorile numerice curente, consultă `.claude/rules.md`; codul runtime este sursa de adevăr, iar documentația trebuie să rămână sincronizată cu el.
+This document describes the gameplay experience. For the current numeric values, see `.claude/rules.md`; the runtime code is the source of truth, and the documentation must stay in sync with it.
 
 ## The opening
 
@@ -58,7 +58,7 @@ Destruction earns points, and large set pieces award bonuses. A short chain of d
 
 ## Hero Mode
 
-Roger arrives at a safe spot and must reach the marked bunker. He can choose between the plasma rifle, minigun, railgun, Fire Gun and Black Hole Gun using the weapon wheel. The right mouse button raises or holsters the weapon; the trigger fires. The plasma rifle charges into a MEGA BEAM, the minigun can enter Bullet Time, the railgun calls lightning, the Fire Gun projects the T-Rex's flame, and the Black Hole Gun draws objects into a vortex.
+Roger arrives at a safe spot and must reach the marked bunker. He can choose between the plasma rifle, minigun, railgun, Fire Gun, Black Hole Gun and Katana using the weapon wheel. The right mouse button raises or holsters the weapon; the trigger fires. The plasma rifle charges into a MEGA BEAM, the minigun can enter Bullet Time, the railgun calls lightning, the Fire Gun projects the T-Rex's flame, and the Black Hole Gun draws objects into a vortex. The Katana is a melee weapon that costs no energy and cuts aliens only: right-click draws it in the follow camera, a click or swipe cuts in one of six directions, and holding the button enters Blade Mode, which slows the world to 10 % while you draw up to three cut lines. A cut slices the alien in two along the line, with a glowing cut face and green goo; each half can be cut again (three cuts an alien) and fades after about six seconds. Every other enemy parries the blade and takes no damage.
 
 Roger also has Time Slow, Teleport and EMP abilities. Energy comes from explosions and nuclear terminals. Weapons, abilities and enemies have distinct interactions; consult `.claude/rules.md` for the exact combat contracts and values.
 

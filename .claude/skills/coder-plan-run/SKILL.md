@@ -9,18 +9,18 @@ Runs the repository's Coder agent against one approved, implementation-ready pla
 
 **SAVES:** Replaces repeated instructions for invoking Coder and processing plan subtasks in dependency order.
 
-**CÂND SE FOLOSEȘTE:** When the user names a plan such as `PLAN_katana.md` and asks to implement its subtasks using `.claude/agents/coder.md`.
+**WHEN TO USE:** When the user names a plan such as `PLAN_katana.md` and asks to implement its subtasks using `.claude/agents/coder.md`.
 
-## Proces fix
+## Fixed process
 
-### 1. Selectează și verifică planul
+### 1. Select and verify the plan
 
 - Use the exact plan path named by the user. Do not guess between multiple plans.
 - Confirm it exists and contains approved, numbered subtasks with `- [ ]` / `- [x]` status, dependencies, and risks/edge cases.
 - A task brief or GDD without an implementation checklist is not an approved Coder plan. Stop and ask for a Lead-created/decomposed plan; do not let Coder invent the plan.
 - Do not reimplement completed subtasks. Select the earliest incomplete subtask whose dependencies are complete.
 
-### 2. Pregătește un subtask pentru Coder
+### 2. Prepare a subtask for the Coder
 
 Before invoking the Coder agent:
 
@@ -30,7 +30,7 @@ Before invoking the Coder agent:
 4. Verify protected numeric values in the runtime implementation. Treat runtime code as the source of truth; if it conflicts with `.claude/rules.md` on the system being changed, stop and report the exact conflict before implementation.
 5. Brief the agent defined in `.claude/agents/coder.md` to implement exactly this one subtask, preserve scope, run the narrowest relevant check, and update the plan with completion status and files changed.
 
-Apply the batching, rules-citation, and reporting-length rules defined in `.claude/skills/full-autonomous-run/SKILL.md` (Faza 2) when dispatching each subtask here. Batching never applies to the plan's flagged highest-risk subtask or to any subtask matching the fixed safety gates — those are always dispatched individually and always trigger the mandatory stop.
+Apply the batching, rules-citation, and reporting-length rules defined in `.claude/skills/full-autonomous-run/SKILL.md` (Phase 2) when dispatching each subtask here. Batching never applies to the plan's flagged highest-risk subtask or to any subtask matching the fixed safety gates — those are always dispatched individually and always trigger the mandatory stop.
 
 Do not dispatch independent subtasks concurrently. Run them in plan order, respecting dependencies and keeping each Coder assignment to one subtask.
 
@@ -43,7 +43,7 @@ After Coder returns:
 - If the result fails its focused check, return the same subtask to Coder for correction; do not advance to dependent work.
 - Advance to the next dependency-ready incomplete subtask only after the current one is complete.
 
-## Gărzi de siguranță fixe
+## Fixed safety guards
 
 Apply the safety rules in `.claude/skills/full-autonomous-run/SKILL.md` to every Coder run. They are fixed and cannot be weakened for a specific plan. In particular, stop and wait for the user's decision if:
 
@@ -54,16 +54,16 @@ Apply the safety rules in `.claude/skills/full-autonomous-run/SKILL.md` to every
 - a required dependency, acceptance criterion, or approved subtask is ambiguous or missing;
 - a build or lint failure has no clearly isolated cause.
 
-### Oprire obligatorie după subtask-ul cu risc ridicat
+### Mandatory stop after the highest-risk subtask
 
 Use the highest-risk subtask identified by Lead. After Coder completes that subtask, stop before implementing dependent subtasks and request the user's visual/manual review. This is mandatory for a new rendering, physics, or algorithmic technique without an existing project analogue. Continue only after the user explicitly confirms.
 
-## Verificare și încheiere
+## Verification and wrap-up
 
 This skill runs Coder implementation, not an independent Verifier phase. Do not claim independent verification unless the user explicitly requests the Verifier or invokes the full pipeline. Require the Coder to run a focused check after each subtask; report which checks ran and which plan items remain.
 
 At completion or any safety stop, summarize completed and pending subtasks, files changed, checks performed, warnings, and the exact user decision needed to continue.
 
-## Cum se invocă
+## How to invoke
 
-> Folosește skill-ul `coder-plan-run` pentru `PLAN_katana.md`: implementează subtask-urile aprobate în ordine cu agentul Coder.
+> Use the `coder-plan-run` skill for `PLAN_katana.md`: implement the approved subtasks in order with the Coder agent.

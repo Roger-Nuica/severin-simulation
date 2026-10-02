@@ -9,18 +9,18 @@ Orchestrate a new or complex feature from planning through implementation and ve
 
 **SAVES:** Removes the need to restate the Lead/Coder/Verifier orchestration instructions for each new task; invoke this skill once with the complete task attached.
 
-**CÂND SE FOLOSEȘTE:** When the user provides a complete task, GDD, or brief and asks for an autonomous run from planning to verification without manual intermediate steps.
+**WHEN TO USE:** When the user provides a complete task, GDD, or brief and asks for an autonomous run from planning to verification without manual intermediate steps.
 
-## Proces fix (nu se modifică între task-uri)
+## Fixed process (does not change between tasks)
 
-### Faza 1: Planificare
+### Phase 1: Planning
 
 1. Use the role and process defined in `.claude/agents/lead.md`.
 2. Read `.claude/rules.md` and the relevant gameplay/design context before planning. Treat the runtime code as the source of truth for implemented numeric behaviour; report contradictions with `.claude/rules.md` and stop if they affect the planned change.
 3. Create `PLAN_<nume-task>.md` with atomic, numbered subtasks, explicit dependencies, likely files, acceptance criteria, and risks/edge cases. Cite the applicable rules in each subtask's risks.
 4. Identify and label the technically riskiest subtask before implementation. This is the manual verification gate described below.
 
-### Faza 2: Implementare
+### Phase 2: Implementation
 
 1. Use the role and limits defined in `.claude/agents/coder.md`.
 2. Read `.claude/rules.md` in full the first time a subtask is prepared in this run. For every subsequent subtask in the same run, cite only the specific rule IDs relevant to that subtask instead of re-reading the whole file — unless the subtask touches a system not yet covered by rules already reviewed in this run, in which case re-check the full file for that system.
@@ -31,21 +31,21 @@ Orchestrate a new or complex feature from planning through implementation and ve
 6. After the designated highest-risk subtask, stop and request the user's visual/manual review. Do not implement dependent subtasks until the user confirms continuation.
 7. At the end of Phase 2, run lint and build. If either fails and the cause is not clearly isolated, stop and report the failure; do not proceed to Phase 3 with an unexplained broken build.
 
-### Faza 3: Verificare
+### Phase 3: Verification
 
-Această fază rulează DOAR dacă userul specifică explicit "cu verificare" 
-sau "run full" la invocarea skill-ului. Dacă userul invocă skill-ul fără 
-această mențiune, Faza 3 este SĂRITĂ, iar skill-ul se consideră complet 
-după Faza 2, cu mențiunea explicită în rezumatul final: 
-"Faza 3 (Verificare) a fost omisă la cererea userului — rezultatele 
-NU au fost validate independent."
+This phase runs ONLY if the user explicitly says "with verification"
+or "run full" when invoking the skill. If the user invokes the skill without
+that mention, Phase 3 is SKIPPED and the skill is considered complete
+after Phase 2, with an explicit note in the final summary:
+"Phase 3 (Verification) was skipped at the user's request — the results
+have NOT been independently validated."
 
 1. Use the independent validation role defined in `.claude/agents/verifier.md`; do not rely only on the Coder's self-report.
 2. Check every original task acceptance criterion point by point, including manual visual criteria where applicable.
 3. Run the repository checks: `npm run lint` and `npm run build`. Report command results and any pre-existing or unrelated failure distinctly.
 4. Create `VERIFICATION_<nume-task>.md` with a result for each criterion, using `✅` for pass and `❌` for fail or unverified. Include test/build evidence and remaining risks.
 
-## Reguli de siguranță fixe
+## Fixed safety rules
 
 These gates apply to every task run with this skill and must not be weakened or skipped for an individual task.
 
@@ -58,13 +58,13 @@ Stop immediately, report the evidence, and wait for the user's decision if:
 - Lint or build fails at the end of Phase 2 and the cause is not clearly isolated. Do not begin Phase 3 with an unexplained broken build.
 - A required clarification, dependency, acceptance criterion, or source-of-truth decision is missing or contradictory enough to make safe implementation impossible.
 
-### Oprire obligatorie pentru verificare manuală
+### Mandatory stop for manual verification
 
 After the highest-risk technical subtask identified by Lead is complete, stop before implementing dependent work. Summarise what was implemented and request a visual/manual check from the user. This gate is mandatory when the subtask introduces a rendering, physics, or algorithmic technique that does not already exist in the codebase. Continue only after explicit user confirmation.
 
 Low-risk and batched subtasks may proceed continuously without pausing for confirmation after each one. This does not weaken or delay the mandatory stop defined above: the stop for the plan's flagged highest-risk subtask, or any subtask matching the fixed safety gates, always applies in full, regardless of batching or auto mode.
 
-## Rezumat la final sau la oprire
+## Summary at the end or on stopping
 
 Report:
 
@@ -73,8 +73,8 @@ Report:
 - lint/build and verification results available so far;
 - safety warnings, unresolved contradictions, and the exact confirmation needed to continue.
 
-## Cum se invocă acest skill
+## How to invoke this skill
 
 Attach the complete task (GDD or brief) and write:
 
-> Folosește skill-ul `full-autonomous-run` pentru acest task: [task]
+> Use the `full-autonomous-run` skill for this task: [task]

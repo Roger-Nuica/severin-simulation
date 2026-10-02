@@ -27,6 +27,10 @@ This keeps enemy logic modular while keeping one shared combat contract.
 
 Not every hostile actor is a separate class; some are registry-backed kinds using the same contract.
 
+## Katana interaction
+
+The Katana (`engine/hero/katana/`) cuts registry kind `alien` only, in the phases patrol, escort and exiting, through a `blade` hit carrying `cut`; `aliens.js` routes it to `crew.js` `sliceKill`, which scores `ALIENS.killScore` once and hands the root to the pieces system. Every other kind (Terminator, T-Rex, Yeti, Patient Zero and any other) parries: a clang and sparks, no damage, no state change. No `accepts` list changed. The T-Rex accepts `blade` for the samurai, so the Katana filters on kind itself and never sends `blade` to a non-alien. Samurai are ignored.
+
 ## Shared enemy states
 
 The registry supports these states:

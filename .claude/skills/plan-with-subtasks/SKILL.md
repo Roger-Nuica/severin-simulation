@@ -9,9 +9,9 @@ Turn the user's attached task details into a repository-grounded implementation 
 
 **SAVES:** Replaces repeated instructions for decomposing a feature brief into safe, ordered, dependency-aware subtasks.
 
-**CÂND SE FOLOSEȘTE:** When the user provides a GDD, feature brief, or detailed task and asks for a plan, implementation breakdown, or ordered subtasks.
+**WHEN TO USE:** When the user provides a GDD, feature brief, or detailed task and asks for a plan, implementation breakdown, or ordered subtasks.
 
-**SURSĂ:** `.claude/agents/lead.md`; `.claude/rules.md`; `.claude/skills/`; `GAME_DESIGN.md`; runtime code under `src/app/tornado/engine/`; the user's attached task details.
+**SOURCE:** `.claude/agents/lead.md`; `.claude/rules.md`; `.claude/skills/`; `GAME_DESIGN.md`; runtime code under `src/app/tornado/engine/`; the user's attached task details.
 
 ## Input
 
@@ -19,7 +19,7 @@ Turn the user's attached task details into a repository-grounded implementation 
 - Do not replace missing task requirements with guesses. If the brief leaves a safety-critical behavior, numeric value, acceptance criterion, or integration unclear, the Lead must ask focused clarifying questions and wait before finalizing the plan.
 - Use the exact plan path/name supplied by the user if present. Otherwise ask Lead to create `PLAN_<task-slug>.md` in the repository root.
 
-## Proces fix
+## Fixed process
 
 1. Read `.claude/agents/lead.md`, `.claude/rules.md`, and the attached task details.
 2. Delegate the planning work to the repository's `lead` subagent. Instruct it to inspect the relevant runtime owners, docs, and skills before writing the plan. Do not impersonate the Lead or write implementation code.
@@ -48,4 +48,4 @@ Turn the user's attached task details into a repository-grounded implementation 
 
 Attach the completed request template or your own task brief, then write:
 
-> Folosește skill-ul `plan-with-subtasks` pentru brief-ul atașat. Cheamă subagentul Lead conform `.claude/agents/lead.md` și creează un plan cu subtask-uri atomice, dependențe explicite, criterii de acceptanță și riscuri cu referințe la regulile relevante. Nu implementa cod.
+> Use the `plan-with-subtasks` skill for the attached brief. Call the Lead subagent as defined in `.claude/agents/lead.md` and create a plan with atomic subtasks, explicit dependencies, acceptance criteria and risks that reference the relevant rules. Do not implement code.

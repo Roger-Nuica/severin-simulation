@@ -15,10 +15,10 @@ import { createKatanaBladeCut } from './hero/katana/bladeCut.js';
  * ===========================================================================
  * SECTION AM.1 — Hero Mode weapons
  * ===========================================================================
- * Roger carries five weapons (engine/heroMode.js), and the mouse wheel
+ * Roger carries six weapons (engine/heroMode.js), and the mouse wheel
  * cycles through them on foot (Q did, until it went to Time Slow): the
- * plasma rifle, the minigun, the railgun, the Fire Gun and the Black Hole
- * Gun. Whichever is
+ * plasma rifle, the minigun, the railgun, the Fire Gun, the Black Hole
+ * Gun and the Katana. Whichever is
  * in hand, the right mouse button raises it into first person as before,
  * and the left button (or Enter) is its trigger. The plasma rifle is
  * heroMode.js's own; this module is the other three and their close-up
