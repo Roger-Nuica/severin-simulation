@@ -124,6 +124,7 @@ const SPARKS = {
  *   ignite: (manual?: boolean) => void,
  *   quench: () => void,
  *   damageMultiplier: () => number,
+ *   groundContactAt: (x: number, z: number) => boolean,
  *   resetFirenado: () => void,
  *   disposeFirenado: () => void
  * }}
@@ -638,5 +639,13 @@ export function createFirenadoSystem(ctx) {
     state.age = Math.max(state.age, FIRENADO.duration - FIRENADO.fadeOut);
   }
 
-  return { initFirenado, updateFirenado, ignite, quench, damageMultiplier, burning, resetFirenado, disposeFirenado };
+  /**
+   * Whether a point stands in the ground fire this funnel lit.
+   * @param {number} x World x.
+   * @param {number} z World z.
+   * @returns {boolean} True when a patch covers the point.
+   */
+  const groundContactAt = (x, z) => groundFire.contactAt(x, z);
+
+  return { initFirenado, updateFirenado, ignite, quench, damageMultiplier, groundContactAt, burning, resetFirenado, disposeFirenado };
 }

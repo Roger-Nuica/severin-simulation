@@ -30,9 +30,9 @@ export function createFireDamage(ctx) {
    */
   const inFire = (roger) => {
     const s = ctx.systems;
-    return s.buildingFire.contactAt(roger.x, roger.z, HEALTH.dot.fireReach)
-      || s.groundFire.contactAt(roger.x, roger.z)
-      || s.fuelFire.contactAt(roger.x, roger.z);
+    return (!!s.buildingFire && s.buildingFire.contactAt(roger.x, roger.z, HEALTH.dot.fireReach))
+      || (!!s.firenado && s.firenado.groundContactAt(roger.x, roger.z))
+      || (!!s.fuelFire && s.fuelFire.contactAt(roger.x, roger.z));
   };
 
   /**

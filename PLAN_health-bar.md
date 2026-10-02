@@ -1,5 +1,8 @@
 # Plan: Rechargeable health bar for Roger
 
+## Status: COMPLETE (marked by the user, 2026-10-02)
+Subtasks 1-22 implemented; lint, build and 122 tests pass. Subtask 23 (independent verification) skipped. Known gaps are listed under Subtask 22.
+
 Status: PLAN ONLY. No runtime code has been changed. Implementation starts only after the user's go-ahead for PR 1 (subtask 1 onwards).
 Process: `.claude/skills/full-autonomous-run/SKILL.md` gates apply (fixed safety gates, manual review gate after the highest-risk subtask). Roles per `.claude/agents/lead.md`, then `coder.md` (one subtask per call), then `verifier.md`.
 
@@ -318,7 +321,7 @@ Order follows the 6 PRs in the brief. "Classification" follows full-autonomous-r
 - Still open: tanker kill radius (66 m now) and whether barrels hurt Roger.
 
 ### Checkpoint
-- [ ] MANUAL REVIEW GATE after Subtask 17 (highest-risk technical subtask): per `.claude/skills/full-autonomous-run/SKILL.md` ("Mandatory stop for manual verification") the run must stop, summarise, and request the user's visual/manual check before Subtasks 18-23 (dependent work). The Terminator telegraph (Subtask 9) is flagged as the runner-up risk and is reviewed together with this gate if the user wishes.
+- [x] DONE (user confirmed continuation) MANUAL REVIEW GATE after Subtask 17 (highest-risk technical subtask): per `.claude/skills/full-autonomous-run/SKILL.md` ("Mandatory stop for manual verification") the run must stop, summarise, and request the user's visual/manual check before Subtasks 18-23 (dependent work). The Terminator telegraph (Subtask 9) is flagged as the runner-up risk and is reviewed together with this gate if the user wishes.
 
 ### PR 6 - Co-op (LAST; depends on the net system)
 
@@ -353,7 +356,7 @@ Order follows the 6 PRs in the brief. "Classification" follows full-autonomous-r
 
 ### Final
 
-- [ ] Subtask 23: Verification run (Verifier).
+- [x] DONE (skipped at the user's request, 2026-10-02) Subtask 23: Verification run (Verifier). Phase 3 was skipped: the results have NOT been independently validated and nothing was exercised in the browser.
   - Objective: independent check of every acceptance criterion below; produce `VERIFICATION_health-bar.md` (only when invoked "with verification" per the skill).
   - Depends on: 22.
   - Risks / edge cases: manual checks listed below; flag as unverified anything not exercised in the browser.
