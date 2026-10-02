@@ -1,6 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
 import { onRailway, RAIL_Z } from './train.js';
+import { createRng } from '../rng.js';
 
 
 // Placed at the start of a run; more arrive in waves later
@@ -37,6 +38,7 @@ export function createEnvironmentSystem(ctx) {
 
   const Environment = {
     buildings: [], trees: [], cars: [], people: [], groups: /** @type {THREE.Group|null} */ (null),
+    seed: /** @type {number|null} */ (null),
     buildingSpots: /** @type {{x:number, z:number}[]} */ [],
     roadsGroup: /** @type {THREE.Group|null} */ (null),
     decorMeshes: /** @type {Object<string, THREE.InstancedMesh>} */ ({})
@@ -44,8 +46,16 @@ export function createEnvironmentSystem(ctx) {
 
   ctx.Environment = Environment;
 
-  /** @returns {void} */
-  function generateEnvironment() {
+  /**
+   * @param {number} [seed] when given, every random choice in town
+   *   construction (placement jitter, tree/car/person appearance and
+   *   physics rolls) comes from a generator seeded with it, so the same
+   *   seed yields the same town. Omitted: ambient Math.random, as before.
+   * @returns {void}
+   */
+  function generateEnvironment(seed) {
+    Environment.seed = seed === undefined ? null : seed;
+    const rand = seed === undefined ? Math.random : createRng(seed);
     const group = new THREE.Group();
     group.name = 'environment';
     Sim.three.scene.add(group);
@@ -79,7 +89,7 @@ export function createEnvironmentSystem(ctx) {
     // room each has: against every other, along whichever axis separates
     // them more, half the gap less a little air -- so the real-size
     // buildings (engine/scale.js BUILDINGS) never overlap a neighbour.
-    const placed = buildingSpots.map(spot => ({ x: spot.x + (Math.random() - 0.5) * 4, z: spot.z + (Math.random() - 0.5) * 4 }));
+    const placed = buildingSpots.map(spot => ({ x: spot.x + (rand() - 0.5) * 4, z: spot.z + (rand() - 0.5) * 4 }));
     const rooms = placed.map((p, i) => {
       let hx = Infinity;
       let hz = Infinity;
@@ -103,20 +113,20 @@ export function createEnvironmentSystem(ctx) {
 
     // Tree lines along streets and scattered clusters.
     for (let i = 0; i < 90; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const rad = 18 + Math.random() * 70;
+      const angle = rand() * Math.PI * 2;
+      const rad = 18 + rand() * 70;
       const x = Math.cos(angle) * rad;
       const z = Math.sin(angle) * rad;
       if (Math.abs(x) < 8 && Math.abs(z) < 8) continue;
       if (onRailway(x, z)) continue;
-      const obj = createTree(x, z, i);
+      const obj = createTree(x, z, i, rand);
       Environment.trees.push(obj);
       group.add(obj.mesh);
       Sim.objects.push(obj);
     }
 
     // Denser clusters in the parks (see parks.js), as ordinary trees.
-    for (const obj of ctx.systems.parks.populateParks(group, Environment.trees.length)) {
+    for (const obj of ctx.systems.parks.populateParks(group, Environment.trees.length, rand)) {
       Environment.trees.push(obj);
       Sim.objects.push(obj);
     }
@@ -124,10 +134,10 @@ export function createEnvironmentSystem(ctx) {
     // Cars parked near buildings.
     for (let i = 0; i < 34; i++) {
       const spot = buildingSpots[i % buildingSpots.length];
-      const x = spot.x + (Math.random() - 0.5) * 10;
-      const z = spot.z + (Math.random() - 0.5) * 10 + 6;
+      const x = spot.x + (rand() - 0.5) * 10;
+      const z = spot.z + (rand() - 0.5) * 10 + 6;
       if (onRailway(x, z)) continue;
-      const obj = createCar(x, z, `envCar_${i}`);
+      const obj = createCar(x, z, `envCar_${i}`, rand);
       Environment.cars.push(obj);
       group.add(obj.mesh);
       Sim.objects.push(obj);
@@ -149,10 +159,10 @@ export function createEnvironmentSystem(ctx) {
     const peopleCount = INITIAL_PEOPLE;
     for (let i = 0; i < peopleCount; i++) {
       const spot = buildingSpots[i % buildingSpots.length];
-      const x = spot.x + (Math.random() - 0.5) * 80;
-      const z = spot.z + (Math.random() - 0.5) * 80 - 4;
+      const x = spot.x + (rand() - 0.5) * 80;
+      const z = spot.z + (rand() - 0.5) * 80 - 4;
       // Nudged off the line rather than skipped, so the head count holds.
-      const obj = createPerson(x, onRailway(x, z) ? z + (z < RAIL_Z ? -5 : 5) : z, i);
+      const obj = createPerson(x, onRailway(x, z) ? z + (z < RAIL_Z ? -5 : 5) : z, i, rand);
       Environment.people.push(obj);
       group.add(obj.mesh);
       Sim.objects.push(obj);
@@ -166,9 +176,10 @@ export function createEnvironmentSystem(ctx) {
    * (releaseDebris et al already emptied it of debris by the time
    * resetSim() calls this) so generateEnvironment()'s fresh
    * buildings/trees/cars/people are the only objects left in it.
+   * @param {number} [seed] forwarded to generateEnvironment()
    * @returns {void}
    */
-  function resetEnvironment() {
+  function resetEnvironment(seed) {
     for (const obj of [...Environment.trees, ...Environment.cars, ...Environment.people]) {
       if (!Sim.objects.includes(obj)) Sim.objects.push(obj);
     }
@@ -180,7 +191,7 @@ export function createEnvironmentSystem(ctx) {
     Environment.people = [];
     Sim.objects = Sim.objects.filter(o => o.pooled); // clears everything since pool was just released -> empty
     Sim.objects = [];
-    generateEnvironment();
+    generateEnvironment(seed);
   }
 
   return { Environment, generateEnvironment, resetEnvironment };

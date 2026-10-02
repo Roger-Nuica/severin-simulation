@@ -15,8 +15,8 @@ export function createTreesSystem(ctx) {
    *   to give this tree a unique scene-graph name
    * @returns {SimObject}
    */
-  function createTree(x, z, index = 0) {
-    const trunkHeight = 3 + Math.random() * 2.5;
+  function createTree(x, z, index = 0, rand = Math.random) {
+    const trunkHeight = 3 + rand() * 2.5;
     const root = new THREE.Group();
     root.name = `tree_${index}`;
     root.position.set(x, 0, z);
@@ -33,7 +33,7 @@ export function createTreesSystem(ctx) {
     root.add(trunk);
 
     const canopyMat = new THREE.MeshStandardMaterial({ color: 0x3f6b3a, roughness: 1 });
-    const canopyGeo = new THREE.SphereGeometry(1.6 + Math.random() * 0.8, 8, 6);
+    const canopyGeo = new THREE.SphereGeometry(1.6 + rand() * 0.8, 8, 6);
     const canopy = new THREE.Mesh(canopyGeo, canopyMat);
     canopy.name = `${root.name}_canopy`;
     canopy.position.y = trunkHeight + 1.2;
@@ -47,11 +47,11 @@ export function createTreesSystem(ctx) {
       mesh: root,
       velocity: new THREE.Vector3(),
       angularVelocity: new THREE.Vector3(),
-      mass: 6 + Math.random() * 6,
+      mass: 6 + rand() * 6,
       drag: 1.4,
       rooted: true,
       damageState: 'intact',
-      breakThreshold: 2.2 + Math.random() * 1.4,
+      breakThreshold: 2.2 + rand() * 1.4,
       liftEligible: 0.4,
       pooled: false,
       poolIndex: -1,
