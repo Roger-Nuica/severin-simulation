@@ -171,10 +171,12 @@ export function createEnergySystem(ctx) {
 
   /**
    * An explosion near Roger: his share of it, if he is in reach.
-   * @param {{x: number, z: number, size: number, source?: any}} payload
+   * @param {{x: number, z: number, size: number, source?: any, own?: boolean}} payload  own: set off by Roger himself (no energy)
    * @returns {number} what the bar took
    */
-  function absorb({ x, z, size, source }) {
+  function absorb({ x, z, size, source, own }) {
+    // One Roger set off himself (effects/carBlast.js): he cannot feed himself.
+    if (own) return 0;
     const hero = ctx.systems.heroMode;
     const roger = hero && hero.rogerTarget();
     if (!roger || !(size > 0)) return 0;
