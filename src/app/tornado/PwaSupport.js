@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
  * cached) and shows an install button once the browser offers the install
  * prompt.
  *
- * @returns {JSX.Element | null} The install button, or null when not installable.
+ * @returns {import('react').JSX.Element | null} The install button, or null when not installable.
  */
 export default function PwaSupport() {
   const [installPrompt, setInstallPrompt] = useState(null);

@@ -118,8 +118,8 @@ const ease = (t) => t * t * (3 - 2 * t);
 
 /**
  * @param {Float64Array} out written in place
- * @param {ReadonlyArray<number>} a
- * @param {ReadonlyArray<number>} b
+ * @param {ArrayLike<number>} a
+ * @param {ArrayLike<number>} b
  * @param {number} t 0 to 1
  * @returns {Float64Array} out
  */

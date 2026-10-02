@@ -253,7 +253,7 @@ export function createUISystem(ctx, controllers) {
 
   function initUI() {
     for (const def of SLIDER_DEFS) {
-      const input = document.getElementById('p-' + def.id);
+      const input = /** @type {HTMLInputElement|null} */ (document.getElementById('p-' + def.id));
       const label = document.getElementById('v-' + def.id);
       label.textContent = def.fmt(Sim.params[def.id]);
       input.addEventListener('input', () => {
@@ -291,7 +291,7 @@ export function createUISystem(ctx, controllers) {
       muteBtn.classList.toggle('active', SoundSystem.muted);
     }, { signal: ctx.signal });
 
-    const volumeInput = document.getElementById('p-volume');
+    const volumeInput = /** @type {HTMLInputElement|null} */ (document.getElementById('p-volume'));
     SoundSystem.volume = parseFloat(volumeInput.value);
     volumeInput.addEventListener('input', () => {
       SoundSystem.volume = parseFloat(volumeInput.value);

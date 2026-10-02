@@ -31,7 +31,7 @@ const ROUTE_LENGTH = LINK * 2 + BEND * 2 + STRAIGHT;
  * @param {number} s metres from the west junction
  * @param {{x: number, z: number, dx: number, dz: number, straight: boolean}} out
  *   `straight`: on the line of the ramps and the deck, where x says which span
- * @returns {typeof out}
+ * @returns {{x: number, z: number, dx: number, dz: number, straight: boolean}}
  */
 export function routeAt(s, out) {
   out.straight = false;

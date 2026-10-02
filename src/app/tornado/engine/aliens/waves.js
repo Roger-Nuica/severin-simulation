@@ -163,7 +163,7 @@ export function createAlienWaves(ctx, S, api) {
     if (!S.wave.ship) return;
     const geometries = new Set();
     const materials = new Set();
-    S.wave.ship.group.traverse((child) => {
+    S.wave.ship.group.traverse((/** @type {any} */ child) => {
       if (child.geometry) geometries.add(child.geometry);
       if (child.material) materials.add(child.material);
     });
@@ -207,7 +207,7 @@ export function createAlienWaves(ctx, S, api) {
     if (at !== -1) Sim.objects.splice(at, 1);
     /** @type {THREE.MeshStandardMaterial[]} */
     const materials = [];
-    person.mesh.traverse((child) => {
+    person.mesh.traverse((/** @type {any} */ child) => {
       const m = child.material;
       if (m && m.emissive && !materials.includes(m)) materials.push(m);
     });
@@ -478,7 +478,7 @@ export function createAlienWaves(ctx, S, api) {
     api.stopTracker(h.tracker);
     const geometries = new Set();
     const materials = new Set();
-    h.group.traverse((child) => {
+    h.group.traverse((/** @type {any} */ child) => {
       if (child.geometry) geometries.add(child.geometry);
       if (child.material) materials.add(child.material);
     });

@@ -1,3 +1,7 @@
+/** @typedef {import('./config.js').FloatUniform} FloatUniform */
+/** @typedef {import('./config.js').Caldera} Caldera */
+/** @typedef {import('./config.js').Fissure} Fissure */
+/** @typedef {import('./config.js').Vent} Vent */
 import * as THREE from 'three';
 import { FISSURE, RIFT, CALDERA, LAVA_VERTEX, LAVA_FRAGMENT, LAKE_FRAGMENT, between, lerpRange, walkFissure, cumulativeLengths, buildStripGeometry } from './config.js';
 

@@ -155,6 +155,7 @@ export const BOLT_FRAGMENT = /* glsl */`
  * @property {boolean} down whether it has been brought down
  * @property {number} index instance index in the pole meshes
  * @property {PowerNode} node
+ * @property {{type: string, mesh: THREE.Object3D, userData: {pole: Pole|null}}} target the strike-provider stand-in
  */
 
 /**

@@ -1,3 +1,7 @@
+/** @typedef {import('./fissure/config.js').HotSpot} HotSpot */
+/** @typedef {import('./fissure/config.js').Fissure} Fissure */
+/** @typedef {import('./fissure/config.js').Caldera} Caldera */
+/** @typedef {import('./fissure/config.js').Vent} Vent */
 import * as THREE from 'three';
 import { createSoftDotTexture } from '../utils/textures.js';
 import { createParticlePool, markPoolDirty, disposeParticlePool } from './particlePool.js';
@@ -69,6 +73,7 @@ import { createFissureParticles } from './fissure/particles.js';
  *   updateFissures: (dt: number, strength: number) => void,
  *   hotSpots: () => HotSpot[],
  *   quench: (spot: HotSpot) => void,
+ *   lavaContactAt: (x: number, z: number, minLevel: number) => boolean,
  *   resetFissures: () => void,
  *   disposeFissures: () => void
  * }}

@@ -340,7 +340,7 @@ export function createChaseSystem(ctx) {
     if (ctx.Possess && ctx.Possess.active) return false;
     if (ctx.Hero && ctx.Hero.active) return false;
     if (Cinematic.active) { setCinematicView(false); Cinematic.blend = 0; }
-    const cinematicBtn = document.getElementById('btn-cinematic');
+    const cinematicBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-cinematic'));
     if (cinematicBtn) cinematicBtn.disabled = true;
 
     // The car parked in town (parkChaseCar), where it stands; one made on
@@ -383,7 +383,7 @@ export function createChaseSystem(ctx) {
     ctx.systems.wedge.setWedge(false);
     ctx.systems.doomsday.setDoomsday(false);
     for (const id of ['preset-fujiwhara', 'btn-wedge', 'btn-doomsday']) {
-      const modeBtn = document.getElementById(id);
+      const modeBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById(id));
       if (modeBtn) modeBtn.disabled = true;
     }
     ctx.systems.ui.highlightMatchingPreset();
@@ -403,7 +403,7 @@ export function createChaseSystem(ctx) {
     showChaseHud();
     updateChaseHud();
 
-    const cockpitBtn = document.getElementById('btn-cockpit');
+    const cockpitBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-cockpit'));
     if (cockpitBtn) cockpitBtn.disabled = false;
     return true;
   }
@@ -444,13 +444,13 @@ export function createChaseSystem(ctx) {
       Chase.savedTornadoCount = 0;
     }
     for (const id of ['preset-fujiwhara', 'btn-wedge', 'btn-doomsday']) {
-      const modeBtn = document.getElementById(id);
+      const modeBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById(id));
       if (modeBtn) modeBtn.disabled = false;
     }
     ctx.systems.ui.highlightMatchingPreset();
-    const cinematicBtn = document.getElementById('btn-cinematic');
+    const cinematicBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-cinematic'));
     if (cinematicBtn) cinematicBtn.disabled = false;
-    const cockpitBtn = document.getElementById('btn-cockpit');
+    const cockpitBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-cockpit'));
     if (cockpitBtn) {
       cockpitBtn.disabled = true;
       cockpitBtn.textContent = 'Cockpit View';

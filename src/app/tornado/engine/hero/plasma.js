@@ -437,6 +437,9 @@ export function createHeroPlasma(ctx, S, api) {
     const cam = Sim.three.camera;
     const hit = traceAim(cam.position, S.aimDir);
     S.beamTo.copy(cam.position).addScaledVector(S.aimDir, hit.t);
+    // The other Rogers in the line of fire take the weapon's value once (co-op
+    // friendly fire, R-053); the blast at the end then finds them already hit.
+    if (ctx.systems.net) ctx.systems.net.hurtRay('0', cam.position.x, cam.position.y, cam.position.z, S.aimDir.x, S.aimDir.y, S.aimDir.z, hit.t, mega ? 'mega' : 'plasma');
     if (!S.beam) buildBeam();
     S.beam.visible = true;
     S.beamSplash.visible = hit.kind !== 'sky';

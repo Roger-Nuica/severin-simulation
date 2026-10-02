@@ -182,7 +182,7 @@ export const DAZED_BOB = 0.055;
  * @property {number} dazedSpin radians/sec that heading turns at (signed)
  * @property {number} landRotX pitch they landed at, rotated out as they stand
  * @property {number} landRotZ roll they landed at, rotated out as they stand
- * @property {import('./shelters.js').ShelterEntrance|null} shelter the door this runner is making for, if any
+ * @property {import('../shelters.js').ShelterEntrance|null} shelter the door this runner is making for, if any
  * @property {Object|null} hazard the ground hazard they are clearing, if any
  * @property {Object|null} pickup the muster point they have been called to
  * @property {SimObject|null} partner the other half of this person's pair, if any

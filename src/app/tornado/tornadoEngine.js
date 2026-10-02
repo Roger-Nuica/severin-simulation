@@ -888,7 +888,9 @@ export function createSimulation(container) {
     cameraSystem.restoreGlide();
     // Before OrbitControls, so the target it damps towards is the moved one.
     updateKeyPan(rawDt);
-    Sim.three.controls.update();
+    // A co-op guest's camera is placed by the net system; OrbitControls would
+    // pull it back to the town's orbit every frame (the "blocked screen").
+    if (!ctx.systems.net.isPeerView()) Sim.three.controls.update();
     if (Chase.active) {
       updateChaseCar(dt);
       updateCarVisuals(dt);
@@ -1207,8 +1209,8 @@ export function createSimulation(container) {
     const target = Math.min(Sim.params.debrisCount, DEBRIS_CAP);
     for (let i = 0; i < target; i++) spawnAmbientDebris();
 
-    document.getElementById('btn-start').disabled = true;
-    document.getElementById('btn-pause').disabled = false;
+    /** @type {HTMLButtonElement} */ (document.getElementById('btn-start')).disabled = true;
+    /** @type {HTMLButtonElement} */ (document.getElementById('btn-pause')).disabled = false;
     document.getElementById('btn-pause').textContent = '⏸ Pause';
   }
   
@@ -1340,9 +1342,9 @@ export function createSimulation(container) {
     resetReinforcements();
     lifecycle.endPhase('reset');
 
-    document.getElementById('btn-start').disabled = false;
+    /** @type {HTMLButtonElement} */ (document.getElementById('btn-start')).disabled = false;
     stormLife.resetStormLife();
-    document.getElementById('btn-pause').disabled = true;
+    /** @type {HTMLButtonElement} */ (document.getElementById('btn-pause')).disabled = true;
     document.getElementById('btn-pause').textContent = '⏸ Pause';
   }
 

@@ -29,7 +29,7 @@ const SLIDER_DEFS = [
  * updates) is handled imperatively inside tornadoEngine.js via
  * document.getElementById — this component's only React-specific
  * responsibility is mounting/unmounting the engine.
- * @returns {JSX.Element}
+ * @returns {import('react').JSX.Element}
  */
 export default function TornadoSimulator() {
   const mountRef = useRef(null);

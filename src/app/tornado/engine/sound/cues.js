@@ -95,6 +95,7 @@ const MUSIC = {
  *   playSonicBoom: (gain?: number) => void,
  *   updateCues: () => void,
  *   stopAllCues: () => void,
+ *   playEarthquake: () => void,
  *   musicLevels: () => {playlist: number, city: number}
  * }}
  */

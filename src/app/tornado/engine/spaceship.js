@@ -161,7 +161,7 @@ export function createSpaceshipSystem(ctx) {
     if (s.group.parent) s.group.parent.remove(s.group);
     const geometries = new Set();
     const materials = new Set();
-    s.group.traverse((child) => {
+    s.group.traverse((/** @type {any} */ child) => {
       if (child.geometry) geometries.add(child.geometry);
       if (child.material) materials.add(child.material);
     });

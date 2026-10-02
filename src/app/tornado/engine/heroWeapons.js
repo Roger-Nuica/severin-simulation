@@ -122,7 +122,6 @@ const UP = new THREE.Vector3(0, 1, 0);
  * @typedef {Object} KatanaRelease what a button release hands the slash logic
  * @property {number} dx swipe movement along x
  * @property {number} dy swipe movement along y
- * @property {number} hold real seconds held
  */
 
 /**
@@ -742,6 +741,8 @@ export function createHeroWeapons(ctx, hero) {
     const r = Math.sqrt(Math.random()) * MINIGUN.spread;
     dir.copy(aimDir).addScaledVector(side, Math.cos(a) * r).addScaledVector(lift, Math.sin(a) * r).normalize();
     const hit = hero.traceAim(cam.position, dir);
+    // The other Rogers in the line of fire take one round's value (co-op friendly fire, R-053).
+    if (ctx.systems.net) ctx.systems.net.hurtRay('0', cam.position.x, cam.position.y, cam.position.z, dir.x, dir.y, dir.z, hit.t, 'bullet');
     const at = scratch.copy(cam.position).addScaledVector(dir, hit.t).clone();
     const vm = view();
     const from = vm ? vm.muzzle.getWorldPosition(new THREE.Vector3()) : cam.position.clone();
@@ -857,6 +858,8 @@ export function createHeroWeapons(ctx, hero) {
       // A samurai under it (Landing Support): the bolt is Roger's, so it can.
       || (!!ctx.systems.spaceship && ctx.systems.spaceship.hitSamuraiArea(railPoint.x, railPoint.z, 5, 'bolt') > 0);
     ctx.systems.strikeTargeting.boltAt(railPoint.x, railPoint.z);
+    // The other Rogers where the bolt lands (the people's kill radius, 5 m; co-op friendly fire, R-053).
+    if (ctx.systems.net) ctx.systems.net.hurtArea('0', railPoint.x, railPoint.z, 5, 'bolt', 'Struck by');
     if (victims) ctx.events.emit('rogerKill');
     const vm = view();
     if (vm) {

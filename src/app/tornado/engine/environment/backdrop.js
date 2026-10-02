@@ -245,6 +245,7 @@ export function createBackdropSystem(ctx) {
           colour.setHSL(0.06 + rand() * 0.08, 0.12 + rand() * 0.12, 0.34 + rand() * 0.2);
           blocks.setColorAt(nBlocks, colour);
           const turned = yaw !== 0;
+          /** @type {BackdropBlock} */
           const block = {
             x, z, w, h, d, yaw, roof: -1, roofH: 0, colour: colour.clone(), state: 0, t: 0, lean: 0,
             hw: (turned ? d : w) / 2, hd: (turned ? w : d) / 2

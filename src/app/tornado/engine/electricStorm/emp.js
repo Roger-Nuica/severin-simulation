@@ -150,7 +150,7 @@ export function createElectricEmp(ctx, S, api) {
     if (at !== -1) Sim.objects.splice(at, 1);
     /** @type {THREE.MeshStandardMaterial[]} */
     const mats = [];
-    person.mesh.traverse((child) => {
+    person.mesh.traverse((/** @type {any} */ child) => {
       const m = child.material;
       if (m && m.emissive && !mats.includes(m)) mats.push(m);
     });
@@ -166,7 +166,7 @@ export function createElectricEmp(ctx, S, api) {
    */
   function removeCorpse(person) {
     person.mesh.removeFromParent();
-    person.mesh.traverse((child) => {
+    person.mesh.traverse((/** @type {any} */ child) => {
       if (child.geometry) child.geometry.dispose();
       if (child.material) child.material.dispose();
     });

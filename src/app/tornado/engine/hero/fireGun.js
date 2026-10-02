@@ -39,6 +39,7 @@ export const FIRE_GUN = {
  *   flashMessage: (text: string) => void, rogerPosition: () => THREE.Vector3}} hero
  * @returns {{
  *   build: (addHandsAndMuzzle: (group: THREE.Group, z: number, colour: THREE.Color) => {muzzle: THREE.Object3D, flash: THREE.Mesh}) => {group: THREE.Group, muzzle: THREE.Object3D, flash: THREE.Mesh, pilot: THREE.Mesh},
+ *   breathe: (gun: {tick: number}, dt: number, muzzle: THREE.Vector3, aimDir: THREE.Vector3) => void,
  *   update: (dt: number, firing: boolean, muzzle: THREE.Vector3|null, aimDir: THREE.Vector3) => void,
  *   clear: () => void,
  *   dispose: () => void
@@ -137,10 +138,14 @@ export function createFireGun(ctx, hero) {
   /**
    * What the flame has reached, burning.
    * @param {THREE.Vector3} dir
+   * @param {THREE.Vector3} [origin] the flame's origin (a guest's muzzle); Roger's position when absent
+   * @param {string} [shooter] who is burning: `'0'` is Roger, else the guest's id
    * @returns {void}
    */
-  function scorch(dir, origin) {
+  function scorch(dir, origin, shooter = '0') {
     const r = origin || hero.rogerPosition();
+    // The other Rogers in the cone take a tick (co-op friendly fire, R-053); ticks are 0.25 s apart.
+    if (ctx.systems.net) ctx.systems.net.hurtSector(shooter, r.x, r.z, dir.x, dir.z, FIRE_GUN.range, Math.cos(FIRE_GUN.halfAngle), 3, 'fire', 'fire', 'Burned by');
     const fire = ctx.systems.buildingFire;
     for (const b of ctx.Environment.buildings) {
       if (b.damageState === 'collapsed' || fire.isBurning(b)) continue;
@@ -239,7 +244,7 @@ export function createFireGun(ctx, hero) {
    * A co-op guest's flame (engine/net/system.js): the same particles, sound
    * and burning as Roger's, from their own position. Their own tick clock,
    * so two guns do not share one.
-   * @param {{tick: number}} gun the guest's clock holder
+   * @param {{tick: number, shooter?: string}} gun the guest's clock holder and id
    * @param {number} dt
    * @param {THREE.Vector3} muzzle
    * @param {THREE.Vector3} aimDir
@@ -252,7 +257,7 @@ export function createFireGun(ctx, hero) {
     gun.tick -= dt;
     for (let n = 0; gun.tick <= 0 && n < 4; n++) {
       gun.tick += FIRE_GUN.tick;
-      scorch(aimDir, muzzle);
+      scorch(aimDir, muzzle, gun.shooter || '0');
     }
     if (gun.tick <= 0) gun.tick = FIRE_GUN.tick;
   }

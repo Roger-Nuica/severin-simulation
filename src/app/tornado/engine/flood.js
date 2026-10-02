@@ -134,7 +134,7 @@ export function createFloodSystem(ctx) {
     materials: [],
 
     state: {
-      /** @type {'idle'|'breaking'|'surge'|'drain'} */
+      /** @type {'idle'|'strain'|'breaking'|'surge'|'drain'} */
       phase: 'idle',
       // Whether the gate has gone. Separate from `phase`, which is back to
       // 'idle' once the water has drained away: a dam that has already been
@@ -489,7 +489,7 @@ export function createFloodSystem(ctx) {
    * @returns {void}
    */
   function setButtonBusy(busy) {
-    const button = document.getElementById('btn-flood');
+    const button = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-flood'));
     if (button) button.disabled = busy;
   }
 
@@ -525,7 +525,7 @@ export function createFloodSystem(ctx) {
   /** @returns {void} */
   function disposeFlood() {
     if (!S.group) return;
-    S.group.traverse((child) => {
+    S.group.traverse((/** @type {any} */ child) => {
       if (child.geometry) child.geometry.dispose();
     });
     if (S.cracks && S.cracks.userData.texture) S.cracks.userData.texture.dispose();

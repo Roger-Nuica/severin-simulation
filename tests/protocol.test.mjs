@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PROTOCOL_VERSION as V, validateInput, validateSnapshot, validateEvent, validateControl, parseFrame, isValidCode } from '../src/app/tornado/engine/net/protocol.js';
 
-const input = (o = {}) => ({ type: 'input', v: V, seq: 1, mx: 0, mz: 1, yaw: 0.5, pitch: 0, fire: false, aim: false, weapon: 0, abil: 0, use: false, ...o });
+const input = (o = {}) => ({ type: 'input', v: V, seq: 1, mx: 0, mz: 1, yaw: 0.5, pitch: 0, fire: false, aim: false, weapon: 0, abil: 0, use: false, hero: false, ...o });
 
 test('valid input is accepted and normalised', () => assert.equal(validateInput(input()).ok, true));
 
@@ -41,7 +41,7 @@ test('snapshot validation', () => {
   assert.equal(validateSnapshot(snap({ aliens: [[0, 0, 0, 9999, 0]] })).error, 'bound:aliens');
   assert.equal(validateSnapshot(snap({ vehicles: undefined })).ok, false);
   assert.equal(validateSnapshot(snap({ players: new Array(65).fill([0, 0, 0, 0, 0, 0, 0, -1, -1]) })).error, 'count:players');
-  assert.equal(validateSnapshot(snap({ v: 2 })).error, 'version');
+  assert.equal(validateSnapshot(snap({ v: 99 })).error, 'version');
 });
 
 test('event validation', () => {

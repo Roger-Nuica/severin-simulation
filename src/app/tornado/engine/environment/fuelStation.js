@@ -156,7 +156,8 @@ export function createFuelStationSystem(ctx) {
       liftEligible: 0,
       pooled: false,
       poolIndex: -1,
-      lifeTimer: 0
+      lifeTimer: 0,
+      captureState: 'grounded'
     };
     root.userData.simObject = obj;
     root.userData.variant = FUEL_STATION_VARIANT;

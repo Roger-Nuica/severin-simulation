@@ -151,6 +151,7 @@ export { SHIP_DAMAGE } from './hero/config.js';
  *   markers: () => ({bunker: THREE.Vector3, pursuers: THREE.Vector3[], roger: THREE.Vector3, car: Object|null}|null),
  *   terminatorDistance: () => number,
  *   drivingCar: () => ({mesh: THREE.Object3D, speed: number}|null),
+ *   chipTornado: (v: Object, hit: {type: string}) => boolean,
  *   notify: (text: string) => void,
  *   announce: (title: string, sub: string) => void,
  *   empSweep: (x: number, z: number, radius: number) => void,
@@ -168,6 +169,11 @@ export { SHIP_DAMAGE } from './hero/config.js';
  *   rogerPhase: () => string,
  *   killRoger: (title: string, sub: string, kind?: string) => void,
  *   hitArea: (x: number, z: number, radius: number, title: string, sub: string, source?: string) => void,
+ *   guestFlame: (gun: {tick: number}, dt: number, muzzle: THREE.Vector3, dir: THREE.Vector3) => void,
+ *   setCoopDown: (down: boolean) => void,
+ *   rogerPose: () => ({x: number, z: number, heading: number, weapon: string, driving: boolean}|null),
+ *   weapon: () => string,
+ *   bulletTime: (on: boolean) => void,
  *   resetHero: () => void,
  *   disposeHero: () => void
  * }}
@@ -178,6 +184,8 @@ export function createHeroModeSystem(ctx) {
   // reads and writes it as S.
   const S = {
     Hero: { active: false },
+    /** Runs started so far; the co-op layer reads it to spot a Restart (new run, same frame). */
+    runs: 0,
 
     state: {
       /** @type {'running'|'aiming'|'driving'|'dazed'|'won'|'dying'} */
@@ -514,7 +522,7 @@ export function createHeroModeSystem(ctx) {
       cell: 100, plasmaTimer: 0, beamTimer: 0, recoil: 0, spread: 0,
       neutralised: false, dazeImmunity: 0, spawnShield: HERO.spawnShieldSeconds,
       burstTimer: 0, aimBlend: 0, threat: Infinity,
-      stepTimer: 0.5, hintTimer: HERO.hintSeconds, msgTimer: 0, aimKind: 'sky', frozen: 0,
+      stepTimer: 0.5, hintTimer: HERO.hintSeconds, msgTimer: 0, aimKind: 'sky', frozen: 0, coopDown: false,
       zipActive: false
     });
     S.weapons.startRun();
@@ -522,6 +530,7 @@ export function createHeroModeSystem(ctx) {
     ctx.systems.energy.resetEnergy();
     api.attachKeys();
     S.Hero.active = true;
+    S.runs += 1;
     // Every run, Restart included, starts at full health (health/system.js).
     if (ctx.systems.health) ctx.systems.health.resetHealth();
     if (S.button) {
@@ -561,7 +570,7 @@ export function createHeroModeSystem(ctx) {
 
     if (S.roger) {
       Sim.three.scene.remove(S.roger.mesh);
-      S.roger.mesh.traverse((child) => {
+      S.roger.mesh.traverse((/** @type {any} */ child) => {
         if (child.geometry) child.geometry.dispose();
         if (child.material && !S.runMaterials.includes(child.material)) child.material.dispose();
       });
@@ -667,7 +676,7 @@ export function createHeroModeSystem(ctx) {
     api.updateBurst(dt);
     api.updateCharge(dt);
     if (dt > 0) api.checkChasm();
-    if (S.state.phase === 'dying') return;
+    if (/** @type {string} */ (S.state.phase) === 'dying') return;
 
     if (S.state.phase === 'aiming') api.placeAimCamera(rawDt);
     else if (S.state.phase === 'driving') api.placeDriveCamera(rawDt);
@@ -688,7 +697,7 @@ export function createHeroModeSystem(ctx) {
     // (health/melee.js). A lethal touch is the old "caught" death.
     if (dt > 0 && !S.state.coopDown) {
       api.touchByPursuers(dt * ctx.systems.time.scale('world'));
-      if (S.state.phase === 'dying') return;
+      if (/** @type {string} */ (S.state.phase) === 'dying') return;
     }
     // Safe.
     const p = S.roger.mesh.position;
@@ -752,7 +761,7 @@ export function createHeroModeSystem(ctx) {
    */
   function zipRoger(x, z, speed) {
     const target = api.rogerTarget();
-    if (!target || !target.onFoot || S.state.frozen > 0 || S.state.phase === 'dazed') return false;
+    if (!target || !target.onFoot || S.state.frozen > 0 || S.state.coopDown || S.state.phase === 'dazed') return false;
     Object.assign(S.state, { zipActive: true, zipX: x, zipZ: z, zipSpeed: speed, zipTotal: Math.hypot(x - target.x, z - target.z) });
     return true;
   }
@@ -842,7 +851,7 @@ export function createHeroModeSystem(ctx) {
     rogerPose: () => {
       if (!S.Hero.active || !S.roger) return null;
       const p = S.roger.mesh.position;
-      return { x: p.x, z: p.z, heading: S.state.heading, weapon: S.weapons ? S.weapons.current() : '', driving: S.state.phase === 'driving' };
+      return { x: p.x, z: p.z, heading: S.state.heading, weapon: S.weapons ? S.weapons.current() : '', driving: S.state.phase === 'driving', run: S.runs };
     },
     guestFlame: (/** @type {any} */ gun, /** @type {number} */ dt, /** @type {THREE.Vector3} */ muzzle, /** @type {THREE.Vector3} */ dir) => { if (S.weapons) S.weapons.guestFlame(gun, dt, muzzle, dir); },
     setCoopDown: (/** @type {boolean} */ down) => {

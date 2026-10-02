@@ -103,6 +103,8 @@ export function createKeyPanSystem(ctx) {
     return !!(ctx.Chase && ctx.Chase.active)
       || !!(ctx.Possess && ctx.Possess.active)
       || !!(ctx.Hero && ctx.Hero.active)
+      // A co-op guest's WASD walks Roger 2; it must not also pan the town camera.
+      || !!(s.net && s.net.isPeerView())
       || !!(ctx.Cinematic && ctx.Cinematic.active)
       || !!(s.spaceship && s.spaceship.isLanding())
       || !!(s.killcam && s.killcam.isReplaying());

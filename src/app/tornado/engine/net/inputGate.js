@@ -42,7 +42,7 @@ export function createInputGate(opts = {}) {
       p.last = t;
       if (p.tokens < 1) return { ok: false, error: 'rate' };
       const v = validateInput(body);
-      if (!v.ok) return v;
+      if (!v.ok) return /** @type {{ok: false, error: string}} */ (v);
       p.tokens -= 1;
       if (v.input.seq <= p.seq) return { ok: false, error: 'stale' };
       p.seq = v.input.seq;

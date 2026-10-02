@@ -16,7 +16,13 @@
  * Relay -> client: created, joined, peerJoined, peerLeft, hostLeft, error
  */
 
-export const PROTOCOL_VERSION = 1;
+/**
+ * Version 2 adds the peer's `hero` request flag to the input message (a guest
+ * asking the host to bring it into Hero Mode). Host, relay and peer must run
+ * the same build: a mismatch is rejected with the `version` error, which the
+ * client turns into a "refresh the page" message.
+ */
+export const PROTOCOL_VERSION = 2;
 
 export const LIMITS = {
   /** Largest raw frame the relay or a client will parse, in bytes. */
@@ -63,7 +69,7 @@ const inRange = (v, lo, hi) => num(v) && v >= lo && v <= hi;
 /**
  * Parses a raw frame to a plain object, or null when it is too big, not
  * JSON, or not an object.
- * @param {string|Buffer|ArrayBuffer} raw
+ * @param {string|Uint8Array|ArrayBuffer} raw
  * @param {number} [max]
  * @returns {Object|null}
  */
@@ -101,13 +107,15 @@ export function validateControl(msg) {
   }
 }
 
-const INPUT_KEYS = new Set(['type', 'v', 'seq', 'mx', 'mz', 'yaw', 'pitch', 'fire', 'aim', 'weapon', 'abil', 'use']);
+const INPUT_KEYS = new Set(['type', 'v', 'seq', 'mx', 'mz', 'yaw', 'pitch', 'fire', 'aim', 'weapon', 'abil', 'use', 'hero']);
 
 /**
  * A peer's input: its intent only. Movement axes, look angles, buttons.
  * @typedef {{type:'input', v:number, seq:number, mx:number, mz:number,
  *   yaw:number, pitch:number, fire:boolean, aim:boolean, weapon:number,
- *   abil:number, use:boolean}} PlayerInput
+ *   abil:number, use:boolean, hero:boolean}} PlayerInput
+ * `hero` is a request level, not an order: true while the guest is asking to
+ * join Hero Mode (the host acts on the rising edge only).
  * @param {any} msg
  * @returns {{ok: true, input: PlayerInput} | {ok: false, error: string}}
  */
@@ -119,7 +127,7 @@ export function validateInput(msg) {
   if (!inRange(msg.mx, -1, 1) || !inRange(msg.mz, -1, 1)) return { ok: false, error: 'move' };
   if (!inRange(msg.yaw, -Math.PI * 4, Math.PI * 4)) return { ok: false, error: 'yaw' };
   if (!inRange(msg.pitch, -1.6, 1.6)) return { ok: false, error: 'pitch' };
-  if (typeof msg.fire !== 'boolean' || typeof msg.aim !== 'boolean' || typeof msg.use !== 'boolean') return { ok: false, error: 'buttons' };
+  if (typeof msg.fire !== 'boolean' || typeof msg.aim !== 'boolean' || typeof msg.use !== 'boolean' || typeof msg.hero !== 'boolean') return { ok: false, error: 'buttons' };
   if (!Number.isInteger(msg.weapon) || msg.weapon < 0 || msg.weapon >= WEAPONS.length) return { ok: false, error: 'weapon' };
   // Ability bits: 1 time slow, 2 teleport, 4 EMP.
   if (!Number.isInteger(msg.abil) || msg.abil < 0 || msg.abil > 7) return { ok: false, error: 'abil' };
@@ -127,7 +135,7 @@ export function validateInput(msg) {
     ok: true,
     input: {
       type: 'input', v: msg.v, seq: msg.seq, mx: msg.mx, mz: msg.mz, yaw: msg.yaw, pitch: msg.pitch,
-      fire: msg.fire, aim: msg.aim, weapon: msg.weapon, abil: msg.abil, use: msg.use
+      fire: msg.fire, aim: msg.aim, weapon: msg.weapon, abil: msg.abil, use: msg.use, hero: msg.hero
     }
   };
 }
