@@ -49,3 +49,17 @@ test('event validation', () => {
   assert.equal(validateEvent({ type: 'event', v: V, id: 1, kind: 'debris', data: {} }).error, 'kind');
   assert.equal(validateEvent({ type: 'event', v: V, id: 1, kind: 'score', data: { s: 'x'.repeat(2000) } }).error, 'size');
 });
+
+test('worst-case snapshot (every kind at the per-kind cap) fits the frame limit', async () => {
+  const { LIMITS } = await import('../src/app/tornado/engine/net/protocol.js');
+  const rows = (n, w) => Array.from({ length: n }, (_, i) => [i, -123.45, 234.56, 3.14, 1, 4, 100, -1, -1].slice(0, w));
+  const full = snap({
+    players: rows(LIMITS.maxPerKind, 9), tornadoes: rows(LIMITS.maxPerKind, 4), terminators: rows(LIMITS.maxPerKind, 5),
+    aliens: rows(LIMITS.maxPerKind, 5), ships: rows(LIMITS.maxPerKind, 5), vehicles: rows(LIMITS.maxPerKind, 5)
+  });
+  assert.equal(validateSnapshot(full).ok, true);
+  const bytes = JSON.stringify(full).length;
+  assert.ok(bytes < LIMITS.maxBytes, `${bytes} bytes`);
+  // Sustained worst case at the approved 15 Hz.
+  console.log(`# worst-case snapshot ${bytes} B -> ${(bytes * LIMITS.snapshotHz / 1024).toFixed(0)} KiB/s`);
+});

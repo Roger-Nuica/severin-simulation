@@ -178,7 +178,8 @@ export function createHeroPursuers(ctx, S, api) {
     // Frozen (engine/effects/freeze.js): it stands in its block of ice.
     if (ctx.systems.enemies.getState(unit, 'frozen')) return Infinity;
     const p = unit.root.position;
-    const r = S.roger.mesh.position;
+    // Co-op: the nearest player who is up (engine/net/system.js); Roger alone otherwise.
+    const r = (ctx.systems.net && ctx.systems.net.pickTarget(p.x, p.z)) || S.roger.mesh.position;
     const dist = Math.hypot(r.x - p.x, r.z - p.z);
     const j = unit.joints;
     let speed = HERO.pursuerSpeed;

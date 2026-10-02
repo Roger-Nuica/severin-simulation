@@ -1979,3 +1979,29 @@ body.ship-cutscene .minimap {
   display: none;
 }
 .spotless-glare.visible { display: block; }
+
+/* Co-op (engine/net/system.js): room panel, peer HUD and toast. */
+.coop-panel {
+  position: fixed; left: 12px; bottom: 12px; z-index: 30;
+  padding: 8px 10px; border-radius: 8px;
+  background: rgba(12, 16, 24, 0.78); color: #e8eef7;
+  font: 12px/1.4 system-ui, sans-serif; max-width: 340px;
+}
+.coop-title { font-weight: 700; letter-spacing: 0.12em; margin-bottom: 4px; }
+.coop-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.coop-row button { font: inherit; padding: 3px 8px; }
+.coop-code { width: 72px; font: inherit; text-transform: uppercase; letter-spacing: 0.15em; padding: 3px 6px; }
+.coop-status { margin-top: 4px; opacity: 0.85; }
+.coop-hud {
+  position: fixed; right: 12px; top: 12px; z-index: 30; display: none;
+  padding: 8px 10px; border-radius: 8px; background: rgba(12, 16, 24, 0.78);
+  color: #e8eef7; font: 12px/1.5 system-ui, sans-serif; max-width: 320px;
+}
+.coop-hud.visible { display: block; }
+.coop-toast {
+  position: fixed; left: 50%; top: 14%; transform: translateX(-50%); z-index: 31;
+  padding: 8px 14px; border-radius: 8px; background: rgba(12, 16, 24, 0.85);
+  color: #fff; font: 600 14px system-ui, sans-serif; opacity: 0;
+  transition: opacity 0.25s; pointer-events: none;
+}
+.coop-toast.visible { opacity: 1; }

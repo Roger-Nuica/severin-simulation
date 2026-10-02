@@ -202,6 +202,8 @@ export function createHeroModeSystem(ctx) {
       spread: 0,
       neutralised: false,
       dazeImmunity: 0,
+      // Co-op: down but revivable (engine/net/system.js), not dead.
+      coopDown: false,
       // The Chase Mode car's door takes him in by itself; after he gets out it
       // waits until he has walked away, or he would be straight back in.
       chaseDoorArmed: true,
@@ -611,7 +613,7 @@ export function createHeroModeSystem(ctx) {
     // Frozen solid (engine/effects/freeze.js): he cannot move until it thaws.
     if (S.state.frozen > 0) S.state.frozen = Math.max(0, S.state.frozen - dt);
     if (S.state.phase === 'driving') api.updateCar(dt);
-    else if (!(S.state.frozen > 0)) api.updateRoger(dt);
+    else if (!(S.state.frozen > 0) && !S.state.coopDown) api.updateRoger(dt);
     api.updateDoorCue();
     // Time Slow slows the machines with the rest of the world (its time
     // group, engine/time.js); Roger runs at his own pace.
@@ -637,13 +639,13 @@ export function createHeroModeSystem(ctx) {
     api.updateHud(threat, rawDt);
 
     // Caught -- by a machine on its feet (torn out of the car, if he is in one).
-    if (dt > 0 && api.caughtByPursuer()) {
+    if (dt > 0 && !S.state.coopDown && api.caughtByPursuer()) {
       api.killRoger('TERMINATED', S.state.phase === 'dazed' ? 'Caught while he was reeling' : 'The Terminator caught Roger');
       return;
     }
     // Safe.
     const p = S.roger.mesh.position;
-    if (Math.hypot(p.x - S.bunker.x, p.z - S.bunker.z) < HERO.winRadius && S.state.phase !== 'dazed') {
+    if (!S.state.coopDown && Math.hypot(p.x - S.bunker.x, p.z - S.bunker.z) < HERO.winRadius && S.state.phase !== 'dazed') {
       if (S.state.phase === 'aiming') api.leaveAim();
       api.exitCar();
       S.state.phase = 'won';
@@ -772,6 +774,28 @@ export function createHeroModeSystem(ctx) {
   return {
     initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, standable, freezeRoger, rogerFrozen: () => S.state.frozen > 0, killRoger: api.killRoger, hitArea: api.hitArea,
     resetHero, disposeHero,
+    // Co-op (engine/net/system.js): Roger's pose for the shared snapshot, and
+    // the down-not-dead state while a teammate can still revive him.
+    rogerPose: () => {
+      if (!S.Hero.active || !S.roger) return null;
+      const p = S.roger.mesh.position;
+      return { x: p.x, z: p.z, heading: S.state.heading, weapon: S.weapons ? S.weapons.current() : '', driving: S.state.phase === 'driving' };
+    },
+    setCoopDown: (/** @type {boolean} */ down) => {
+      if (!S.roger) return;
+      S.state.coopDown = down;
+      if (down) {
+        if (S.state.phase === 'aiming') api.leaveAim();
+        api.cancelCharge();
+        api.exitCar();
+        api.releaseKeys();
+        S.roger.mesh.rotation.x = -Math.PI / 2 + 0.1;
+      } else {
+        S.roger.mesh.rotation.x = 0;
+        // A breath of safety after the revive (the spawn shield, as at the start).
+        S.state.spawnShield = 2;
+      }
+    },
     // The weapon in hand (the minigun turns Time Slow into Bullet Time,
     // player/abilities.js), and Bullet Time's hold on its bullets.
     weapon: () => (S.weapons ? S.weapons.current() : ''),

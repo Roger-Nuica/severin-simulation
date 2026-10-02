@@ -51,7 +51,7 @@ export const WEAPONS = ['rifle', 'minigun', 'railgun', 'fire', 'blackhole'];
 export const SNAPSHOT_KINDS = ['players', 'tornadoes', 'terminators', 'aliens', 'ships', 'vehicles'];
 
 /** Major events the host may replicate (cosmetic destruction stays local). */
-export const EVENT_TYPES = ['announce', 'notice', 'explosion', 'playerDown', 'playerRevived', 'gameOver', 'score', 'mission'];
+export const EVENT_TYPES = ['welcome', 'announce', 'notice', 'explosion', 'playerDown', 'playerRevived', 'gameOver', 'score', 'mission'];
 
 const CODE_RE = new RegExp(`^[${ROOM.codeAlphabet}]{${ROOM.codeLength}}$`);
 

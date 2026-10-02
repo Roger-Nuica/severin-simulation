@@ -262,6 +262,33 @@ is smaller, the minigun has 200 rounds):
 - giants 50 s: `872/371348/295/69/61/10/-4986.09`
 - hole 60 s: `409/230219/91/110/62/8/16629.97`
 
+### Co-op multiplayer (2 players), 2026-10-02
+
+Measured/derived, not a GPU benchmark (the container has none):
+
+- **Network.** A snapshot at the per-kind cap (64 rows in each of players,
+  tornadoes, Terminators, aliens, ships, vehicles) is ~11 KB of JSON, about
+  162 KiB/s at the approved 15 Hz; the relay frame limit is 64 KiB. Typical
+  snapshots (a handful of rows) are well under 1 KB. Peer inputs are ~150 B
+  at 30 Hz.
+- **Entity and particle caps (R-048) are untouched.** The guest is one
+  `createPerson` figure on the host (never in `Sim.objects`, no pooled
+  entities, no particles); the peer's proxies are plain meshes (<=64 per
+  kind, shared geometry and materials, disposed with the session). No cap was
+  raised. The 160-enemy and 10,000-particle budgets are not affected: the
+  guest's shots go through the existing enemy registry.
+- **Per-frame cost on the host** is one pass over the registered enemies per
+  guest shot, one pass per frame for the catch test, and the snapshot build
+  every ~67 ms. No allocation in the hot enemy/`Sim.objects` loops; the
+  snapshot and the guest's input objects are the only per-tick allocations.
+- **Known limits.** The guest has the rifle, minigun and railgun only (the
+  Fire Gun and Black Hole stay host-only); EMP and Time Slow are host-only
+  (time is host-authoritative). Aliens target Roger, not the guest. The
+  peer's local simulation stays idle and draws the host's world as proxies,
+  so cars thrown by the storm appear as proxy boxes beside their (static)
+  local originals. Seed-matching covers town construction only; runtime
+  gameplay randomness is not shared.
+
 ## Key findings (the essentials)
 
 1. **The funnel's surface noise was the single biggest CPU cost** (half a
