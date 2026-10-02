@@ -40,8 +40,8 @@ export { SHIP_DAMAGE } from './hero/config.js';
  * aliens too), the Fire Gun and the Black Hole Gun (heroWeapons.js). Each
  * is raised with the right mouse button and fired with the left button or
  * Enter (pullTrigger / releaseTrigger). The abilities are on Q E R
- * (engine/player/abilities.js): Q is Time Slow, seven seconds of the world
- * at 30% (with the minigun in hand, Bullet Time: the world at 3%, its
+ * (engine/player/abilities.js): Q is Time Slow, five seconds of the world
+ * at 10% (with the minigun in hand, Bullet Time: the world at 3%, its
  * bullets hanging in the air), E Teleport, R the EMP. The controls are read through engine/player/input.js
  * (hero/input.js consumeInput).
  *

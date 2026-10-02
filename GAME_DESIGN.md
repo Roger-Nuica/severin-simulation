@@ -93,7 +93,7 @@ These notes preserve the historical context that was embedded in the former comb
 - The second tornado delay changed from 1 minute 30 seconds to 30 seconds.
 - The Chase Mode top speed changed from 22 to 34.
 - The minigun ammunition count returned from 600 to 200.
-- Time Slow duration changed from 3 to 7 seconds; the current charge-to-MEGA-BEAM time changed from 3 to 2 seconds.
+- Time Slow duration changed from 3 to 7 seconds (2026-10-02: now 5 seconds with the world at 10% and a 3 s cooldown); the current charge-to-MEGA-BEAM time changed from 3 to 2 seconds.
 - Teleport moved from W to E; EMP moved from E to R.
 - The mothership is called after 4 abductions rather than 5.
 - Hunter ships now arrive 90 seconds after the first ship; earlier values were 150 and 120 seconds.

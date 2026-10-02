@@ -12,8 +12,8 @@
  * while the game is paused), so slowing the world does not stretch it.
  *
  * The slots (GAME_DESIGN.md "Hero Mode"); exact values are in .claude/rules.md:
- *   Q  Time Slow            the world at 30% for 7 s, Roger at full speed.
- *                           20%, 6 s cooldown. With the minigun in hand it
+ *   Q  Time Slow            the world at 10% for 5 s, Roger at full speed.
+ *                           20%, 3 s cooldown. With the minigun in hand it
  *                           is **Bullet Time** instead: the world at 3%,
  *                           the minigun's bullets hanging in the air
  *                           (hero/bullets.js), the picture drained and
@@ -32,9 +32,9 @@ export const ABILITIES = {
     name: 'TIME SLOW',
     keys: ['KeyQ'],
     cost: 2,               // segments (20%)
-    seconds: 7,            // real seconds (3 until 2026-10-01)
-    cooldown: 6,           // real seconds after it ends
-    scale: 0.3,            // the world's time while it lasts (70% slower)
+    seconds: 5,            // real seconds (7 until 2026-10-02, 3 until 2026-10-01)
+    cooldown: 3,           // real seconds after it ends (6 until 2026-10-02)
+    scale: 0.1,            // the world's time while it lasts (90% slower; 0.3 until 2026-10-02)
     bulletScale: 0.03      // Bullet Time's: almost a stop
   }
 };

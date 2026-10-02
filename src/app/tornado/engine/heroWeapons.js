@@ -927,7 +927,7 @@ export function createHeroWeapons(ctx, hero) {
     state.railCooldown = Math.max(0, state.railCooldown - rawDt);
     // Blade Mode times itself out on real time (it is begun by Q, katanaBladeToggle).
     blade.update(rawDt);
-    // The quick slash's cooldown, wind-up and lunge, on the same real clock.
+    // The quick slash's cooldown and wind-up, on the same real clock.
     slash.update(rawDt);
     // Blade Mode's vignette, highlights and cut line follow the virtual cursor
     // (real time); in first person the line also shows while a cut is dragged.
