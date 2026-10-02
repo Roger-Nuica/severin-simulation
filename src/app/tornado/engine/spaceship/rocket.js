@@ -84,7 +84,7 @@ const ROCKET_BLAST = {
   ringColour: new THREE.Color(3.2, 1.0, 1.4),
   flash: { colour: '#ffd8a8', peak: 0.6, hold: 0.15, seconds: 1.6 },
   event: 'tanker',
-  heroKill: { title: 'ROCKET STRIKE', sub: 'Roger was inside the blast' }
+  heroKill: { title: 'ROCKET STRIKE', sub: 'Caught in the blast' }
 };
 
 /**

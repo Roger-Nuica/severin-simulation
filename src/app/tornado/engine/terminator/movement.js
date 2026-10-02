@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { T800, PAD } from './config.js';
+import { stepTelegraph, cancelTelegraph, applyTelegraph } from './telegraph.js';
 /** @typedef {import('./config.js').Unit} Unit */
 
 /**
@@ -188,6 +189,7 @@ export function createTerminatorMovement(ctx, S, api) {
     if (empCharge && empCharge.lethalAt(p.x, p.z)) {
       unit.phase = 'dying';
       unit.timer = 0;
+      cancelTelegraph(unit);
       empCharge.arcAround(p, 3 * T800.scale * 0.6);
       ctx.systems.lightning.flashScreen(S.scratch.set(p.x, 6, p.z), 0.4, '#cfeaff');
       api.showBanner('EMP HIT!', 'The charged funnel shorted it out');
@@ -221,15 +223,20 @@ export function createTerminatorMovement(ctx, S, api) {
     const coop = ctx.systems.net ? ctx.systems.net.pickTarget(p.x, p.z) : null;
     const hero = coop || (ctx.systems.heroMode ? ctx.systems.heroMode.rogerTarget() : null);
     if (hero) unit.foe = null;
+    let telegraphing = false;
 
     // Towards the target, or on round the town if there is nobody left.
     let want = unit.heading;
     if (hero) {
       want = Math.atan2(hero.x - p.x, hero.z - p.z);
-      if (Math.hypot(hero.x - p.x, hero.z - p.z) < T800.reach + 0.8) {
-        if (coop && coop.id !== '0') ctx.systems.net.catchPlayer(coop.id, 'TERMINATED', `A Terminator reached Player ${coop.id}`);
-        else ctx.systems.heroMode.killRoger('TERMINATED', 'A Terminator reached Roger');
-      }
+      const hd = Math.hypot(hero.x - p.x, hero.z - p.z);
+      // The nearest player: wind-up inside 6 m, then one touch of 50 per 3 s of
+      // world time per machine (terminator/telegraph.js, health/melee.js).
+      // A co-op guest takes the same touch through `damagePlayer(targetId)`.
+      const id = coop ? coop.id : '0';
+      unit.touchClock += dt;
+      stepTelegraph(ctx, unit, hd, false, p, id === '0' ? 'A Terminator reached Roger' : `A Terminator reached Player ${id}`, id);
+      telegraphing = true;
     } else if (unit.foe) {
       const q = unit.foe.root.position;
       want = Math.atan2(q.x - p.x, q.z - p.z);
@@ -246,6 +253,7 @@ export function createTerminatorMovement(ctx, S, api) {
     } else if (Math.hypot(p.x, p.z) > T800.bound * 0.8) {
       want = Math.atan2(-p.x, -p.z);
     }
+    if (!telegraphing) cancelTelegraph(unit);
     // Round buildings, the chasm and the edge of town rather than into them.
     want = steer(unit, want, dt);
 
@@ -279,6 +287,8 @@ export function createTerminatorMovement(ctx, S, api) {
     j.shoulderL.rotation.x = -s * 0.4;
     // The right arm swung through for a blow, just after one lands.
     j.shoulderR.rotation.x = unit.strikeTimer > T800.strikeCooldown - 0.35 ? -1.6 : s * 0.4;
+    // The wind-up raises the arm and flares the eyes over the stride.
+    applyTelegraph(unit, unit, T800.eye);
     j.body.position.y = Math.abs(Math.cos(unit.cycle)) * 0.03;
     const vortex = ctx.tornadoes.nearest(p.x, p.z);
     const near = vortex && vortex.birth > 0

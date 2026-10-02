@@ -32,7 +32,8 @@ Add, modify, disable, or remove a disaster by following the existing disaster-sy
 5. Search for related consumers before wiring interactions: `doomsday.js` scripts disasters; `collisions.js`, `ui/minimap.js`, environment systems, sound systems, and missions may consume or expose disaster state. Update only the integrations required by the approved task.
 6. Add sound through the existing sound systems and registration paths when requested; do not introduce module-global audio state or unmanaged listeners.
 7. If the disaster creates particles, lights, enemies, or transient entities, use the existing pools/caps and ask permission before any cap increase.
-8. Update `GAME_DESIGN.md` for player-facing behavior and `.claude/rules.md` for protected numeric contracts. If runtime code conflicts with existing rules, stop and report it before changing the affected gameplay.
+8. Damage to the player: if the disaster can hurt Roger or a co-op player, route it through `ctx.systems.health.damagePlayer({source, ...})` with a source entry (value and death message) in `engine/health/config.js` (R-053); never call `killRoger` directly. Use damage over time ticks of 0.25 s (`health/dot.js`) or once-per-event latches (`health/hazards.js`) rather than per-frame damage, and keep the tornado, debris and ice at daze or freeze only (R-001).
+9. Update `GAME_DESIGN.md` for player-facing behavior and `.claude/rules.md` for protected numeric contracts. If runtime code conflicts with existing rules, stop and report it before changing the affected gameplay.
 
 ### Modify a disaster
 

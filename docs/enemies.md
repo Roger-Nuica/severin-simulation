@@ -29,11 +29,11 @@ Not every hostile actor is a separate class; some are registry-backed kinds usin
 
 ## Katana interaction
 
-The Katana (`engine/hero/katana/`) cuts registry kind `alien` in the phases patrol, escort and exiting (and people, see `docs/weapons.md`), through a `blade` hit carrying `cut`; `aliens.js` routes it to `crew.js` `sliceKill`, which scores `ALIENS.killScore` once and hands the root to the pieces system. Every other kind (Terminator, T-Rex, Yeti, Patient Zero and any other) parries: a clang and sparks, no damage, no state change. No `accepts` list changed. The T-Rex accepts `blade` for the samurai, so the Katana filters on kind itself and never sends `blade` to a non-alien. Samurai and hunter ships are ignored.
+The Katana (`engine/hero/katana/`) cuts registry kind `alien` in the phases patrol, escort and exiting (and people, see `docs/weapons.md`), through a `blade` hit carrying `cut`; `aliens.js` routes it to `crew.js` `sliceKill`, which scores `ALIENS.killScore` once and hands the root to the pieces system. Every other registry kind in reach (Terminator, pursuer, T-Rex, Yeti, Patient Zero and clones) takes a plain `blade` hit (no cut) that deals its table chip (R-054) with a parry spark; no `accepts` list changed. The T-Rex accepts `blade` for the samurai only, so the Katana never gives its handler a cut. Nuclear plants, the mothership and tornadoes are never reached (zero cells), and samurai and hunter ships are ignored.
 
 ## Hunter ships
 
-Hunter ships are the registry kind `hunterShip` (`engine/aliens.js`; it has no `hitbox`, so the rifle still finds one once through `shipTargets`). It accepts `plasma`, `bullet`, `bolt` and `fire`, never `blade`, `emp` or `freeze`. All damage reaches `waves.js` `hitHunter` against a hull of 4, which ignores downed ships:
+Hunter ships are the registry kind `hunterShip` (`engine/aliens.js`; it has no `hitbox`, so the rifle still finds one once through `shipTargets`). It accepts `plasma`, `bullet`, `bolt` and `fire`; EMP and the Katana chip it through the table (0.08), and it never takes `freeze`. All damage reaches `waves.js` `hitHunter` against a hull of 4, which ignores downed ships:
 
 | Weapon | Hull per hit |
 | --- | --- |
@@ -41,7 +41,8 @@ Hunter ships are the registry kind `hunterShip` (`engine/aliens.js`; it has no `
 | Minigun | 0.25 a round |
 | Railgun and Lightning-tile bolt | 2 |
 | Fire Gun | 0.5 a tick (about 8 ticks) |
-| Katana | none (ignored) |
+| Katana | none in practice (ignored; table cell 0.08) |
+| EMP | 0.08 chip |
 
 Rocket Strike still damages hunters only through its existing ship path. The Black Hole Gun pulls hunters like any registry enemy within 100 m and consumes them. Hits below 1 point (minigun, fire) give a light spark and a quiet cue; the full burst is for plasma or the downing hit.
 
@@ -54,9 +55,13 @@ The registry supports these states:
 
 These states are used for cross-type effects without hard-coding logic into each enemy owner.
 
+## Health and the weapon table
+
+Every enemy has health in `engine/health/damageTable.js` (alien 1, Terminator and pursuer 30, T-Rex 40, Yeti 30, Patient Zero 12, clone 1, hunter ship 4, UFO 6, samurai 3, nuclear plant 5, mothership 15, tornado 20). `enemies.hit` applies the table to every hit and calls the owner's optional `defeat(e, hit)` at 0 health; per-instance health lives in a WeakMap in the registry. Samurai, the UFO, the nuclear plant, the mothership and the tornado are not registry kinds and are routed through their own call sites (`hitSamurai`, `hitShip`, `chipTarget`). Enemies and disasters never hurt a samurai. See R-054 for every value.
+
 ## Damage contract
 
-A registered enemy kind accepts a set of hit types and implements `damage(e, hit)`. That is the project’s core rule for enemy-specific immunity and reactions.
+A registered enemy kind accepts a set of hit types and implements `damage(e, hit)`. That is the project’s core rule for enemy-specific weaknesses and reactions: accepted types reach the handler; any other hit chips health through the table instead of being ignored.
 
 Examples of hit families:
 - `plasma`
@@ -69,7 +74,7 @@ Examples of hit families:
 - `cleanse`
 - `blade`
 
-A hostile entity reacts only to damage types it explicitly accepts.
+A hostile entity has its own reaction (stun, knockdown, kill) only to the damage types it explicitly accepts; other types chip its health.
 
 ## How to add a new enemy
 

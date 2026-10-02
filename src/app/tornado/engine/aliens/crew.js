@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { danceAlien } from '../dance.js';
 import { ALIENS } from './config.js';
+import { HEALTH } from '../health/config.js';
+import { touchAttempt } from '../health/melee.js';
 
 /**
  * ===========================================================================
@@ -180,7 +182,7 @@ export function createAlienCrew(ctx, S, api) {
       return;
     }
     // Roger near: he comes first, ship or no ship.
-    const hero = api.heroTarget();
+    const hero = api.heroTarget(alien.root.position.x, alien.root.position.z);
     if (hero && huntRoger(alien, hero, dt)) {
       unDance(alien);
       checkFirenado(alien);
@@ -539,7 +541,7 @@ export function createAlienCrew(ctx, S, api) {
    * A crew member near Roger goes for him: closes in to grab him, and shoots
    * at where he stood as its gun came up.
    * @param {Alien} alien
-   * @param {{x: number, z: number, onFoot: boolean}} hero
+   * @param {{x: number, z: number, onFoot: boolean, id?: string}} hero the player it hunts (`id` '0' or absent: Roger)
    * @param {number} dt
    * @returns {boolean} whether it is busy with him (and so not patrolling)
    */
@@ -555,7 +557,7 @@ export function createAlienCrew(ctx, S, api) {
     turn = THREE.MathUtils.clamp(turn, -ALIENS.turnRate * 2 * dt, ALIENS.turnRate * 2 * dt);
     alien.heading += turn;
     let speed = 0;
-    if (d > ALIENS.meleeReach * 0.6) {
+    if (d > HEALTH.melee.contactReach * 0.6) {
       speed = ALIENS.huntSpeed;
       const nx = p.x + Math.sin(alien.heading) * speed * dt;
       const nz = p.z + Math.cos(alien.heading) * speed * dt;
@@ -570,10 +572,17 @@ export function createAlienCrew(ctx, S, api) {
     alien.root.rotation.y = alien.heading;
     poseWalk(alien, speed);
     if (alien.aim > 0) alien.aim -= dt;
-    if (d < ALIENS.meleeReach) {
-      ctx.systems.heroMode.killRoger('KILLED BY ALIENS', 'They got their hands on Roger');
-      return true;
+    // Melee: one touch of 34 per 3 s of world time per alien (health/melee.js).
+    alien.touchClock += dt;
+    const touch = touchAttempt(alien.touch, d, HEALTH, alien.touchClock, { source: 'alienTouch' });
+    alien.touch = touch.state;
+    if (touch.damage > 0) {
+      ctx.systems.health.damagePlayer({
+        source: 'alienTouch', type: 'melee', title: 'KILLED BY ALIENS', sub: 'They got their hands on Roger', targetId: hero.id ?? '0',
+        position: { x: p.x, y: p.y, z: p.z }
+      });
     }
+    if (d < HEALTH.melee.contactReach) return true;
     // The shot: aimed where he is as the gun comes up, and fired there.
     alien.rayTimer -= dt;
     if (!alien.locked && alien.rayTimer < ALIENS.aimLead) {
@@ -590,7 +599,10 @@ export function createAlienCrew(ctx, S, api) {
         alien.rayTimer = api.between(ALIENS.rayEvery);
         alien.locked = false;
         if (Math.hypot(hero.x - alien.lockX, hero.z - alien.lockZ) < ALIENS.rayHitRadius) {
-          ctx.systems.heroMode.killRoger('ZAPPED', 'An alien ray hit Roger');
+          ctx.systems.health.damagePlayer({
+            source: 'alienRay', type: 'ray', title: 'ZAPPED', sub: 'An alien ray hit Roger', targetId: hero.id ?? '0',
+            position: { x: alien.root.position.x, y: alien.root.position.y, z: alien.root.position.z }
+          });
         }
       }
     }

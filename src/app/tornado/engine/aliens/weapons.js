@@ -109,7 +109,7 @@ export function createAlienWeapons(ctx, S, api) {
    * @returns {void}
    */
   function updateTracker(tr, from, armed, dt) {
-    const hero = api.heroTarget();
+    const hero = api.heroTarget(from.x, from.z);
     if (!tr.active) {
       tr.cooldown -= dt;
       const inRange = hero && Math.hypot(hero.x - from.x, hero.z - from.z) < ALIENS.laserRange;
@@ -119,6 +119,7 @@ export function createAlienWeapons(ctx, S, api) {
       }
       tr.active = true;
       tr.timer = 0;
+      tr.struck = false; // re-armed: each burst may hurt Roger once
       const a = Math.random() * Math.PI * 2;
       tr.fx = hero.x + Math.cos(a) * ALIENS.laserStart;
       tr.fz = hero.z + Math.sin(a) * ALIENS.laserStart;
@@ -134,8 +135,14 @@ export function createAlienWeapons(ctx, S, api) {
         tr.fx += (dx / d) * step;
         tr.fz += (dz / d) * step;
       }
-      if (d - step < ALIENS.laserKill) {
-        ctx.systems.heroMode.killRoger('VAPORISED', 'An alien ship\'s laser caught Roger');
+      // Discrete hit, once per 3.2 s burst: `struck` is cleared only when the
+      // next burst starts, so the beam never ticks per frame. A hit the spawn
+      // shield or hit window refuses does not use up the burst.
+      if (!tr.struck && d - step < ALIENS.laserKill) {
+        const res = ctx.systems.health.damagePlayer({
+          source: tr.source, type: 'ray', title: 'VAPORISED', sub: 'An alien ship\'s laser caught Roger', targetId: hero.id ?? '0'
+        });
+        if (res.applied) tr.struck = true;
       }
     }
     const to = S.scratch.set(tr.fx, 0.1, tr.fz);

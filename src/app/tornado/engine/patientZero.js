@@ -244,7 +244,10 @@ export function createPatientZeroSystem(ctx) {
     const hero = ctx.systems.heroMode;
     const roger = hero && hero.rogerTarget();
     if (roger && !w.prey && Math.hypot(roger.x - w.pos.x, roger.z - w.pos.z) < PZ.touch * 1.2) {
-      hero.killRoger('INFECTED', isOriginal ? 'Patient Zero got to Roger' : 'A clone of Patient Zero got to Roger');
+      ctx.systems.health.damagePlayer({
+        source: 'patientZero', instantKill: true, position: { x: w.pos.x, y: 0, z: w.pos.z },
+        title: 'INFECTED', sub: isOriginal ? 'Patient Zero got to Roger' : 'A clone of Patient Zero got to Roger'
+      });
       return;
     }
     if (w.prey && w.prey.mesh.parent) {
@@ -328,6 +331,13 @@ export function createPatientZeroSystem(ctx) {
       position: (w) => w.pos,
       accepts: ['plasma', 'bullet', 'bolt', 'emp', 'gravity'],
       damage: (w, hit) => hitOriginal(w, hit),
+      // Out of health (D1, health/damageTable.js: the Katana, fire and the
+      // rest chip it): it dies as at 0 hp, its clones with it, scored once.
+      defeat: (w) => {
+        if (original !== w) return true;
+        killOriginal();
+        return true;
+      },
       hitbox: (w) => ({ x: w.pos.x, z: w.pos.z, radius: 0.9, top: 2.8 }),
       object: (w) => w.root,
       // The black hole: gone quietly. Its clones are swallowed one by one
@@ -345,6 +355,12 @@ export function createPatientZeroSystem(ctx) {
       position: (w) => w.pos,
       accepts: ['plasma', 'bullet', 'bolt', 'emp', 'gravity', 'fire', 'freeze'],
       damage: (w) => {
+        removeClone(w);
+        return true;
+      },
+      // Every weapon the table lists kills a clone (1 health); the rest
+      // (the Katana, the rocket) chip it and it is removed when that is used up.
+      defeat: (w) => {
         removeClone(w);
         return true;
       },

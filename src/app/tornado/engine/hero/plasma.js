@@ -3,6 +3,9 @@ import * as THREE from 'three';
 import { setOffExplosivesAt } from '../explosives.js';
 import { SHIP_DAMAGE, HERO, UP, Z_AXIS } from './config.js';
 import { PERSON, CHARACTERS } from '../scale.js';
+import { chipTarget, fullHealth } from '../health/enemyDamage.js';
+import { insideMuzzleGuard, mayHurtPlayer, splashAmount } from '../health/friendlyFire.js';
+import { HEALTH } from '../health/config.js';
 
 /**
  * ===========================================================================
@@ -527,6 +530,30 @@ export function createHeroPlasma(ctx, S, api) {
   }
 
   /**
+   * Friendly fire (D4): Roger's own blast hurts him if he stands inside it,
+   * falling away with distance. Nothing for an impact inside the muzzle guard
+   * (a trace that began inside geometry), or when friendly fire is off.
+   * @param {{t: number}} hit
+   * @param {THREE.Vector3} at
+   * @param {number} radius
+   * @param {boolean} mega
+   * @returns {void}
+   */
+  function hurtRogerInBlast(hit, at, radius, mega) {
+    if (!HEALTH.friendlyFire.enabled || insideMuzzleGuard(hit.t)) return;
+    // The partner in the blast (co-op friendly fire, D4).
+    if (ctx.systems.net) ctx.systems.net.splashGuests(at, radius, mega ? 'mega' : 'plasma');
+    if (!mayHurtPlayer('0', '0', { coop: false, friendlyFire: true })) return;
+    const p = S.roger.mesh.position;
+    const amount = splashAmount(mega ? 'mega' : 'plasma', Math.hypot(p.x - at.x, p.z - at.z), radius);
+    if (amount <= 0) return;
+    ctx.systems.health.damagePlayer({
+      source: 'friendlyFire', amount, type: 'blast', position: { x: at.x, y: at.y, z: at.z },
+      title: 'FRIENDLY FIRE', sub: 'Caught in your own blast'
+    });
+  }
+
+  /**
    * Everything the beam does where it lands: the thing it hit, then a blast
    * round the point -- far bigger for a mega beam.
    * @param {{t: number, kind: string, obj: Object|null}} hit
@@ -541,9 +568,11 @@ export function createHeroPlasma(ctx, S, api) {
     s.explosions.spawnImpactBurst(at, (hit.kind === 'building' ? 3 : 2.2) * near * (mega ? 2.2 : 1));
     s.lightning.flashScreen(at, 0.45 * near, '#bfe6ff');
     if (hit.kind === 'tornado') {
-      // Only a mega beam is enough for a funnel.
+      // A MEGA BEAM is enough for a funnel; a normal shot only chips its health (D3).
       if (mega) neutralise(hit.obj);
-      else api.flashMessage(`TOO STRONG — hold ENTER ${HERO.chargeSeconds} s for a MEGA BEAM`);
+      else if (!chipTornado(hit.obj, { type: 'plasma' })) {
+        api.flashMessage(`STRONG FUNNEL ${Math.round((hit.obj.health / fullHealth('tornado')) * 100)}% — hold ENTER ${HERO.chargeSeconds} s for a MEGA BEAM`);
+      }
       return;
     }
     if (hit.kind === 'ship') {
@@ -554,12 +583,14 @@ export function createHeroPlasma(ctx, S, api) {
       return;
     }
     if (hit.kind === 'nuclear') {
-      // Only a mega beam gets through the containment (engine/nuclear.js).
+      // A mega beam goes straight through the containment; a normal shot chips it (engine/nuclear.js, D3).
       if (mega) {
         s.nuclear.megaHit(hit.obj);
         api.flashMessage('REACTOR BREACHED — GET CLEAR');
+      } else if (s.nuclear.chipPlant(hit.obj, { type: 'plasma' })) {
+        api.flashMessage('REACTOR BREACHED — GET CLEAR');
       } else {
-        api.flashMessage('REINFORCED CONTAINMENT — only a MEGA BEAM breaks it');
+        api.flashMessage('REINFORCED CONTAINMENT — a MEGA BEAM breaks it at once');
       }
       return;
     }
@@ -591,6 +622,7 @@ export function createHeroPlasma(ctx, S, api) {
     // The tanker, the chemical works, a gas main or a power line in the blast
     // goes off (engine/explosives.js).
     setOffExplosivesAt(ctx, at.x, at.z, R);
+    hurtRogerInBlast(hit, at, R, mega);
     const { damageFromImpact, shockBuilding, addDamageScore, flattenTree } = s.damage;
     // The building it struck takes the whole of it, and catches.
     if (hit.kind === 'building') {
@@ -672,13 +704,32 @@ export function createHeroPlasma(ctx, S, api) {
   }
 
   /**
+   * One of Roger's weapons but the MEGA BEAM and the katana on a funnel (D3,
+   * health/damageTable.js): a chip of its health, with no effect of its own.
+   * At 0 it is neutralised like a MEGA BEAM (the existing removal path).
+   * @param {Object} v the Vortex hit
+   * @param {{type: string}} hit
+   * @returns {boolean} whether it brought the funnel down
+   */
+  function chipTornado(v, hit) {
+    if (v.neutralized) return false;
+    const left = chipTarget('tornado', v.health, hit);
+    v.health = left.health;
+    if (!left.spent) return false;
+    neutralise(v, 'Roger\'s weapons wore it down');
+    return true;
+  }
+
+  /**
    * The hit: the funnel ropes out and is gone, with everything a moment like
    * that deserves.
    * @param {Object} v the Vortex hit
+   * @param {string} [cause] for the banner
    * @returns {void}
    */
-  function neutralise(v) {
+  function neutralise(v, cause = 'Roger\'s plasma beam') {
     v.neutralized = true;
+    v.health = 0;
     S.state.neutralised = true;
     const base = new THREE.Vector3(v.center.x, 2, v.center.z);
     ctx.systems.explosions.spawnImpactBurst(base, 5);
@@ -691,7 +742,7 @@ export function createHeroPlasma(ctx, S, api) {
     ctx.systems.cues.playLargeExplosion({ priority: true, gain: 1.4 });
     ctx.systems.gamefeel.event('tanker', base);
     ctx.systems.damage.addDamageScore(HERO.neutraliseScore);
-    api.showBanner('TORNADO NEUTRALIZED', `Roger's plasma beam · +${HERO.neutraliseScore}`);
+    api.showBanner('TORNADO NEUTRALIZED', `${cause} · +${HERO.neutraliseScore}`);
   }
 
   /**
@@ -740,5 +791,5 @@ export function createHeroPlasma(ctx, S, api) {
     if (S.state.beamTimer <= 0) S.beam.visible = S.beamSplash.visible = false;
   }
 
-  return { beginCharge, releaseCharge, cancelCharge, updateCharge, toggleAim, enterAim, leaveAim, rayCylinder, rayCappedCylinder, rayBox, traceAim, buildBeam, placeBeam, firePlasma, launchRings, updateRings, trailFire, plasmaHit, neutralise, updatePlasma };
+  return { beginCharge, releaseCharge, cancelCharge, updateCharge, toggleAim, enterAim, leaveAim, rayCylinder, rayCappedCylinder, rayBox, traceAim, buildBeam, placeBeam, firePlasma, launchRings, updateRings, trailFire, plasmaHit, neutralise, chipTornado, updatePlasma };
 }

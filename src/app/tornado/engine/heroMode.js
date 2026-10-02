@@ -10,6 +10,7 @@ import { createHeroCar } from './hero/car.js';
 import { createHeroPursuers } from './hero/pursuers.js';
 import { createHeroScreen } from './hero/screen.js';
 import { ENERGY } from './player/energy.js';
+import { fullHealth } from './health/enemyDamage.js';
 export { SHIP_DAMAGE } from './hero/config.js';
 
 /**
@@ -158,8 +159,10 @@ export { SHIP_DAMAGE } from './hero/config.js';
  *   standable: (x: number, z: number) => boolean,
  *   freezeRoger: (seconds: number) => boolean,
  *   rogerFrozen: () => boolean,
+ *   rogerShielded: () => boolean,
+ *   rogerPhase: () => string,
  *   killRoger: (title: string, sub: string, kind?: string) => void,
- *   hitArea: (x: number, z: number, radius: number, title: string, sub: string) => void,
+ *   hitArea: (x: number, z: number, radius: number, title: string, sub: string, source?: string) => void,
  *   resetHero: () => void,
  *   disposeHero: () => void
  * }}
@@ -362,6 +365,7 @@ export function createHeroModeSystem(ctx) {
     ctx.events.on('announce', ({ title, sub }) => api.announce(title, sub));
     ctx.events.on('notice', ({ text }) => api.notify(text));
     ctx.events.on('empPulse', ({ x, z, radius }) => api.empSweep(x, z, radius));
+    ctx.events.on('playerHurt', (hurt) => api.hurtFlash(hurt));
     // Roger's own pursuers, in the shared register of enemies
     // (engine/enemies.js).
     ctx.systems.enemies.registerKind({
@@ -375,6 +379,11 @@ export function createHeroModeSystem(ctx) {
           else api.knockdownPursuer(unit);
         } else if (hit.type === 'bullet') api.pursuerBulletHit(unit, MINIGUN.terminatorHits);
         else api.startPursuerDeath(unit);
+        return unit.p.state !== 'hunting';
+      },
+      // Out of health (D1, health/damageTable.js): down as an EMP brings it down.
+      defeat: (unit) => {
+        if (unit.p.state === 'hunting') api.startPursuerDeath(unit);
         return unit.p.state !== 'hunting';
       },
       // The black hole: out of the hunt and gone, with no death of its own.
@@ -391,6 +400,8 @@ export function createHeroModeSystem(ctx) {
     S.hud.innerHTML = `
       <div class="hero-name">🦸 ROGER</div>
       <div class="hero-row hero-weapon">WEAPON <span class="hero-wname"></span></div>
+      <div class="hero-row hero-health">HEALTH <span class="hero-cell hero-hbar"><i></i></span> <span class="hero-hpct"></span></div>
+      <div class="hero-row hero-partner" hidden>PARTNER <span class="hero-cell hero-hbar hero-pbar"><i></i></span> <span class="hero-hpct hero-ppct"></span></div>
       <div class="hero-row hero-energy">ENERGY <span class="hero-ebar">${'<i></i>'.repeat(ENERGY.segments)}</span> <span class="hero-epct"></span></div>
       <div class="hero-row hero-abilities"></div>
       <div class="hero-row">PLASMA <span class="hero-cell"><i></i></span> <span class="hero-cellpct"></span></div>
@@ -424,6 +435,13 @@ export function createHeroModeSystem(ctx) {
     S.crosshair.className = 'hero-crosshair';
     S.crosshair.innerHTML = '<i class="n"></i><i class="s"></i><i class="w"></i><i class="e"></i><b></b><span class="hero-target"></span>';
     container.appendChild(S.crosshair);
+
+    // Hit flash, low-health vignette and direction arrow (hero/screen.js).
+    S.hurt = document.createElement('div');
+    S.hurt.className = 'hero-hurt';
+    S.hurt.innerHTML = '<i class="hero-hurt-flash"></i><i class="hero-hurt-low"></i><b class="hero-hurt-dir">▲</b>';
+    S.hurtDir = S.hurt.querySelector('.hero-hurt-dir');
+    container.appendChild(S.hurt);
 
     S.banner = document.createElement('div');
     S.banner.className = 'hero-banner';
@@ -484,6 +502,8 @@ export function createHeroModeSystem(ctx) {
     ctx.systems.energy.resetEnergy();
     api.attachKeys();
     S.Hero.active = true;
+    // Every run, Restart included, starts at full health (health/system.js).
+    if (ctx.systems.health) ctx.systems.health.resetHealth();
     if (S.button) {
       S.button.textContent = '✕ Exit Hero';
       S.button.classList.add('active');
@@ -508,11 +528,15 @@ export function createHeroModeSystem(ctx) {
     S.weapons.endRun();
     S.Hero.active = false;
     if (S.over) S.over.classList.remove('visible');
+    api.clearHurt();
     api.detachKeys();
     // Time Slow (or any ability) let go with the run.
     ctx.systems.abilities.cancelAll();
     // The funnel it put out comes back down now.
-    for (const tornado of ctx.tornadoes.instances) tornado.Vortex.neutralized = false;
+    for (const tornado of ctx.tornadoes.instances) {
+      tornado.Vortex.neutralized = false;
+      tornado.Vortex.health = fullHealth('tornado');
+    }
     ctx.tornadoes.setCount(S.saved.tornadoes);
 
     if (S.roger) {
@@ -640,10 +664,11 @@ export function createHeroModeSystem(ctx) {
 
     api.updateHud(threat, rawDt);
 
-    // Caught -- by a machine on its feet (torn out of the car, if he is in one).
-    if (dt > 0 && !S.state.coopDown && api.caughtByPursuer()) {
-      api.killRoger('TERMINATED', S.state.phase === 'dazed' ? 'Caught while he was reeling' : 'The Terminator caught Roger');
-      return;
+    // Touched -- by a machine on its feet: 50 per touch, then its 3 s cooldown
+    // (health/melee.js). A lethal touch is the old "caught" death.
+    if (dt > 0 && !S.state.coopDown) {
+      api.touchByPursuers(dt * ctx.systems.time.scale('world'));
+      if (S.state.phase === 'dying') return;
     }
     // Safe.
     const p = S.roger.mesh.position;
@@ -768,13 +793,13 @@ export function createHeroModeSystem(ctx) {
   function disposeHero() {
     resetHero();
     if (S.weapons) S.weapons.dispose();
-    for (const el of [S.hud, S.crosshair, S.banner, S.over]) if (el && el.parentNode) el.parentNode.removeChild(el);
-    S.hud = S.crosshair = S.banner = S.over = null;
+    for (const el of [S.hud, S.crosshair, S.banner, S.over, S.hurt]) if (el && el.parentNode) el.parentNode.removeChild(el);
+    S.hud = S.crosshair = S.banner = S.over = S.hurt = S.hurtDir = null;
     S.button = null;
   }
 
   return {
-    initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, standable, freezeRoger, rogerFrozen: () => S.state.frozen > 0, killRoger: api.killRoger, hitArea: api.hitArea,
+    initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, standable, freezeRoger, rogerFrozen: () => S.state.frozen > 0, rogerShielded: () => S.state.spawnShield > 0, rogerPhase: () => S.state.phase, killRoger: api.killRoger, hitArea: api.hitArea, chipTornado: api.chipTornado,
     resetHero, disposeHero,
     // Co-op (engine/net/system.js): Roger's pose for the shared snapshot, and
     // the down-not-dead state while a teammate can still revive him.

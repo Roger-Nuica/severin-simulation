@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { ALIENS } from '../aliens/config.js';
 import { alienRampLength } from '../aliens/models.js';
 import { SUPPORT } from './config.js';
+import { fullHealth, healthAfter, tableDamage } from '../health/enemyDamage.js';
 import { SAMURAI, buildSamuraiKit, buildSamurai, disposeSamuraiKit } from './samuraiModel.js';
 
 /**
@@ -54,7 +55,7 @@ import { SAMURAI, buildSamuraiKit, buildSamurai, disposeSamuraiKit } from './sam
  * @property {number} slashClock seconds to its next cut
  * @property {number} swing seconds into the cut, or -1
  * @property {boolean} cutDone this cut has landed
- * @property {number} hits rounds taken
+ * @property {number} health what is left of SAMURAI health (health/damageTable.js)
  * @property {number} gx its guard post
  * @property {number} gz
  * @property {number} postTimer seconds to a new post
@@ -118,7 +119,7 @@ export function createSamuraiSquad(ctx, S, api) {
     units.push({
       rig, phase: 'exiting', timer: 0, heading: Math.atan2(S.dir.x, S.dir.z), cycle: Math.random() * 6,
       slot: index, target: null, retarget: Math.random() * SAMURAI.retarget, slashClock: 0, swing: -1, cutDone: false,
-      hits: 0, gx: S.drop.x, gz: S.drop.z, postTimer: 0, pitch: 0.85 + Math.random() * 0.3
+      health: fullHealth('samurai'), gx: S.drop.x, gz: S.drop.z, postTimer: 0, pitch: 0.85 + Math.random() * 0.3
     });
   }
 
@@ -566,16 +567,21 @@ export function createSamuraiSquad(ctx, S, api) {
   }
 
   /**
-   * One of Roger's weapons on one of them: the minigun takes
-   * SAMURAI.bulletHits rounds, anything else one.
+   * One of Roger's weapons on one of them, by the weapon x enemy table
+   * (health/damageTable.js, D1): the minigun round takes a third of its 3
+   * health (SAMURAI.bulletHits rounds), a rifle shot, a bolt or a rocket
+   * blast all of it, and fire a small chip per tick. Only Roger's weapons
+   * call this: enemies and disasters never do, so they cannot kill one.
    * @param {Samurai} u
    * @param {string} type 'plasma' | 'bullet' | 'bolt' | 'fire' | 'blast'
    * @returns {boolean} whether it went down
    */
   function hitSamurai(u, type) {
     if (!u || !onGround(u)) return false;
-    if (type === 'bullet' && ++u.hits < SAMURAI.bulletHits) {
-      ctx.systems.explosions.spawnImpactBurst(scratch.copy(u.rig.root.position).setY(1.2), 0.15);
+    u.health = healthAfter(u.health, tableDamage('samurai', { type }));
+    if (u.health > 0) {
+      // A minigun round keeps its small spark; fire and the rest add no particles.
+      if (type === 'bullet') ctx.systems.explosions.spawnImpactBurst(scratch.copy(u.rig.root.position).setY(1.2), 0.15);
       return false;
     }
     kill(u, type);

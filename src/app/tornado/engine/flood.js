@@ -77,6 +77,7 @@ const ICE_DEEP = new THREE.Color(0x9cc8e6);
  *   resetFlood: () => void,
  *   disposeFlood: () => void,
  *   inWater: (x: number, z: number) => boolean,
+ *   atCrest: (x: number, z: number) => boolean,
  *   spreadAt: (x: number) => number,
  *   surfaceAt: (x: number, z: number) => number,
  *   frontX: () => number,
@@ -583,6 +584,6 @@ export function createFloodSystem(ctx) {
     initFlood, updateFlood, breakDam, isRunning, resetFlood, disposeFlood, damWall: api.damWall, westLimit: api.westLimit, damSolids: api.damSolids,
     // Read by engine/collisions.js and the train, which need to know where
     // the water is rather than merely that it is running.
-    inWater: api.inWater, spreadAt: api.spreadAt, surfaceAt: api.surfaceAt, frontX, isSurging, isDamIntact: api.isDamIntact
+    inWater: api.inWater, atCrest: api.atCrest, spreadAt: api.spreadAt, surfaceAt: api.surfaceAt, frontX, isSurging, isDamIntact: api.isDamIntact
   };
 }

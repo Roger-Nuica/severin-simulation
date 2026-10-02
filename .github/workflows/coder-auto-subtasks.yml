@@ -3,9 +3,11 @@ name: Coder Plan Subtask (Guarded)
 on:
   schedule:
     # GitHub cron is UTC.
-    # Both adjacent UTC hours are triggered; the gate below selects exactly
-    # one that corresponds to 03:00 Europe/Bucharest, including DST.
-    - cron: "0 0,1 * * *"
+    # Two separate entries, because github.event.schedule holds the exact cron
+    # string that fired. The gate below selects the one that corresponds to
+    # 03:00 Europe/Bucharest, including DST.
+    - cron: "0 0 * * *"
+    - cron: "0 1 * * *"
 
   workflow_dispatch:
     inputs:
@@ -19,7 +21,7 @@ on:
         default: PLAN_katana_subtasks.md
 
       subtask:
-        description: "Optional exact subtask number. Leave empty to process all dependency-ready subtasks in order."
+        description: "Optional exact subtask number. Leave empty to run the first dependency-ready incomplete subtask."
         required: false
         type: string
         default: ""
@@ -31,7 +33,7 @@ on:
         default: ""
 
 concurrency:
-  group: coder-plan-${{ inputs.plan_file || 'katana-subtasks' }}
+  group: coder-plan-${{ inputs.plan_file || 'PLAN_katana_subtasks.md' }}
   cancel-in-progress: false
 
 jobs:
@@ -62,30 +64,30 @@ jobs:
           # Determine which UTC hour corresponds to 03:00 Bucharest today.
           # On the DST fall-back day, 03:00 can occur twice; select the first.
           expected_utc_hour="$(
-            python3 <<'PY'
-            from datetime import datetime, timezone
-            from zoneinfo import ZoneInfo
+          python3 <<'PY'
+          from datetime import datetime, timezone
+          from zoneinfo import ZoneInfo
 
-            zone = ZoneInfo("Europe/Bucharest")
-            today = datetime.now(zone).date()
-            local_target = datetime(today.year, today.month, today.day, 3, 0, 0)
+          zone = ZoneInfo("Europe/Bucharest")
+          today = datetime.now(zone).date()
+          local_target = datetime(today.year, today.month, today.day, 3, 0, 0)
 
-            candidates = []
-            for fold in (0, 1):
-                aware = local_target.replace(tzinfo=zone, fold=fold)
-                utc = aware.astimezone(timezone.utc)
+          candidates = []
+          for fold in (0, 1):
+              aware = local_target.replace(tzinfo=zone, fold=fold)
+              utc = aware.astimezone(timezone.utc)
 
-                # Keep only real local times. This excludes nonexistent DST times.
-                back = utc.astimezone(zone).replace(tzinfo=None)
-                if back == local_target:
-                    candidates.append(utc)
+              # Keep only real local times. This excludes nonexistent DST times.
+              back = utc.astimezone(zone).replace(tzinfo=None)
+              if back == local_target:
+                  candidates.append(utc)
 
-            if not candidates:
-                # 03:00 does not exist on the DST spring-forward date.
-                print("none")
-            else:
-                print(min(candidates).hour)
-            PY
+          if not candidates:
+              # 03:00 does not exist on the DST spring-forward date.
+              print("none")
+          else:
+              print(min(candidates).hour)
+          PY
           )"
 
           if [[ "$expected_utc_hour" == "none" ]]; then
@@ -294,31 +296,15 @@ jobs:
 
             selected = [id];
           } else {
-            // Build an ordered sequence. A later task may depend on an earlier
-            // selected task, which Claude must complete first in the same run.
-            const virtuallyDone = new Set(
-              [...tasks.entries()]
-                .filter(([, task]) => task.done)
-                .map(([id]) => id),
+            // One subtask per run: the first incomplete task, in plan order,
+            // whose dependencies are all done.
+            const id = taskOrder.find(
+              candidate =>
+                !tasks.get(candidate).done &&
+                tasks.get(candidate).deps.every(dep => tasks.get(dep)?.done),
             );
 
-            const remaining = taskOrder.filter(id => !tasks.get(id).done);
-
-            while (remaining.length > 0) {
-              const nextIndex = remaining.findIndex(id =>
-                tasks.get(id).deps.every(dep => virtuallyDone.has(dep)),
-              );
-
-              if (nextIndex === -1) {
-                break;
-              }
-
-              const [id] = remaining.splice(nextIndex, 1);
-              selected.push(id);
-              virtuallyDone.add(id);
-            }
-
-            if (selected.length === 0) {
+            if (id === undefined) {
               fs.appendFileSync(
                 process.env.GITHUB_STEP_SUMMARY,
                 `No dependency-ready incomplete subtasks were found in ${planPath}.\n`,
@@ -327,13 +313,7 @@ jobs:
               process.exit(0);
             }
 
-            if (remaining.length > 0) {
-              const blocked = remaining.join(', ');
-              fs.appendFileSync(
-                process.env.GITHUB_STEP_SUMMARY,
-                `The following subtasks were not selected because their dependencies are incomplete or cyclic: ${blocked}\n`,
-              );
-            }
+            selected = [id];
           }
 
           fs.appendFileSync(
@@ -524,7 +504,7 @@ jobs:
           fi
 
           git diff --cached --check
-          git commit -m "Auto-run: ${PLAN_FILE} subtasks ${SUBTASKS}"
+          git commit -m "Auto-run: ${PLAN_FILE} subtasks ${SUBTASK}"
           git push --set-upstream origin "$BRANCH_NAME"
 
           echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -541,7 +521,7 @@ jobs:
           set -euo pipefail
 
           body="$(cat <<EOF
-          Automated Coder run for \`${PLAN_FILE}\`, subtasks \`${SUBTASKS}\`.
+          Automated Coder run for \`${PLAN_FILE}\`, subtasks \`${SUBTASK}\`.
 
           Please review \`STATUS_AUTO_RUN.md\`, the implementation, and all checks
           before merging. Safety gates and unresolved approvals are not bypassed.
@@ -549,7 +529,7 @@ jobs:
           )"
 
           gh pr create \
-            --title "Auto-run: ${PLAN_FILE} subtasks ${SUBTASKS}"
+            --title "Auto-run: ${PLAN_FILE} subtasks ${SUBTASK}" \
             --body "$body" \
             --base "$BASE_BRANCH" \
             --head "$BRANCH_NAME"

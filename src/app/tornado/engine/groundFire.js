@@ -79,6 +79,7 @@ const GROUND_FIRE = {
  *   initGroundFire: () => void,
  *   updateGroundFire: (dt: number, strength: number) => void,
  *   isBurning: () => boolean,
+ *   contactAt: (x: number, z: number) => boolean,
  *   resetGroundFire: () => void,
  *   disposeGroundFire: () => void
  * }}
@@ -310,6 +311,24 @@ export function createGroundFireSystem(ctx) {
     return alive > 0 || (flames !== null && flames.life.some(l => l > 0));
   }
 
+  /**
+   * Whether a point stands in a burning patch: within the flame spawn radius
+   * (`jitter`) of a patch that has grown past a quarter burn. Allocation-free.
+   * @param {number} x
+   * @param {number} z
+   * @returns {boolean}
+   */
+  function contactAt(x, z) {
+    for (let i = 0; i < patches.length; i++) {
+      const patch = patches[i];
+      if (!patch.active || patch.level < 0.25) continue;
+      const dx = x - patch.x;
+      const dz = z - patch.z;
+      if (dx * dx + dz * dz <= GROUND_FIRE.jitter * GROUND_FIRE.jitter) return true;
+    }
+    return false;
+  }
+
   /** @returns {void} */
   function resetGroundFire() {
     for (const patch of patches) patch.active = false;
@@ -337,5 +356,5 @@ export function createGroundFireSystem(ctx) {
     beds = null;
   }
 
-  return { initGroundFire, updateGroundFire, isBurning, resetGroundFire, disposeGroundFire };
+  return { initGroundFire, updateGroundFire, isBurning, contactAt, resetGroundFire, disposeGroundFire };
 }

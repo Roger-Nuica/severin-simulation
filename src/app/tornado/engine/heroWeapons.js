@@ -1,6 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
 import { HOLE } from './player/blackHole.js';
+import { tableDamage, shipKindOf } from './health/enemyDamage.js';
 import { createBullets } from './hero/bullets.js';
 import { createFireGun } from './hero/fireGun.js';
 import { createKatanaSlash } from './hero/katana/slash.js';
@@ -788,8 +789,7 @@ export function createHeroWeapons(ctx, hero) {
       // One of Landing Support's samurai: only Roger can bring one down.
       if (s.spaceship.hitSamurai(hit.obj, 'bullet')) ctx.events.emit('rogerKill');
     } else if (hit.kind === 'ship' && hit.obj && hit.obj.hunter) {
-      // A hunter ship only (the UFO and the mothership carry no `hunter` and
-      // shrug it off). Rounds take time to arrive: the ship is looked up by
+      // A hunter ship only (the UFO, below, and the mothership carry no `hunter`). Rounds take time to arrive: the ship is looked up by
       // identity now, and a downed or gone one is simply not found.
       round.target = hit.obj.hunter;
       round.at = at;
@@ -798,6 +798,15 @@ export function createHeroWeapons(ctx, hero) {
       round.target = null;
       round.at = null;
       if (round.stopped) ctx.events.emit('rogerKill');
+    } else if (hit.kind === 'ship' && hit.obj && shipKindOf(hit.obj.name)) {
+      // The alien ship or the mothership (D1, D3): a round chips its hull by the table.
+      if (hit.obj.hit(tableDamage(/** @type {string} */ (shipKindOf(hit.obj.name)), { type: 'bullet' })) === 0) ctx.events.emit('rogerKill');
+    } else if (hit.kind === 'nuclear' && hit.obj && s.nuclear) {
+      // The reactor (D3): a round chips the containment.
+      s.nuclear.chipPlant(hit.obj, { type: 'bullet' });
+    } else if (hit.kind === 'tornado' && hit.obj && s.heroMode) {
+      // A funnel (D3): a round chips its health; at 0 it is neutralised.
+      s.heroMode.chipTornado(hit.obj, { type: 'bullet' });
     } else if (hit.kind === 'unit' && hit.obj && s.terminator) {
       const n = s.terminator.bulletHit(hit.obj, MINIGUN.terminatorHits);
       if (n > 0 && n < MINIGUN.terminatorHits) hero.flashMessage(`TERMINATOR HIT ${n} / ${MINIGUN.terminatorHits}`);

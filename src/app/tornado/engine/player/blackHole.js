@@ -36,8 +36,9 @@ import { createHoleWind, windAt } from './blackHole/wind.js';
  * Terminators, the Yeti, the T-Rex, Patient Zero and his clones, Roger's
  * pursuers), the UFOs and the mothership, the nuclear plants, the landed
  * ships, buildings -- and tornadoes, which rope out and dissipate. What is
- * swallowed is gone quietly: no death explosion of its own. Never Roger, or
- * the car he is driving.
+ * swallowed is gone quietly: no death explosion of its own. Roger too: inside
+ * the no-escape zone he is killed through the health API (consumeCaster), and
+ * the car he was driving is then taken like any other.
  *
  * Capped for 60 FPS: HOLE.maxCaught drawn in at once, DISSOLVE.maxAtOnce
  * dissolving; anything past either simply shrinks away (HOLE.fadeSeconds).
@@ -208,6 +209,32 @@ export function createBlackHoleSystem(ctx) {
   }
 
   /**
+   * The caster is not exempt (R-031): Roger inside the point of no return is
+   * swallowed -- an instant kill through the health API (R-035), which also
+   * gets him out of his car; the empty car is then taken like any other.
+   * Nothing is added to the pulled or dissolving sets, so the caps of 60 / 6
+   * / 1400 are untouched.
+   * @param {number} x hole centre
+   * @param {number} z hole centre
+   * @param {number} strength how far open the hole is, 0 to 1
+   * @returns {void}
+   */
+  function consumeCaster(x, z, strength) {
+    // A co-op guest inside the zone is swallowed too, whoever cast the hole.
+    if (ctx.systems.net) {
+      ctx.systems.net.hitGuestsArea(x, z, HOLE.escape * strength, {
+        source: 'blackHole', instantKill: true, title: 'SWALLOWED', sub: 'Crossed the black hole\'s point of no return', position: { x, y: 0, z }
+      });
+    }
+    const roger = ctx.systems.heroMode && ctx.systems.heroMode.rogerTarget();
+    if (!roger || Math.hypot(roger.x - x, roger.z - z) > HOLE.escape * strength) return;
+    ctx.systems.health.damagePlayer({
+      source: 'blackHole', instantKill: true, title: 'SWALLOWED', sub: 'Roger crossed the black hole\'s point of no return',
+      position: { x, y: 0, z }
+    });
+  }
+
+  /**
    * Who and what crosses the line, and the wind beyond it.
    * @param {number} dt
    * @returns {void}
@@ -216,6 +243,7 @@ export function createBlackHoleSystem(ctx) {
     if (!hole) return;
     const { x, z } = hole;
     const strength = hole.size;
+    consumeCaster(x, z, strength);
     ctx.systems.consumables.each(x, z, HOLE.influence, (target, d, make, family) => {
       if (held.has(target)) return;
       if (d <= HOLE.escape * strength) {

@@ -47,6 +47,7 @@ This matters because environment setup, damage, debris, and UI all depend on cor
 - `engine/heroWeapons.js` holds the weapon wheel and close-up models
 
 ### Combat and damage
+- `engine/health/` is Roger's health: `system.js` registers `ctx.systems.health` (auto lifecycle: `initHealth`, `resetHealth`, `disposeHealth`, plus `updateHealth(rawDt)` called by `tornadoEngine.js` after `updateHero`, on real time). It exposes the one player-damage API `damagePlayer`, `health`, `state`, `glow` and `revivePlayer`. Pure helpers sit beside it: `state.js` (regeneration), `melee.js` (touch, wind-up), `dot.js` and `fire.js` (damage over time), `hazards.js` (lava, flood), `friendlyFire.js`, `enemyDamage.js` and `damageTable.js` (weapon x enemy), with every number in `config.js`. Co-op health rides the net snapshot (`hp` rows) and a `playerDamage` event
 - `engine/enemies.js` is the shared registry for enemy kinds and hit acceptance
 - `engine/damage.js` owns damage resolution, collapse logic, and score updates
 - `engine/physics.js` applies force and object motion

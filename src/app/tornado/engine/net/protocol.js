@@ -51,7 +51,7 @@ export const WEAPONS = ['rifle', 'minigun', 'railgun', 'fire', 'blackhole', 'kat
 export const SNAPSHOT_KINDS = ['players', 'tornadoes', 'terminators', 'aliens', 'ships', 'vehicles'];
 
 /** Major events the host may replicate (cosmetic destruction stays local). */
-export const EVENT_TYPES = ['welcome', 'announce', 'notice', 'explosion', 'playerDown', 'playerRevived', 'gameOver', 'score', 'mission'];
+export const EVENT_TYPES = ['welcome', 'announce', 'notice', 'explosion', 'playerDown', 'playerRevived', 'playerDamage', 'gameOver', 'score', 'mission'];
 
 const CODE_RE = new RegExp(`^[${ROOM.codeAlphabet}]{${ROOM.codeLength}}$`);
 
@@ -140,9 +140,15 @@ export function validateInput(msg) {
  *   aliens       [id, x, y, z, heading]
  *   ships        [id, x, y, z, heading]
  *   vehicles     [id, x, z, heading, speed]
+ * Optional `hp` (added with per-player health; absent from older hosts, and
+ * ignored by older clients, which read only the listed fields):
+ *   hp           [id, health 0-100, sinceLastDamage seconds]
+ * The client derives the bar's glow from `sinceLastDamage`; glow itself is
+ * never sent. The players row keeps its nine columns on purpose: a longer
+ * row would fail an older client's strict row-width check.
  * @typedef {{type:'snapshot', v:number, room:string, tick:number, t:number,
  *   score:number, players:number[][], tornadoes:number[][], terminators:number[][],
- *   aliens:number[][], ships:number[][], vehicles:number[][]}} Snapshot
+ *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][]}} Snapshot
  */
 const ROW_WIDTH = { players: 9, tornadoes: 4, terminators: 5, aliens: 5, ships: 5, vehicles: 5 };
 
@@ -169,6 +175,13 @@ export function validateSnapshot(msg) {
       if (kind === 'aliens' || kind === 'ships') {
         if (Math.abs(row[3]) > b) return { ok: false, error: `bound:${kind}` };
       } else if (Math.abs(row[2]) > b) return { ok: false, error: `bound:${kind}` };
+    }
+  }
+  if (msg.hp !== undefined) {
+    if (!Array.isArray(msg.hp) || msg.hp.length > LIMITS.maxPerKind) return { ok: false, error: 'hp' };
+    for (const row of msg.hp) {
+      if (!Array.isArray(row) || row.length !== 3 || !row.every(num)) return { ok: false, error: 'hp' };
+      if (!inRange(row[1], 0, 1000) || row[2] < 0) return { ok: false, error: 'hp' };
     }
   }
   return { ok: true };

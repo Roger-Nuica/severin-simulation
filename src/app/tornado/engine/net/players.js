@@ -15,12 +15,13 @@
  *   - A downed player bleeds out after REVIVE.bleedOut seconds (dead).
  *   - Terminators hunt the nearest *up* player.
  *   - Game over in co-op when no player is up (all down or dead).
- *   - Friendly fire is disabled.
+ *   - Friendly fire is ON (decision D4, PLAN_health-bar.md): a partner's
+ *     weapons, the black hole and explosions can hurt the other player.
  *   - Cars have a driver seat (0) and one passenger seat (1).
  */
 
 export const REVIVE = { range: 3, hold: 5, bleedOut: 30, shield: 2 };
-export const FRIENDLY_FIRE = false;
+export const FRIENDLY_FIRE = true;
 
 /**
  * @typedef {Object} Player
@@ -159,7 +160,7 @@ export function createPlayerRegistry() {
 
   /**
    * Friendly fire policy: a player's hit lands on another *player* only if
-   * FRIENDLY_FIRE is on. Hits on anything else are not this module's call.
+   * FRIENDLY_FIRE is on (it is, since D4). Hits on anything else are not this module's call.
    * @param {string} attackerId @param {string} targetId
    * @returns {boolean}
    */

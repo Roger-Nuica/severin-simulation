@@ -1,6 +1,6 @@
 // @ts-check
 import * as THREE from 'three';
-import { setOffExplosivesAt } from '../../explosives.js';
+import { hitRogerAt, setOffExplosivesAt } from '../../explosives.js';
 import { FACTORY } from './config.js';
 import { BLAST_SIZE } from '../../player/energy.js';
 /** @typedef {import('./config.js').Barrel} Barrel */
@@ -244,6 +244,10 @@ export function createFactoryBlast(ctx, S, api) {
       // it carries on down whichever streets it reached -- and it sets off
       // the tanker if it reaches it (engine/explosives.js).
       setOffExplosivesAt(ctx, at.x, at.z, reach);
+    }
+    // Roger on the wave's front inside the scorched ground is caught in it.
+    if (previous < FACTORY.scorchRadius) {
+      hitRogerAt(ctx, at.x, at.z, Math.min(S.state.shockRadius, FACTORY.scorchRadius));
     }
     if (S.state.shockRadius >= FACTORY.blastRadius && S.state.timer >= FACTORY.mushroomSeconds) {
       S.state.phase = 'done';

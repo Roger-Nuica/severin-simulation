@@ -16,7 +16,8 @@ import { createKatanaTargets } from './targets.js';
  *    horizontal, vertical, which starts over after CHAIN_IDLE seconds idle.
  *  - What it touches: everything inside REACH metres and a forward arc, found
  *    by targets.js (a stacked three-point height test, R-024). Aliens are cut
- *    through the register; every other kind only parries. The strike lands
+ *    through the register; every other kind parries and takes the table's
+ *    chip (a plain `blade` hit, D1: see targets.js). The strike lands
  *    STRIKE_DELAY seconds after the press, at the blade's strike (the
  *    model's wind-up), not at the press.
  *  - The auto-lunge: during that wind-up Roger slides up to LUNGE_MAX metres
@@ -237,7 +238,7 @@ export function createKatanaSlash(ctx, env) {
   }
 
   /**
-   * The blade lands: the cut aliens go through the register, the rest parry.
+   * The blade lands: the cut aliens go through the register, the rest parry and are chipped.
    * @returns {void}
    */
   function land() {

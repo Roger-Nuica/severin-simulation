@@ -34,9 +34,13 @@
  *                               size 0..1 (player/energy.js BLAST_SIZE);
  *                               source is the thing that blew, once each.
  *                               Roger near it takes energy (player/energy.js).
+ *   playerHurt {amount,         Roger lost health and is still alive (never
+ *              position}        an instant kill; health/system.js): the HUD
+ *                               flashes red and points at `position` (an
+ *                               {x, y, z} or null) (hero/screen.js hurtFlash).
  */
 
-export const EVENTS = ['announce', 'notice', 'empPulse', 'rogerKill', 'explosion'];
+export const EVENTS = ['announce', 'notice', 'empPulse', 'rogerKill', 'explosion', 'playerHurt'];
 
 /**
  * @returns {{

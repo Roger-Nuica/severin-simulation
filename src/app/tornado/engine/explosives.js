@@ -29,6 +29,11 @@
  * Each of those does nothing a second time, so it is safe to call every
  * frame a beam is burning.
  *
+ * hitRogerAt is the other half: whoever blows up with a fireball of its own
+ * (tanker, fuel station, gas main, chemical works) kills Roger inside the
+ * radius that owner already uses for its fireball, through the one health
+ * path (heroMode.hitArea -> health.damagePlayer, instant kill, R-035).
+ *
  * A pure function of ctx: no state of its own.
  */
 
@@ -51,4 +56,19 @@ export function setOffExplosivesAt(ctx, x, z, radius) {
   if (s.gasMains) s.gasMains.ruptureAt(x, z, radius, { ignite: true });
   if (s.powerLines) s.powerLines.faultAt(x, z, radius);
   if (s.fuelFire) s.fuelFire.igniteAt(x, z, radius);
+}
+
+/**
+ * Roger caught inside a fireball: an instant kill through the health API
+ * with the "Caught in the blast" card. A no-op outside Hero Mode, and while
+ * he is already dying, so a blast and its secondaries cost him one death.
+ * @param {Object} ctx
+ * @param {number} x
+ * @param {number} z
+ * @param {number} radius the owner's own fireball radius
+ * @returns {void}
+ */
+export function hitRogerAt(ctx, x, z, radius) {
+  const hero = ctx.systems.heroMode;
+  if (hero) hero.hitArea(x, z, radius, 'BLOWN UP', 'Caught in the blast', 'explosion');
 }

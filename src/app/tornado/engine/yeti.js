@@ -79,8 +79,10 @@ export const YETI = {
   gunHalfAngle: 0.2,
   gunTick: 0.25,
   hp: 30,
-  // Only fire hurts it now (Roger's Fire Gun, on request): plasma, the
-  // minigun and the railgun do nothing. An EMP still stuns it, for no hurt.
+  // Fire is its weakness (Roger's Fire Gun, on request). Since D1 every other
+  // weapon chips its health too, through the register's weapon x enemy
+  // table (health/damageTable.js: 0.6 of 30 a hit). An EMP still stuns it,
+  // for no hurt of its own.
   // A burst of the Fire Gun (a tick every 0.25 s) takes `fire`.
   damage: { fire: 1.2, emp: 0 },
   empStun: 3,
@@ -266,6 +268,22 @@ export function createYetiSystem(ctx) {
   }
 
   /**
+   * Its health is used up, by fire, an EMP or any other weapon (D1): it
+   * falls, scored once.
+   * @param {Yeti} y
+   * @returns {boolean} true, it is down
+   */
+  function fell(y) {
+    if (y.phase === 'falling' || y.phase === 'dead') return true;
+    y.phase = 'falling';
+    ctx.systems.creatureSounds.play('yetiDeath', y.root.position, { size: SOUND_SIZE, shake: 0.4 });
+    y.timer = 0;
+    ctx.systems.damage.addDamageScore(YETI.score);
+    showBanner('YETI DOWN!', `The cyber Yeti falls · +${YETI.score} bonus`);
+    return true;
+  }
+
+  /**
    * @param {Yeti} y
    * @param {import('./enemies.js').Hit} hit
    * @returns {boolean} whether it is down
@@ -274,14 +292,7 @@ export function createYetiSystem(ctx) {
     if (y.phase === 'falling' || y.phase === 'dead') return true;
     const d = YETI.damage;
     y.hp -= hit.type === 'fire' ? d.fire : hit.type === 'emp' ? d.emp : 0;
-    if (y.hp <= 0) {
-      y.phase = 'falling';
-      ctx.systems.creatureSounds.play('yetiDeath', y.root.position, { size: SOUND_SIZE, shake: 0.4 });
-      y.timer = 0;
-      ctx.systems.damage.addDamageScore(YETI.score);
-      showBanner('YETI DOWN!', `The cyber Yeti falls · +${YETI.score} bonus`);
-      return true;
-    }
+    if (y.hp <= 0) return fell(y);
     if (hit.type === 'emp') {
       y.phase = 'stunned';
       y.timer = 0;
@@ -387,9 +398,15 @@ export function createYetiSystem(ctx) {
       kind: 'yeti',
       list: () => (yeti && (yeti.phase === 'walking' || yeti.phase === 'stunned') ? [yeti] : []),
       position: (y) => y.root.position,
-      // Fire (Roger's Fire Gun) kills it; an EMP stuns it. Nothing else.
+      // Fire (Roger's Fire Gun) is its weakness (1.2 a tick of 30) and an EMP
+      // stuns it. Every other weapon now chips its health (D1,
+      // health/damageTable.js) and `defeat` drops it when that is used up.
       accepts: ['fire', 'emp'],
       damage: (y, hit) => damage(y, hit),
+      defeat: (y) => {
+        y.hp = 0;
+        return fell(y);
+      },
       hitbox: (y) => ({ x: y.root.position.x, z: y.root.position.z, radius: YETI.height * YETI.hitboxRadius, top: YETI.height }),
       size: () => YETI.height,
       // The black hole: gone, with no fall of its own.
@@ -534,7 +551,11 @@ export function createYetiSystem(ctx) {
       y.swing = 0.5;
       ctx.systems.creatureSounds.play('yetiRoar', p, { size: SOUND_SIZE, shake: 0.3 });
       const frozenRoger = hero.rogerFrozen();
-      hero.killRoger(frozenRoger ? 'SHATTERED' : 'MAULED', frozenRoger ? 'The Yeti smashed frozen Roger' : 'The cyber Yeti got hold of Roger');
+      ctx.systems.health.damagePlayer({
+        source: 'yeti', instantKill: true, position: { x: p.x, y: 0, z: p.z },
+        title: frozenRoger ? 'SHATTERED' : 'MAULED',
+        sub: frozenRoger ? 'The Yeti smashed frozen Roger' : 'The cyber Yeti got hold of Roger'
+      });
     }
     y.swing = Math.max(0, y.swing - dt);
     const s = Math.sin(y.stride);

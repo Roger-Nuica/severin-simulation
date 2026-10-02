@@ -35,7 +35,9 @@ import { createTerminatorHits } from './terminator/hits.js';
  * so they count among the dead in the humans readout).
  *
  * With Hero Mode on (engine/heroMode.js) the squad comes for Roger instead
- * of the townspeople: straight at him, and reaching him is the end of him.
+ * of the townspeople: straight at him. Each one winds up its arm inside 6 m and
+ * strikes for 50 within 2 m; two touches kill (health/melee.js,
+ * terminator/telegraph.js).
  * His plasma rifle knocks one back; a mega beam (the two-second charge)
  * takes it down for good, the same way the EMP does.
  *
@@ -144,7 +146,9 @@ export function createTerminatorSystem(ctx) {
       }, { signal: ctx.signal });
     }
     // In the shared register of enemies (engine/enemies.js): the plasma
-    // rifle, the minigun, lightning and an EMP stop one.
+    // rifle, the minigun, lightning and an EMP stop one (its weaknesses, in
+    // `accepts`). Every other weapon chips its health (D1, health/damageTable.js)
+    // and `defeat` takes it down, as an EMP would, when it is used up.
     ctx.systems.enemies.registerKind({
       kind: 'terminator',
       list: api.walkingUnits,
@@ -155,6 +159,11 @@ export function createTerminatorSystem(ctx) {
         if (hit.type === 'plasma') api.plasmaHit(unit, !!hit.mega, hit.at || p);
         else if (hit.type === 'bullet') api.bulletHit(unit, MINIGUN.terminatorHits);
         else api.empSweep(p.x, p.z, 0.01);
+        return unit.phase !== 'walking';
+      },
+      defeat: (unit) => {
+        const p = unit.root.position;
+        api.empSweep(p.x, p.z, 0.01);
         return unit.phase !== 'walking';
       },
       // The black hole: gone, with no shutdown of its own.

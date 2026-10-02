@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { setOffExplosivesAt } from './explosives.js';
 import { ALIENS } from './aliens/config.js';
+import { tableDamage } from './health/enemyDamage.js';
 
 /**
  * ===========================================================================
@@ -267,6 +268,35 @@ export function createStrikeTargetingSystem(ctx) {
           if (Math.hypot(p.x - x, p.z - z) < reach && s.enemies.hit(h, hunterKind, { type: 'bolt', at: { x, z } }) && roger) {
             // Only a hit that downs it: breaks Smooth Criminal's spell, as the minigun's does.
             ctx.events.emit('rogerKill');
+          }
+        }
+      }
+    }
+
+    // The alien ship (the UFO is not in the register): a bolt landing under it
+    // chips its hull by the table (D1), seen as its disc from above.
+    if (s.aliens) {
+      for (const ship of s.aliens.shipTargets()) {
+        if (ship.name === 'UFO' && Math.hypot(ship.x - x, ship.z - z) < ship.radius && ship.hit(tableDamage('ufo', { type: 'bolt' })) === 0 && roger) {
+          ctx.events.emit('rogerKill');
+        }
+      }
+    }
+
+    // The mothership (D3): the same chip as the UFO's, by its disc from above.
+    const mother = s.mothership && s.mothership.shipTarget();
+    if (mother && Math.hypot(mother.x - x, mother.z - z) < mother.radius && mother.hit(tableDamage('mothership', { type: 'bolt' })) === 0 && roger) {
+      ctx.events.emit('rogerKill');
+    }
+    // Roger's railgun only (the Lightning tile's strikes leave the reactors and
+    // funnels as they were): a bolt chips the reactor it lands on, and a funnel.
+    if (roger) {
+      if (s.nuclear) s.nuclear.chipAt(x, z, STRIKE.faultRadius, { type: 'bolt' });
+      if (s.heroMode) {
+        for (const { Vortex } of ctx.tornadoes.active) {
+          if (Vortex.neutralized || Vortex.birth < 0.5) continue;
+          if (Math.hypot(Vortex.center.x - x, Vortex.center.z - z) < Sim.params.radius * (Vortex.sizeMul || 1) * 0.9) {
+            s.heroMode.chipTornado(Vortex, { type: 'bolt' });
           }
         }
       }

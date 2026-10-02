@@ -53,6 +53,8 @@ export const PAD = 0.6 * T800.scale * 0.3;
  * @property {'walking'|'dying'|'taken'|'dead'} phase
  * @property {Object|null} foe the alien it is going for, if any
  * @property {number} strikeTimer seconds until it can strike again
+ * @property {import('../health/melee.js').TouchState} touch its melee cooldown against Roger (health/melee.js)
+ * @property {number} touchClock world seconds it has been walking, the clock of `touch`
  * @property {number} heading
  * @property {number} cycle
  * @property {number} timer

@@ -5,6 +5,8 @@ import { TREX } from './trex/config.js';
 import { createTrexModel } from './trex/model.js';
 import { createTrexFlames } from './trex/flames.js';
 import { BLAST_SIZE } from './player/energy.js';
+import { HEALTH } from './health/config.js';
+import { IDLE_DOT, stepDot, dotAmount } from './health/dot.js';
 
 // How big it sounds (sound/creatures.js): the deepest of all, heard from
 // farthest.
@@ -75,6 +77,7 @@ export function createTrexSystem(ctx) {
    * @property {number} breathCooldown
    * @property {number} stride walk-cycle phase
    * @property {number} igniteTimer
+   * @property {import('./health/dot.js').DotState} burn damage-over-time accumulator against Roger
    * @property {number} retarget
    * @property {{x: number, z: number, building?: SimObject}|null} target
    * @property {Set<SimObject>} shaken buildings it has already walked into
@@ -131,7 +134,7 @@ export function createTrexSystem(ctx) {
     Sim.three.scene.add(rig.root);
     rex = {
       rig, heading, hp: TREX.hp, phase: 'walking', timer: 0,
-      breathCooldown: 2, stride: 0, igniteTimer: 0, retarget: 0, target: null,
+      breathCooldown: 2, stride: 0, igniteTimer: 0, burn: IDLE_DOT, retarget: 0, target: null,
       shaken: new Set(), hitFlash: 0
     };
     showBanner('CYBER T-REX!', 'Flames that set the town alight · plasma, minigun and an EMP stop it');
@@ -215,10 +218,32 @@ export function createTrexSystem(ctx) {
         if (inCone(r, q.x, q.z, range)) enemies.hit(alien, kind, { type: 'fire', at: q });
       }
     }
-    const roger = ctx.systems.heroMode && ctx.systems.heroMode.rogerTarget();
-    if (roger && inCone(r, roger.x, roger.z, range * 0.9)) {
-      ctx.systems.heroMode.killRoger('TOASTED', 'The cyber T-Rex\'s flames caught Roger');
-    }
+  }
+
+  /**
+   * Roger in the cone burns: `trexFlame` (about 33 a second) as ticks from
+   * the shared accumulator (health/dot.js), every frame it breathes, not on
+   * the slower ignite check. Out of the cone, or out of breath, it stops at
+   * once. The lethal tick carries the TOASTED card. Allocation-free.
+   * @param {Rex} r
+   * @param {number} range metres: the flame's, or less where it meets the frost
+   * @param {number} dt
+   * @returns {void}
+   */
+  function burnRoger(r, range, dt) {
+    const hero = ctx.systems.heroMode;
+    const roger = r.phase === 'breathing' && hero ? hero.rogerTarget() : null;
+    const next = stepDot(r.burn, roger !== null && inCone(r, roger.x, roger.z, range * 0.9), dt, HEALTH.dot.interval);
+    r.burn = next.state;
+    if (next.ticks === 0) return;
+    ctx.systems.health.damagePlayer({
+      source: 'trexFlame',
+      amount: dotAmount(HEALTH.damage.trexFlame.amount, HEALTH.dot.interval, next.ticks),
+      type: 'fire',
+      position: r.rig.root.position,
+      title: 'TOASTED',
+      sub: 'The cyber T-Rex\'s flames caught Roger',
+    });
   }
 
   /**
@@ -382,6 +407,14 @@ export function createTrexSystem(ctx) {
       position: (r) => r.rig.root.position,
       accepts: ['plasma', 'bullet', 'bolt', 'emp', 'blade'],
       damage: (r, hit) => damage(r, hit),
+      // Out of health (D1, health/damageTable.js: every other weapon, the
+      // Katana and fire included, chips it): it falls as at 0 hp.
+      defeat: (r) => {
+        if (r.phase === 'falling' || r.phase === 'dead') return true;
+        r.hp = 0;
+        fall(r);
+        return true;
+      },
       hitbox: (r) => ({ x: r.rig.root.position.x, z: r.rig.root.position.z, radius: TREX.hitboxRadius * TREX.height, top: TREX.height }),
       size: () => TREX.length,
       // The black hole: gone, with no fall of its own.
@@ -479,6 +512,7 @@ export function createTrexSystem(ctx) {
         x: mouth.x + dir.x * range * 0.4, y: Math.max(4, mouth.y + dir.y * range * 0.4), z: mouth.z + dir.z * range * 0.4,
         colour: 0xff7a2a, intensity: 7, distance: range * 2.2, priority: 5
       });
+      burnRoger(r, range, dt);
       r.igniteTimer -= dt;
       if (r.igniteTimer <= 0) {
         r.igniteTimer = TREX.igniteEvery;
@@ -492,6 +526,7 @@ export function createTrexSystem(ctx) {
         r.breathCooldown = lo + Math.random() * (hi - lo);
       }
     } else {
+      r.burn = IDLE_DOT;
       const aim = foe ? clash.standoff() + 12 : TREX.flameAim;
       if (dist < aim && Math.abs(turn) < 0.3 && (r.breathCooldown <= 0 || foe)) {
         // A roar before the fire, now and then.
