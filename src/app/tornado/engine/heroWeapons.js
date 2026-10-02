@@ -226,7 +226,11 @@ export function createHeroWeapons(ctx, hero) {
   });
   const blade = createKatanaBlade(ctx, { canAct: hero.katanaBody.canAct, cut: bladeCut.resolve });
   /** Blade Mode's vignette, alien highlights and cut line (hero/katana/bladeUi.js): one per simulation, cleared in katanaCancel and endRun, freed in dispose. */
-  const bladeUi = createKatanaBladeUi(ctx, { active: blade.active, input: () => katana, position: hero.katanaBody.position });
+  /** First person with the Katana in hand (set each frame in `update`): the cut line is drawn while the left button is dragged. */
+  let tracing = false;
+  const bladeUi = createKatanaBladeUi(ctx, {
+    active: blade.active, input: () => katana, position: hero.katanaBody.position, tracing: () => tracing
+  });
   const muzzleAt = new THREE.Vector3();
   /** @type {THREE.Mesh|null} the railgun's ring on the ground */
   let reticle = null;
@@ -536,7 +540,7 @@ export function createHeroWeapons(ctx, hero) {
       : w === 'railgun' ? ' · click to call a bolt down'
         : w === 'fire' ? ' · hold to burn · the only thing the Yeti fears'
           : w === 'blackhole' ? ` · ${HOLE.cost * 10}% energy a shot`
-            : w === 'katana' ? ' · drawn · RIGHT-CLICK for first person · click or swipe to cut · Q: Blade Mode' : '';
+            : w === 'katana' ? ' · drawn · RIGHT-CLICK for first person · hold the left button and drag a line to cut along it' : '';
     hero.flashMessage(`${WEAPON_NAMES[w]}${extra}`);
   }
 
@@ -925,7 +929,9 @@ export function createHeroWeapons(ctx, hero) {
     blade.update(rawDt);
     // The quick slash's cooldown, wind-up and lunge, on the same real clock.
     slash.update(rawDt);
-    // Blade Mode's vignette, highlights and cut line follow the virtual cursor (real time).
+    // Blade Mode's vignette, highlights and cut line follow the virtual cursor
+    // (real time); in first person the line also shows while a cut is dragged.
+    tracing = aiming && current() === 'katana' && katana.drawn;
     bladeUi.update(rawDt);
     // The cut halves fly, bounce and fade on the world clock (slow motion applies).
     if (pieces) pieces.update(rawDt * ctx.systems.time.scale('world'));

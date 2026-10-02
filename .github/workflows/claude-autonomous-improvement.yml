@@ -1,0 +1,676 @@
+name: Claude Autonomous Improvement (Guarded)
+
+# Manual dispatch only. There is deliberately no schedule.
+#
+# One Claude Code Action invocation adopts the Scout, Reviewer, Planner and
+# (optionally) Coder roles in strict sequence, writing artifacts to disk
+# between stages. Deterministic steps before and after it enforce the limits
+# that a prompt alone cannot: the allowed write paths, one subtask at most,
+# and lint + build before anything may stay marked DONE.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to produce"
+        required: true
+        type: choice
+        default: propose_only
+        options:
+          - propose_only
+          - plan_only
+          - plan_and_implement_one_subtask
+
+      optional_focus:
+        description: 'Optional focus, e.g. "performance", "bugs", "accessibility" or "tests"'
+        required: false
+        type: string
+        default: ""
+
+      branch_name:
+        description: "Optional new branch name; leave empty for auto/improvement-run-<run_id>-<attempt>"
+        required: false
+        type: string
+        default: ""
+
+      allow_implementation:
+        description: "Allow one subtask to be implemented (only used by plan_and_implement_one_subtask)"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: claude-autonomous-improvement
+  cancel-in-progress: false
+
+jobs:
+  improve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Resolve and validate configuration
+        id: cfg
+        env:
+          MODE_INPUT: ${{ inputs.mode }}
+          FOCUS_INPUT: ${{ inputs.optional_focus }}
+          BRANCH_INPUT: ${{ inputs.branch_name }}
+          ALLOW_INPUT: ${{ inputs.allow_implementation }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+
+          case "$MODE_INPUT" in
+            propose_only|plan_only|plan_and_implement_one_subtask) ;;
+            *)
+              echo "Unsupported mode: $MODE_INPUT" >&2
+              exit 1
+              ;;
+          esac
+
+          # Implementation needs BOTH the mode and the explicit boolean.
+          # Otherwise the run is downgraded to planning only.
+          implement="false"
+          effective_mode="$MODE_INPUT"
+          if [[ "$MODE_INPUT" == "plan_and_implement_one_subtask" ]]; then
+            if [[ "$ALLOW_INPUT" == "true" ]]; then
+              implement="true"
+            else
+              effective_mode="plan_only"
+              echo "allow_implementation is false: downgrading to plan_only."
+            fi
+          fi
+
+          # The focus ends up inside the prompt. Keep it to one short line of
+          # plain text: no newlines, backticks, dollar signs or backslashes.
+          focus="$(printf '%s' "$FOCUS_INPUT" | tr -d '\r\n`$\\' | cut -c1-200)"
+
+          if [[ -n "$BRANCH_INPUT" ]]; then
+            branch_name="$BRANCH_INPUT"
+            git check-ref-format --branch "$branch_name" >/dev/null
+          else
+            branch_name="auto/improvement-run-${RUN_ID}-${RUN_ATTEMPT}"
+          fi
+
+          run_key="${RUN_ID}-${RUN_ATTEMPT}"
+
+          {
+            echo "requested_mode=$MODE_INPUT"
+            echo "effective_mode=$effective_mode"
+            echo "implement=$implement"
+            echo "focus=$focus"
+            echo "branch_name=$branch_name"
+            echo "run_key=$run_key"
+            echo "report_path=docs/auto-improvements/run-${run_key}.md"
+            echo "plan_path=PLAN_auto-improvement-${run_key}.md"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Autonomous improvement run"
+            echo ""
+            echo "- Requested mode: \`$MODE_INPUT\`"
+            echo "- Effective mode: \`$effective_mode\`"
+            echo "- Implementation permitted: \`$implement\`"
+            echo "- Focus: ${focus:-none}"
+            echo "- Branch: \`$branch_name\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Create new isolated branch from default branch
+        env:
+          BRANCH_NAME: ${{ steps.cfg.outputs.branch_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "claude-improvement-bot"
+          git config user.email "claude-improvement-bot@users.noreply.github.com"
+
+          git fetch origin "$DEFAULT_BRANCH"
+
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; then
+            echo "Branch already exists: $BRANCH_NAME" >&2
+            echo "This workflow requires a new branch for every run." >&2
+            exit 1
+          fi
+
+          git switch -c "$BRANCH_NAME" "origin/$DEFAULT_BRANCH"
+          mkdir -p docs/auto-improvements
+
+      - name: Set up Node
+        if: steps.cfg.outputs.implement == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.cfg.outputs.implement == 'true'
+        run: npm ci
+
+      - name: Require Anthropic API secret
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [[ -z "$ANTHROPIC_API_KEY" ]]; then
+            echo "Repository secret ANTHROPIC_API_KEY is required." >&2
+            exit 1
+          fi
+
+      - name: Run the Scout, Reviewer, Planner and Coder roles in sequence
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+          # Why acceptEdits plus an allowlist rather than bypassPermissions:
+          # a GitHub-hosted runner has nobody to approve prompts, so edits and
+          # commands must be pre-approved. acceptEdits lets Claude write files;
+          # the allowlist limits shell use to read-only git, listing and
+          # searching, and the project's own npm lint/build/test commands. It
+          # cannot run git commit or push, gh, curl or arbitrary scripts; the
+          # workflow commits and opens the pull request itself. If a needed
+          # command is denied, show_full_output makes the refusal visible.
+          claude_args: >-
+            --max-turns 80
+            --permission-mode acceptEdits
+            --allowedTools "Read,Write,Edit,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git ls-files:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*),Bash(wc:*),Bash(mkdir:*),Bash(node --test:*),Bash(npx eslint:*),Bash(npm test),Bash(npm run lint),Bash(npm run build)"
+
+          # Makes the actual reason visible if Claude stops or is blocked.
+          show_full_output: true
+
+          prompt: |
+            Run the guarded improvement pipeline defined in
+            .claude/skills/autonomous-improvement-run/SKILL.md. Read that skill
+            first and follow it exactly.
+
+            Run parameters:
+            - Requested mode: ${{ steps.cfg.outputs.requested_mode }}
+            - Effective mode: ${{ steps.cfg.outputs.effective_mode }}
+            - Implementation permitted: ${{ steps.cfg.outputs.implement }}
+            - Optional focus: ${{ steps.cfg.outputs.focus }}
+            - Run key (run id and attempt): ${{ steps.cfg.outputs.run_key }}
+            - Report file to create: ${{ steps.cfg.outputs.report_path }}
+            - Plan file to create if a new plan is needed: ${{ steps.cfg.outputs.plan_path }}
+
+            Adopt these roles one at a time, in strict order, and write each
+            stage's artifact to disk before starting the next. Each later role
+            must read the earlier artifact from disk.
+            1. Scout: .claude/agents/improvement-scout.md. Exactly five
+               candidates, with evidence.
+            2. Reviewer: .claude/agents/improvement-reviewer.md. Score the
+               candidates, select exactly one (or none), and explain why the
+               other four were rejected or deferred. Prefer existing approved
+               plans over invented work. Reject or defer anything that needs an
+               unresolved decision, approval, manual testing or credentials.
+            3. Planner: .claude/agents/improvement-planner.md. Skip this stage
+               if the effective mode is propose_only.
+            4. Coder: .claude/agents/coder.md. Only if the effective mode is
+               plan_and_implement_one_subtask AND implementation is permitted
+               AND every eligibility condition in the skill holds. Implement
+               ONLY the first dependency-ready subtask. Never a second one.
+               Run focused checks, then npm run lint and npm run build, before
+               marking that one subtask DONE. If the effective mode is
+               propose_only or plan_only, or implementation is not permitted,
+               do not edit any source file.
+            5. Report: write STATUS_AUTO_RUN.md (starting with the exact
+               key: value header the skill specifies) and the report file named
+               above. Never overwrite another run's report.
+
+            Do not run git commit, git push, gh, or any network command; the
+            workflow commits and opens the pull request. Do not edit anything
+            under .github/ or .claude/, package.json, package-lock.json or
+            .env files. Do not raise any cap. Do not claim a browser, visual,
+            manual, production or security check that was not performed; this
+            is a headless runner. For gated or manual-only work, generate the
+            proposal and plan and set NEEDS_APPROVAL or BLOCKED.
+
+            Use British English in all documentation.
+
+      - name: Enforce the write scope for this mode
+        id: guard
+        env:
+          IMPLEMENT: ${{ steps.cfg.outputs.implement }}
+          EFFECTIVE_MODE: ${{ steps.cfg.outputs.effective_mode }}
+        run: |
+          set -euo pipefail
+
+          violations_file="$RUNNER_TEMP/scope-violations.txt"
+          : > "$violations_file"
+          code_changed="false"
+
+          # Previous reports are history: never modified or deleted.
+          # Everything else is judged per file below.
+          while IFS= read -r -d '' file; do
+            allowed="false"
+            is_docs_or_plan="false"
+
+            case "$file" in
+              docs/auto-improvements/*|STATUS_AUTO_RUN.md)
+                is_docs_or_plan="true"
+                ;;
+              PLAN_*.md)
+                is_docs_or_plan="true"
+                ;;
+            esac
+
+            case "$file" in
+              # Never writable in any mode.
+              .github/*|.claude/*|package.json|package-lock.json|.env|.env.*)
+                allowed="false"
+                ;;
+              docs/auto-improvements/*)
+                # Only brand-new files; tracked ones are history.
+                if git ls-files --error-unmatch -- "$file" >/dev/null 2>&1; then
+                  allowed="false"
+                else
+                  allowed="true"
+                fi
+                ;;
+              STATUS_AUTO_RUN.md)
+                allowed="true"
+                ;;
+              PLAN_*.md)
+                if [[ "$EFFECTIVE_MODE" == "propose_only" ]]; then
+                  allowed="false"
+                else
+                  allowed="true"
+                fi
+                ;;
+              *)
+                if [[ "$IMPLEMENT" == "true" ]]; then
+                  allowed="true"
+                else
+                  allowed="false"
+                fi
+                ;;
+            esac
+
+            if [[ "$allowed" == "true" ]]; then
+              if [[ "$is_docs_or_plan" == "false" ]]; then
+                code_changed="true"
+              fi
+              continue
+            fi
+
+            echo "$file" >> "$violations_file"
+            if git ls-files --error-unmatch -- "$file" >/dev/null 2>&1; then
+              git checkout HEAD -- "$file"
+            else
+              rm -rf -- "$file"
+            fi
+          done < <(git ls-files -z --modified --deleted --others --exclude-standard)
+
+          violations="$(wc -l < "$violations_file" | tr -d ' ')"
+
+          if [[ "$violations" != "0" ]]; then
+            echo "Reverted changes outside the permitted scope:"
+            cat "$violations_file"
+          fi
+
+          {
+            echo "violations=$violations"
+            echo "code_changed=$code_changed"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Validate status header and the one-subtask rule
+        id: status
+        env:
+          IMPLEMENT: ${{ steps.cfg.outputs.implement }}
+          CODE_CHANGED: ${{ steps.guard.outputs.code_changed }}
+          REPORT_PATH: ${{ steps.cfg.outputs.report_path }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const { execFileSync } = require('node:child_process');
+
+          const STATUS_PATH = 'STATUS_AUTO_RUN.md';
+          const VALID = new Set(['DONE', 'STOPPED', 'BLOCKED', 'NEEDS_APPROVAL']);
+          const HEADING = /^- \[([ x])\](?: DONE)? \*\*Subtask (\d+)[^\n]*$/gm;
+
+          /**
+           * @param {string} text file contents
+           * @param {string} key header key
+           * @returns {string | null} the trimmed value, or null when absent
+           */
+          const readHeader = (text, key) => {
+            const match = text.match(new RegExp(`^${key}:[ \\t]*(.+)$`, 'mi'));
+            return match ? match[1].trim() : null;
+          };
+
+          /**
+           * @param {string} text file contents
+           * @param {string} key header key
+           * @param {string} value new value
+           * @returns {string} text with the header replaced, or prepended when absent
+           */
+          const writeHeader = (text, key, value) => {
+            const pattern = new RegExp(`^${key}:[ \\t]*.*$`, 'mi');
+            return pattern.test(text)
+              ? text.replace(pattern, `${key}: ${value}`)
+              : `${key}: ${value}\n${text}`;
+          };
+
+          /**
+           * @param {string} text plan contents
+           * @returns {ReadonlyMap<number, boolean>} subtask number to done flag
+           */
+          const doneMap = text =>
+            new Map([...text.matchAll(HEADING)].map(m => [Number(m[2]), m[1] === 'x']));
+
+          /**
+           * @param {string} path plan path
+           * @returns {string} the plan as committed on the base branch, or '' when new
+           */
+          const baseText = path => {
+            try {
+              return execFileSync('git', ['show', `HEAD:${path}`], { encoding: 'utf8' });
+            } catch {
+              return '';
+            }
+          };
+
+          /**
+           * @param {string} text plan contents
+           * @param {number} id subtask number
+           * @returns {string} plan with that subtask's heading reset to not done
+           */
+          const unmark = (text, id) =>
+            text.replace(
+              new RegExp(`^- \\[x\\](?: DONE)? (\\*\\*Subtask ${id}\\b[^\\n]*)$`, 'm'),
+              '- [ ] $1',
+            );
+
+          const implement = process.env.IMPLEMENT === 'true';
+          const codeChanged = process.env.CODE_CHANGED === 'true';
+          const notes = [];
+
+          let text = fs.existsSync(STATUS_PATH)
+            ? fs.readFileSync(STATUS_PATH, 'utf8')
+            : '';
+
+          if (text === '') {
+            notes.push('Claude did not write STATUS_AUTO_RUN.md; the workflow created it.');
+            text = '# Automated improvement run\n';
+          }
+
+          let status = (readHeader(text, 'Status') ?? '').toUpperCase();
+          if (!VALID.has(status)) {
+            notes.push(`Status header missing or invalid ("${status}"); set to STOPPED.`);
+            status = 'STOPPED';
+          }
+
+          const rawPlan = readHeader(text, 'Plan path');
+          const planPath =
+            rawPlan &&
+            /^PLAN_[A-Za-z0-9_.-]+\.md$/.test(rawPlan) &&
+            fs.existsSync(rawPlan)
+              ? rawPlan
+              : null;
+
+          const rawSubtask = readHeader(text, 'Implemented subtask');
+          let subtask = rawSubtask && /^\d+$/.test(rawSubtask) ? Number(rawSubtask) : null;
+
+          if (!implement && subtask !== null) {
+            notes.push('A subtask was reported although implementation is not permitted; ignored.');
+            subtask = null;
+          }
+
+          if (subtask !== null && planPath === null) {
+            notes.push('An implemented subtask was reported without a valid plan path.');
+            subtask = null;
+            status = 'BLOCKED';
+          }
+
+          // One subtask at most: compare ticked subtasks against the base branch.
+          if (implement && planPath !== null) {
+            const before = doneMap(baseText(planPath));
+            const plan = fs.readFileSync(planPath, 'utf8');
+            const now = doneMap(plan);
+            const newlyDone = [...now.entries()]
+              .filter(([id, done]) => done && !before.get(id))
+              .map(([id]) => id);
+
+            const consistent =
+              newlyDone.length === 0
+                ? subtask === null
+                : newlyDone.length === 1 && newlyDone[0] === subtask;
+
+            if (!consistent) {
+              const reset = newlyDone.reduce(unmark, plan);
+              fs.writeFileSync(planPath, reset);
+              notes.push(
+                `Plan ticks (${newlyDone.join(', ') || 'none'}) do not match the reported implemented subtask (${subtask ?? 'none'}). Newly ticked subtasks were un-marked.`,
+              );
+              status = 'BLOCKED';
+              subtask = null;
+            }
+          }
+
+          const implemented = subtask !== null;
+
+          if (implement && codeChanged && !implemented) {
+            notes.push('Source files changed but no implemented subtask was recorded; lint and build will still run.');
+            status = 'BLOCKED';
+          }
+
+          text = writeHeader(text, 'Status', status);
+          text = writeHeader(text, 'Plan path', planPath ?? 'none');
+          text = writeHeader(text, 'Implemented subtask', subtask === null ? 'none' : String(subtask));
+          text = writeHeader(text, 'Report path', process.env.REPORT_PATH);
+
+          if (notes.length > 0) {
+            text += `\n## Workflow validation notes\n${notes.map(n => `- ${n}`).join('\n')}\n`;
+          }
+
+          fs.writeFileSync(STATUS_PATH, text);
+
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            [
+              `status=${status}`,
+              `plan_path=${planPath ?? ''}`,
+              `subtask=${subtask === null ? '' : subtask}`,
+              `implemented=${implemented}`,
+              `run_checks=${implement && (implemented || codeChanged)}`,
+            ].join('\n') + '\n',
+          );
+          NODE
+
+      - name: Run lint
+        id: lint
+        if: steps.status.outputs.run_checks == 'true'
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Run production build
+        id: build
+        if: steps.status.outputs.run_checks == 'true'
+        continue-on-error: true
+        run: npm run build
+
+      - name: Record gate results and finalise the status
+        id: finalise
+        env:
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          VIOLATIONS: ${{ steps.guard.outputs.violations }}
+          STATUS: ${{ steps.status.outputs.status }}
+          PLAN_PATH: ${{ steps.status.outputs.plan_path }}
+          SUBTASK: ${{ steps.status.outputs.subtask }}
+          IMPLEMENTED: ${{ steps.status.outputs.implemented }}
+          REQUESTED_MODE: ${{ steps.cfg.outputs.requested_mode }}
+          EFFECTIVE_MODE: ${{ steps.cfg.outputs.effective_mode }}
+          REPORT_PATH: ${{ steps.cfg.outputs.report_path }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const STATUS_PATH = 'STATUS_AUTO_RUN.md';
+
+          /**
+           * @param {string} text file contents
+           * @param {string} key header key
+           * @param {string} value new value
+           * @returns {string} text with the header replaced, or prepended when absent
+           */
+          const writeHeader = (text, key, value) => {
+            const pattern = new RegExp(`^${key}:[ \\t]*.*$`, 'mi');
+            return pattern.test(text)
+              ? text.replace(pattern, `${key}: ${value}`)
+              : `${key}: ${value}\n${text}`;
+          };
+
+          const lint = process.env.LINT_OUTCOME;
+          const build = process.env.BUILD_OUTCOME;
+          const failed = lint === 'failure' || build === 'failure';
+          const implemented = process.env.IMPLEMENTED === 'true';
+          const violations = Number(process.env.VIOLATIONS || '0');
+          const planPath = process.env.PLAN_PATH;
+          const id = process.env.SUBTASK;
+
+          let status = process.env.STATUS || 'STOPPED';
+          const lines = [
+            `- npm run lint: ${lint === 'skipped' ? 'not run (no code change to validate)' : lint}`,
+            `- npm run build: ${build === 'skipped' ? 'not run (no code change to validate)' : build}`,
+          ];
+
+          if (failed) {
+            status = 'BLOCKED';
+
+            if (implemented && planPath && id) {
+              const plan = fs.readFileSync(planPath, 'utf8');
+              fs.writeFileSync(
+                planPath,
+                plan.replace(
+                  new RegExp(`^- \\[x\\](?: DONE)? (\\*\\*Subtask ${id}\\b[^\\n]*)$`, 'm'),
+                  '- [ ] $1',
+                ),
+              );
+              lines.push(`- Subtask ${id} was un-marked in ${planPath} because a repository gate failed.`);
+            }
+          }
+
+          if (violations > 0) {
+            lines.push(`- ${violations} change(s) outside the permitted scope were reverted by the workflow.`);
+          }
+
+          const section = `\n## Workflow gate results\n${lines.join('\n')}\n`;
+
+          let text = fs.existsSync(STATUS_PATH)
+            ? fs.readFileSync(STATUS_PATH, 'utf8')
+            : '# Automated improvement run\n';
+          text = writeHeader(text, 'Status', status) + section;
+          fs.writeFileSync(STATUS_PATH, text);
+
+          if (fs.existsSync(process.env.REPORT_PATH)) {
+            fs.appendFileSync(
+              process.env.REPORT_PATH,
+              `${section}\n- Final status: ${status}\n`,
+            );
+          } else {
+            fs.mkdirSync('docs/auto-improvements', { recursive: true });
+            fs.writeFileSync(
+              process.env.REPORT_PATH,
+              `# Improvement run (report missing)\n\nClaude did not write this report.\n${section}\n- Final status: ${status}\n`,
+            );
+          }
+
+          const mode = process.env.EFFECTIVE_MODE;
+          const kind =
+            mode === 'propose_only'
+              ? 'proposal only'
+              : implemented && !failed && status !== 'BLOCKED'
+                ? 'includes one implemented subtask'
+                : 'plan only';
+
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `final_status=${status}\nkind=${kind}\n`,
+          );
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            `\n### Result\n- Status: ${status}\n- Pull request kind: ${kind}\n${lines.join('\n')}\n`,
+          );
+          NODE
+
+      - name: Show results
+        run: |
+          echo "Git working tree after the run:"
+          git status --short
+          echo ""
+          echo "STATUS_AUTO_RUN.md:"
+          cat STATUS_AUTO_RUN.md
+
+      - name: Commit run results
+        id: commit
+        env:
+          BRANCH_NAME: ${{ steps.cfg.outputs.branch_name }}
+          RUN_KEY: ${{ steps.cfg.outputs.run_key }}
+          KIND: ${{ steps.finalise.outputs.kind }}
+        run: |
+          set -euo pipefail
+
+          # The scope guard already reverted anything outside the permitted
+          # paths, so staging everything is safe here.
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes were produced."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "- No branch was pushed and no pull request was created (no changes)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git diff --cached --check
+          git commit -m "Auto-improvement run ${RUN_KEY}: ${KIND}"
+          git push --set-upstream origin "$BRANCH_NAME"
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create pull request
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH_NAME: ${{ steps.cfg.outputs.branch_name }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_ID: ${{ github.run_id }}
+          KIND: ${{ steps.finalise.outputs.kind }}
+          FINAL_STATUS: ${{ steps.finalise.outputs.final_status }}
+          REPORT_PATH: ${{ steps.cfg.outputs.report_path }}
+          PLAN_PATH: ${{ steps.status.outputs.plan_path }}
+        run: |
+          set -euo pipefail
+
+          title="Auto-improvement (${KIND}, ${FINAL_STATUS}): run ${RUN_ID}"
+
+          {
+            echo "Automated improvement run ${RUN_ID}: ${KIND}. Final status: \`${FINAL_STATUS}\`."
+            echo ""
+            echo "**Before merging, a human reviewer must read:**"
+            echo ""
+            echo "1. \`STATUS_AUTO_RUN.md\` (status, checks run, decisions still needed);"
+            echo "2. the candidate selection and prioritisation in \`${REPORT_PATH}\`;"
+            echo "3. the plan${PLAN_PATH:+ (\`${PLAN_PATH}\`)} and its decision and approval gates;"
+            echo "4. every changed file in this pull request."
+            echo ""
+            echo "Safety gates and unresolved approvals are not bypassed. Manual, browser and"
+            echo "visual checks were not performed by this headless run."
+          } > "$RUNNER_TEMP/pr-body.md"
+
+          gh pr create \
+            --title "$title" \
+            --body-file "$RUNNER_TEMP/pr-body.md" \
+            --base "$BASE_BRANCH" \
+            --head "$BRANCH_NAME"

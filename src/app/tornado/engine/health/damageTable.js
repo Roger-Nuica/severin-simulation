@@ -80,10 +80,10 @@ const row = (health, strong) =>
 export const WEAPON_VS_ENEMY = Object.freeze({
   // R-034/R-013: plasma, bolt, fire kill an alien; MEGA BEAM kills in the blast; katana slice kills (R-051).
   alien: row(ENEMY_HEALTH.alien, { plasma: 1, mega: 1, bolt: 1, lightning: 1, fire: 1, blade: 1 }),
-  // R-029/R-013: 30 rounds; EMP, Lightning, railgun bolt and MEGA BEAM bring it down.
-  terminator: row(ENEMY_HEALTH.terminator, { mega: 30, bullet: 1, bolt: 30, lightning: 30, emp: 30 }),
+  // R-029/R-013: 30 rounds; EMP, Lightning, railgun bolt and MEGA BEAM bring it down; three katana blows destroy it (R-051).
+  terminator: row(ENEMY_HEALTH.terminator, { mega: 30, bullet: 1, bolt: 30, lightning: 30, emp: 30, blade: 10 }),
   // R-029/R-013: the Hero Mode pursuer shares the Terminator contract.
-  pursuer: row(ENEMY_HEALTH.pursuer, { mega: 30, bullet: 1, bolt: 30, lightning: 30, emp: 30 }),
+  pursuer: row(ENEMY_HEALTH.pursuer, { mega: 30, bullet: 1, bolt: 30, lightning: 30, emp: 30, blade: 10 }),
   // R-037: plasma 3, minigun 0.3, bolt/lightning 8, EMP 6, MEGA BEAM kills.
   trex: row(ENEMY_HEALTH.trex, { plasma: 3, mega: 40, bullet: 0.3, bolt: 8, lightning: 8, emp: 6 }),
   // R-030/R-038: fire 1.2 per tick of 30 HP; EMP stuns only (now a chip).

@@ -184,10 +184,12 @@ export function createHeroMovement(ctx, S, api) {
     // The Katana's rig (hero/katana/model.js) shows the sheath while it is the
     // weapon in hand and takes the arms once it is drawn; a daze or the rifle's
     // aim puts it away at once. It reads the weapons API, never S.state.drawn.
+    // In first person the blade stays at the ready while he walks: the run
+    // carry (blade swung back) would take it out of the view.
     const weapons = S.weapons;
     const katanaHeld = S.katanaRig && weapons
       ? S.katanaRig.step(
-        dt, weapons.current() === 'katana', weapons.katanaState().drawn, frac,
+        dt, weapons.current() === 'katana', weapons.katanaState().drawn, S.state.phase === 'aiming' ? 0 : frac,
         S.state.phase === 'dazed' || (S.state.phase === 'aiming' && !weapons.katanaState().drawn)
       )
       : false;

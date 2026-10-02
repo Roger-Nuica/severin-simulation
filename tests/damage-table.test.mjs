@@ -35,6 +35,14 @@ test('chips follow the single fraction', () => {
   assert.equal(WEAPON_VS_ENEMY.terminator.fire, ENEMY_HEALTH.terminator * CHIP_FRACTION);
 });
 
+test('three katana blows destroy a Terminator or pursuer, two do not (R-051)', () => {
+  ['terminator', 'pursuer'].forEach((k) => {
+    const blade = WEAPON_VS_ENEMY[k].blade;
+    assert.ok(ENEMY_HEALTH[k] - blade * 2 > 0, `${k}: two blows leave it standing`);
+    assert.ok(ENEMY_HEALTH[k] - blade * 3 <= 0, `${k}: three blows bring it down`);
+  });
+});
+
 test('runtime baselines are kept', () => {
   const t = WEAPON_VS_ENEMY;
   assert.equal(ENEMY_HEALTH.terminator / t.terminator.bullet, 30);

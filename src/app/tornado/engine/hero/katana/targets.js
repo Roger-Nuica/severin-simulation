@@ -24,8 +24,8 @@ import { IMPACT_SCORE } from '../../damage/config.js';
  *    parries: the clang and a few sparks. Since decision D1 (every weapon
  *    hurts every enemy) the blow is also a plain `blade` hit with no `cut`
  *    through the register, which chips the enemy's health by the weapon
- *    x enemy table (engine/health/damageTable.js: 0.6 of 30 on a
- *    Terminator, 0.8 of 40 on the T-Rex, and so on). Where that is a kill
+ *    x enemy table (engine/health/damageTable.js: 10 of 30 on a
+ *    Terminator, so three blows destroy it, 0.8 of 40 on the T-Rex, and so on). Where that is a kill
  *    the owner's normal kill path runs and scores it once. The sparks stay
  *    the one pooled burst at its smallest: a chip adds no particles.
  *  - The samurai (friendly support, Q11) are ignored: no parry, no damage.

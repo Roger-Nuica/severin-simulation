@@ -65,10 +65,11 @@ export function createHeroInput(ctx, S, api) {
    *  - mouse wheel: the next or the previous weapon;
    *  - Q E R: the abilities (engine/player/abilities.js) -- Time Slow (Bullet
    *    Time with the minigun), Teleport, EMP -- not while dying, safe or
-   *    driving; with the Katana in hand Q is Blade Mode instead
-   *     (on, and off again by Q), never Time Slow, and costs no energy;
+   *    driving; the Katana keeps Q as Time Slow like every other weapon;
    *  - right button: raise / lower the weapon; left button: fire while it is
-   *    raised;
+   *    raised. With the Katana in first person, the left button held and
+   *    dragged draws the cut line from the crosshair (the look freezes while
+   *    it is held) and letting go cuts along it;
    *  - the mouse moving: looking round while aiming.
    * @returns {void}
    */
@@ -113,10 +114,6 @@ export function createHeroInput(ctx, S, api) {
           } else if (code === 'Escape' && S.weapons.katanaBlade().active()) {
             // Esc ends Blade Mode (in first person it has already lowered the view above).
             S.weapons.katanaCancel();
-          } else if (code === 'KeyQ' && S.weapons.current() === 'katana') {
-            // With the Katana in hand Q is Blade Mode, not Time Slow: no energy,
-            // and nothing at all while dazed or frozen (he cannot act).
-            if ((phase() === 'running' || phase() === 'aiming') && !(S.state.frozen > 0)) S.weapons.katanaBladeToggle();
           } else if ((phase() === 'running' || phase() === 'aiming' || phase() === 'dazed') && !(S.state.frozen > 0)) {
             ctx.systems.abilities.press(code);
           }

@@ -33,6 +33,9 @@ import { inReach } from './targets.js';
  * @property {() => Readonly<{down: boolean, pressX: number, pressY: number, cursorX: number, cursorY: number}>} input
  *   the Katana's live input (heroWeapons.katanaState)
  * @property {() => {x: number, y: number, z: number}} position Roger's position
+ * @property {() => boolean} [tracing] first person with the Katana: the cut
+ *   line is shown while the left button is dragged, Blade Mode or not (no
+ *   vignette or highlights then)
  */
 
 /**
@@ -224,7 +227,16 @@ export function createKatanaBladeUi(ctx, env) {
     wasDown = input.down;
 
     if (!on) {
-      if (drawn.visible) hideLine();
+      // A quick slash being dragged in first person: the line from the
+      // crosshair to the virtual cursor, the cut it will make on release.
+      if (input.down && env.tracing && env.tracing()) {
+        drawn.x1 = input.cursorX;
+        drawn.y1 = input.cursorY;
+        drawn.visible = true;
+        drawLine();
+      } else if (drawn.visible) {
+        hideLine();
+      }
       if (shown > 0) hideMarkers();
       return;
     }
