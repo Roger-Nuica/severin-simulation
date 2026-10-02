@@ -312,7 +312,7 @@ export function createHeroMovement(ctx, S, api) {
 
     // The storm: dazed, never killed.
     if (S.state.dazeImmunity > 0) S.state.dazeImmunity -= dt;
-    if (S.state.phase === 'running' || S.state.phase === 'aiming') {
+    if ((S.state.phase === 'running' || S.state.phase === 'aiming') && !S.state.invincible) {
       for (const { Vortex } of ctx.tornadoes.active) {
         if (Vortex.neutralized || Vortex.birth < 0.3 || S.state.dazeImmunity > 0) continue;
         const reach = Sim.params.radius * HERO.dazeReach * (Vortex.sizeMul || 1) * Vortex.birth;
