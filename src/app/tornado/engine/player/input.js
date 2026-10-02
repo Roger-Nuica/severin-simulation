@@ -20,8 +20,9 @@
  *   left button, Enter  fire (Enter held charges the rifle; Enter at a car's
  *                       door gets in)
  *   mouse wheel         next / previous weapon
- *   Q E R               the abilities (engine/player/abilities.js): Time
- *                       Slow (or Bullet Time with the minigun), Teleport, EMP
+ *   Q E R G             the abilities (engine/player/abilities.js): Time
+ *                       Slow (or Bullet Time with the minigun), Teleport,
+ *                       EMP, the grappling hook (engine/player/grapple.js)
  *   Esc                 lower the weapon; with E and Q, get out of a car
  *   V                   Invincible on / off (hero/input.js)
  *   T                   Landing Support (engine/spaceship/targeting.js, which
@@ -31,7 +32,7 @@
 
 // Keys whose browser default (scrolling, a menu) is stopped while the player
 // has the controls.
-const OWNED_KEYS = new Set(['KeyW', 'KeyS', 'KeyA', 'KeyD', 'Enter', 'NumpadEnter', 'KeyQ', 'KeyE', 'KeyR']);
+const OWNED_KEYS = new Set(['KeyW', 'KeyS', 'KeyA', 'KeyD', 'Enter', 'NumpadEnter', 'KeyQ', 'KeyE', 'KeyR', 'KeyG']);
 const MOVE_KEYS = { KeyW: 'up', KeyS: 'down', KeyA: 'left', KeyD: 'right' };
 
 /**

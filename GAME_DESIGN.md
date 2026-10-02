@@ -64,7 +64,7 @@ Roger arrives at a safe spot and must reach the marked bunker. He can choose bet
 
 Roger has a health bar (100 points) next to his energy and plasma bars. It glows after 4 seconds without damage, starts refilling at 7 seconds and is full about 4 seconds later; any new hit resets the timer. A red vignette, a direction arrow and hurt, heartbeat and recharge sounds tell him how bad it is. The Katana now also hurts other enemies in reach, though only slightly; it never harms nuclear plants, the mothership or tornadoes.
 
-Roger also has Time Slow, Teleport and EMP abilities. Energy comes from explosions and nuclear terminals. Weapons, abilities and enemies have distinct interactions; consult `.claude/rules.md` for the exact combat contracts and values.
+Roger also has Time Slow, Teleport, EMP and a grappling hook (G). The hook flies the way he looks: it reels an alien in to sword's reach, and pulls Roger himself along its cable to a wall or to an enemy too heavy to pull, such as a Terminator or a giant. Energy comes from explosions and nuclear terminals. Weapons, abilities and enemies have distinct interactions; consult `.claude/rules.md` for the exact combat contracts and values.
 
 A tornado can daze Roger or throw him from a car, and debris and ice only daze or freeze him; none of them takes health or is a lethal source.
 

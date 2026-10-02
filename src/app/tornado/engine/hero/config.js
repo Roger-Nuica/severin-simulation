@@ -56,6 +56,9 @@ export const HERO = {
   pitchMin: -0.9,
   pitchMax: 1.1,
   aimWalkSpeed: 4,
+  // The grappling hook's zip (engine/player/grapple.js): how high the hop
+  // along the rope goes at its middle.
+  zipHop: PERSON.height * 0.5,
   // The plasma beam.
   cellCost: 25,                    // % of the cell a shot takes
   cellRecharge: 16,                // %/sec back
