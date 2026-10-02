@@ -9,10 +9,11 @@ import { BLAST_SIZE } from '../player/energy.js';
  * One car exploding where it is, with the fuel-station chain's look
  * (fuelFire/chain.js explode) but without setting off its neighbours: a
  * fireball, a hard shake, the car thrown up and burnt out, anyone standing
- * right beside it killed, and the 'explosion' event (Roger's energy soaks
- * it up, engine/player/energy.js). Shared by the gravity rift
- * (gravityRift.js) and telekinesis (player/telekinesis.js). Never Roger:
- * engine/effects/area.js leaves him out.
+ * right beside it killed, and the 'explosion' event (marked `own`: Roger
+ * caused it, so it does not refill his energy, engine/player/energy.js).
+ * Shared by the gravity rift (gravityRift.js) and telekinesis
+ * (player/telekinesis.js). Never Roger: engine/effects/area.js leaves him
+ * out.
  *
  * A pure function of ctx: no state of its own.
  */
@@ -57,5 +58,7 @@ export function blowUpCar(ctx, car, strength) {
   // After the visit: a death splices the people list.
   for (const person of caught) if (person.mesh.parent) ctx.systems.people.explodePerson(person);
   ctx.systems.damage.addDamageScore(CAR_BLAST.score);
-  ctx.events.emit('explosion', { x: p.x, z: p.z, size: BLAST_SIZE.car, source: car });
+  // `own`: Roger set it off (the Gravitron, telekinesis), so it gives him no
+  // energy (player/energy.js absorb); co-op still shows it (net/system.js).
+  ctx.events.emit('explosion', { x: p.x, z: p.z, size: BLAST_SIZE.car, source: car, own: true });
 }
