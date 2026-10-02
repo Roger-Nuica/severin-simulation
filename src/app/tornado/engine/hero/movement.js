@@ -334,7 +334,7 @@ export function createHeroMovement(ctx, S, api) {
    */
   function rogerTarget() {
     if (!S.Hero.active || !S.roger) return null;
-    if (S.state.phase === 'dying' || S.state.phase === 'won') return null;
+    if (S.state.phase === 'dying' || S.state.phase === 'won' || S.state.coopDown) return null;
     const p = S.roger.mesh.position;
     return { x: p.x, z: p.z, onFoot: S.state.phase !== 'driving' };
   }

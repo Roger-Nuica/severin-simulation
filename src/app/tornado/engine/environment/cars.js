@@ -557,13 +557,13 @@ export function createCarsSystem(ctx) {
    *   'chaseCar_body', 'chaseCar_wheel_fl' and so on
    * @returns {SimObject}
    */
-  function createCar(x, z, namePrefix = 'envCar') {
-    const colour = CAR_BODY_COLOURS[Math.floor(Math.random() * CAR_BODY_COLOURS.length)];
+  function createCar(x, z, namePrefix = 'envCar', rand = Math.random) {
+    const colour = CAR_BODY_COLOURS[Math.floor(rand() * CAR_BODY_COLOURS.length)];
 
     const root = new THREE.Group();
     root.name = namePrefix;
     root.position.set(x, 0, z);
-    root.rotation.y = Math.random() * Math.PI * 2;
+    root.rotation.y = rand() * Math.PI * 2;
 
     // The chassis group carries everything that should lean on the vehicle's
     // suspension. The wheels are deliberately parented to the root instead, so
@@ -621,11 +621,11 @@ export function createCarsSystem(ctx) {
       mesh: root,
       velocity: new THREE.Vector3(),
       angularVelocity: new THREE.Vector3(),
-      mass: 14 + Math.random() * 4,
+      mass: 14 + rand() * 4,
       drag: 0.9,
       rooted: false,
       damageState: 'intact',
-      breakThreshold: 4.0 + Math.random() * 2.0,
+      breakThreshold: 4.0 + rand() * 2.0,
       liftEligible: 0.25,
       pooled: false,
       poolIndex: -1,

@@ -52,16 +52,16 @@ export function createPeopleSystem(ctx) {
    *   to give this figure a unique scene-graph name
    * @returns {SimObject}
    */
-  function createPerson(x, z, index = 0) {
-    const clothing = CLOTHING_COLOURS[Math.floor(Math.random() * CLOTHING_COLOURS.length)];
-    const skin = SKIN_TONES[Math.floor(Math.random() * SKIN_TONES.length)];
+  function createPerson(x, z, index = 0, rand = Math.random) {
+    const clothing = CLOTHING_COLOURS[Math.floor(rand() * CLOTHING_COLOURS.length)];
+    const skin = SKIN_TONES[Math.floor(rand() * SKIN_TONES.length)];
     const clothingMat = new THREE.MeshStandardMaterial({ color: clothing, roughness: 0.9 });
     const skinMat = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.8 });
 
     const root = new THREE.Group();
     root.name = `person_${index}`;
     root.position.set(x, 0, z);
-    root.rotation.y = Math.random() * Math.PI * 2;
+    root.rotation.y = rand() * Math.PI * 2;
 
     // Yaw first, then pitch in the figure's own frame, so the forward lean
     // peopleMotion.js gives a runner tilts along whichever way they face.
@@ -132,7 +132,7 @@ export function createPeopleSystem(ctx) {
       // Lighter than every debris kind bar branch (see DEBRIS_KIND_DEFS) and
       // given a lift-eligibility close to branch's own 0.98 -- people are
       // meant to be among the very first things the vortex snatches up.
-      mass: 0.35 + Math.random() * 0.45,
+      mass: 0.35 + rand() * 0.45,
       // 0.6 rather than a heavier value deliberately: this is the same value
       // spawnDebris()/uprootTree() rely on for anything that actually needs
       // to cross into the lift radius under its own inward pull (a higher

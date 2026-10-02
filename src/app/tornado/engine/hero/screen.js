@@ -71,6 +71,8 @@ export function createHeroScreen(ctx, S, api) {
     if (!S.Hero.active || !S.roger || S.state.phase === 'dying' || S.state.phase === 'won') return;
     // The spawn shield: nothing gets him in his first seconds.
     if (S.state.spawnShield > 0) return;
+    // Co-op: while a teammate is up Roger goes down, not out (engine/net/system.js).
+    if (ctx.systems.net && ctx.systems.net.interceptRogerDeath(kind)) return;
     if (S.state.phase === 'aiming') api.leaveAim();
     api.cancelCharge();
     const wasDriving = S.state.phase === 'driving';

@@ -217,7 +217,9 @@ export function createTerminatorMovement(ctx, S, api) {
 
     // Roger, while Hero Mode is on: he is the only target (and the aliens
     // are left alone).
-    const hero = ctx.systems.heroMode ? ctx.systems.heroMode.rogerTarget() : null;
+    // Co-op: the nearest player who is up, Roger included (engine/net/system.js).
+    const coop = ctx.systems.net ? ctx.systems.net.pickTarget(p.x, p.z) : null;
+    const hero = coop || (ctx.systems.heroMode ? ctx.systems.heroMode.rogerTarget() : null);
     if (hero) unit.foe = null;
 
     // Towards the target, or on round the town if there is nobody left.
@@ -225,7 +227,8 @@ export function createTerminatorMovement(ctx, S, api) {
     if (hero) {
       want = Math.atan2(hero.x - p.x, hero.z - p.z);
       if (Math.hypot(hero.x - p.x, hero.z - p.z) < T800.reach + 0.8) {
-        ctx.systems.heroMode.killRoger('TERMINATED', 'A Terminator reached Roger');
+        if (coop && coop.id !== '0') ctx.systems.net.catchPlayer(coop.id, 'TERMINATED', `A Terminator reached Player ${coop.id}`);
+        else ctx.systems.heroMode.killRoger('TERMINATED', 'A Terminator reached Roger');
       }
     } else if (unit.foe) {
       const q = unit.foe.root.position;

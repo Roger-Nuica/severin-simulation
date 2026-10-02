@@ -19,6 +19,7 @@ import { createMegaBlastSystem } from './engine/explosions/megaBlast.js';
 import { createNuclearSystem } from './engine/nuclear.js';
 import { createSmoothCriminalSystem } from './engine/smoothCriminal.js';
 import { createHeroModeSystem } from './engine/heroMode.js';
+import { createNetSystem } from './engine/net/system.js';
 import { createHeroSoundSystem } from './engine/sound/hero.js';
 import { createBlackHoleSoundSystem } from './engine/sound/blackHole.js';
 import { createKatanaSoundSystem } from './engine/sound/katana.js';
@@ -797,6 +798,13 @@ export function createSimulation(container) {
   register('heroMode', heroSystem);
   const { initHero, updateHero, resetHero, disposeHero } = heroSystem;
 
+  // Co-op (engine/net/): the room, the guest's avatar and the host's
+  // snapshots. Looks the hero up lazily; its init/reset/dispose run through
+  // the registry.
+  register('net', createNetSystem(ctx), { auto: true });
+  // Co-op rebuilds the town from the room's seed through a Reset.
+  ctx.resetSim = resetSim;
+
   // W A S D slide the free camera over the town (engine/keyPan.js).
   const keyPanSystem = createKeyPanSystem(ctx);
   register('keyPan', keyPanSystem);
@@ -1100,6 +1108,8 @@ export function createSimulation(container) {
     // Hero Mode's follow, aim and death cameras, likewise before the shake.
     // Real time: aiming slows the world, never Roger's pursuer.
     updateHero(rawDt);
+    // Co-op: the guest's avatar and snapshots (host), or the host's world (peer).
+    ctx.systems.net.updateNet(rawDt);
     // Hank Granite's scene holds the camera on him (engine/actionHero.js),
     // after Hero Mode's camera and before the shake.
     ctx.systems.actionHero.placeCamera(rawDt);
@@ -1287,7 +1297,7 @@ export function createSimulation(container) {
     }
     syncDebrisInstances();
 
-    resetEnvironment();
+    resetEnvironment(ctx.townSeed);
     // The bubbles and queued replies of the crowd just replaced (documented
     // as called on reset, and never was: found by the lifecycle audit).
     clearSpeechBubbles();
@@ -1378,7 +1388,7 @@ export function createSimulation(container) {
   initSoundSystem();
   initLightning();
   initDebrisPool();
-  generateEnvironment();
+  generateEnvironment(ctx.townSeed);
   // The Chase Mode car, parked in town from the start beside where the
   // aliens land (chase/index.js), and the opening shot on them both
   // (aliens.js frameLanding).

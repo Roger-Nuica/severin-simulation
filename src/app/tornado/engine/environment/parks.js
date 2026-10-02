@@ -136,9 +136,10 @@ export function createParksSystem(ctx) {
    * the trees are ordinary destructible SimObjects regenerated on reset.
    * @param {THREE.Group} group environment group to parent the trees to
    * @param {number} firstTreeIndex naming index to continue from
+   * @param {() => number} [townRand] source for each tree's size/mass rolls (placement is already fixed-seed)
    * @returns {SimObject[]} the trees created
    */
-  function populateParks(group, firstTreeIndex) {
+  function populateParks(group, firstTreeIndex, townRand = Math.random) {
     const { createTree } = ctx.systems.trees;
     const trees = [];
     let index = firstTreeIndex;
@@ -160,7 +161,7 @@ export function createParksSystem(ctx) {
         const z = park.z + Math.sin(a) * park.rz * d;
         if (placed.some(p => Math.hypot(p.x - x, p.z - z) < PARK_TREE_SPACING)) continue;
         placed.push({ x, z });
-        const tree = createTree(x, z, index++);
+        const tree = createTree(x, z, index++, townRand);
         group.add(tree.mesh);
         trees.push(tree);
       }

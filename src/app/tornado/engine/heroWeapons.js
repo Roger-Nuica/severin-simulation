@@ -141,6 +141,7 @@ const UP = new THREE.Vector3(0, 1, 0);
  *   katanaCancel: () => void,
  *   katanaLook: (dx: number, dy: number) => void,
  *   katanaState: () => Readonly<KatanaInput>,
+ *   guestFlame: (gun: {tick: number}, dt: number, muzzle: THREE.Vector3, dir: THREE.Vector3) => void,
  *   katanaBlade: () => import('./hero/katana/blade.js').KatanaBlade,
  *   katanaBladeLine: () => Readonly<import('./hero/katana/bladeUi.js').BladeLine>
  * }}
@@ -1034,6 +1035,11 @@ export function createHeroWeapons(ctx, hero) {
     placeView, update, hudLine, isHot, bulletTime,
     katanaToggle, katanaPress, katanaRelease, katanaCancel, katanaLook, katanaState,
     katanaBlade: () => blade,
+    // Co-op guests' Fire Gun (engine/net/system.js): built on first use.
+    guestFlame: (/** @type {{tick: number}} */ gun, /** @type {number} */ dt, /** @type {THREE.Vector3} */ muzzle, /** @type {THREE.Vector3} */ dir) => {
+      buildEffects();
+      if (fireGun) fireGun.breathe(gun, dt, muzzle, dir);
+    },
     katanaBladeLine: () => bladeUi.line(),
     hudColour: () => WEAPON_COLOURS[/** @type {keyof typeof WEAPON_COLOURS} */ (current())] || ''
   };

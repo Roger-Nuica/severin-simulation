@@ -8,7 +8,20 @@ Deliver co-op in stages, with one browser hosting the authoritative simulation a
 - Include room creation/joining, host authority, per-player input/state, independent player HUD/weapon/energy state, Terminator target selection, revive/downed and shared run outcomes, shared score/missions, two-seat car play, and agreed slow-motion behaviour.
 - Keep damage acceptance, enemy immunity, weapon effects, existing single-player death/win behaviour, and documented gameplay values unchanged unless a specific extension is approved. Do not raise entity/particle/performance caps without evidence and explicit approval.
 - Do not implement rollback/lockstep, peer authority, public matchmaking, host migration, persistence, or replication of every cosmetic/destruction detail unless separately approved. The relay forwards room traffic; whether it is hosted alongside Next.js or elsewhere remains undecided.
-- **No coding may begin while an essential clarification below remains unanswered or unapproved.** Every proposed default is **UNAPPROVED** and is not an implementation decision.
+- **No coding may begin while an essential clarification below remains unanswered or unapproved.** All ten clarifications were approved by the user (see "Approved decisions"); the per-item "UNAPPROVED proposal" text below is kept as history.
+
+## Approved decisions
+Approved by the user in session (2026-10-02):
+1. Relay: custom Node `ws` relay as a standalone process (not inside Next.js); the invite code is the room credential. Adds the `ws` dependency in Subtask 3.
+2. Rooms: host-created private room, joined by invite code; no public discovery.
+3. Disconnect: no host migration; 30 s reconnect grace for peers, then removal; host loss ends the room.
+4. Snapshots: 15 Hz, versioned; schema/event list to be defined in Subtask 5 within the approved entity list. Tests use Node's built-in runner (`node --test`).
+5. Randomness: seed town construction only (including child creators); gameplay outcomes are host-authoritative.
+6. Down/revive: revivable; both players down = game over. Revive 5 s hold within 3 m (revisable). Single-player outcomes unchanged.
+7. Friendly fire: disabled.
+8. Time: one host-authoritative shared time scale.
+9. Capacity: 2 players; each browser follows its own avatar, no split-screen.
+10. Car: driver steers; passenger aims/fires independently.
 
 ## Clarifications needed
 1. **Relay/provider, operations, deployment, and authentication:** Which WebSocket relay/provider is approved, who provisions and operates it, where it is deployed, and how hosts/peers authenticate? **UNAPPROVED proposal:** none; make no provider, package, deployment, or auth choice before approval.
@@ -23,13 +36,13 @@ Deliver co-op in stages, with one browser hosting the authoritative simulation a
 10. **Car seats and controls:** Define driver/passenger assignment, passenger fire/aim inputs and eligible weapons, seat occupancy, and control/handoff rules on disconnect/downing. **UNAPPROVED proposal:** driver controls vehicle movement and passenger independently aims/fires; assignment and handoff remain unset.
 
 ## Subtasks
-- [ ] **Subtask 1: Decision and contract gate.** Resolve and record every clarification above before implementation; define authority boundaries, protocol responsibilities, compatibility with existing single-player mode, and approved test approach. Treat any unresolved item as a blocker, not a coder assumption.
+- [x] **Subtask 1: Decision and contract gate.** Resolve and record every clarification above before implementation; define authority boundaries, protocol responsibilities, compatibility with existing single-player mode, and approved test approach. Treat any unresolved item as a blocker, not a coder assumption.
   - Likely files: `PLAN_coop.md`; review `GAME_DESIGN.md`, `.claude/rules.md`, `src/app/tornado/tornadoEngine.js`, `src/app/tornado/engine/context.js`, `src/app/tornado/engine/heroMode.js`, `src/app/tornado/engine/events.js`, `src/app/tornado/engine/chase/index.js`, and `package.json`.
   - Depends on: None.
   - Risks / edge cases: Current design and runtime describe one Roger, one Hero Mode phase/HUD, one camera per simulation, single-player death/win flow, and one chase driver; co-op extends those contracts. Preserve single-player behaviour and obtain approval for changes to unresolved co-op contracts. No numeric discrepancy is inferred or silently reconciled. See `.claude/rules.md` R-035, R-047, R-049, R-050.
   - Acceptance criteria: All ten questions have explicit approved answers or are explicitly descoped; no implementation starts while any essential decision is outstanding; record approved authority, transport, capacity, lifecycle, player, and gameplay contracts without selecting an unapproved provider/package.
 
-- [ ] **Subtask 2: Deterministic seeded town generation.** Make town construction reproducible from an approved room/run seed, including random placement and random appearance/initial state selected by town-generation child creators. Keep runtime gameplay randomness separate unless it affects host-authoritative replicated state.
+- [~] **Subtask 2 (generator seeding done; engine/room wiring of the seed pending Subtask 3): Deterministic seeded town generation.** Make town construction reproducible from an approved room/run seed, including random placement and random appearance/initial state selected by town-generation child creators. Keep runtime gameplay randomness separate unless it affects host-authoritative replicated state.
   - Likely files: `src/app/tornado/engine/environment/index.js`, `src/app/tornado/engine/environment/buildings.js`, `trees.js`, `cars.js`, `people.js`, `parks.js`, `roadsDecor.js`, relevant environment child creators, `src/app/tornado/engine/context.js`, and `src/app/tornado/engine/perf/bench.js`.
   - Depends on: Subtask 1.
   - Risks / edge cases: Generation currently draws from ambient `Math.random()` in placement and child creators; the benchmark replaces global randomness for the full simulation, which is not a reason to require seeded client gameplay. Preserve town layout/scaling, object IDs and construction order assumptions, reset/dispose behaviour, and avoid global mutable RNG state. See `.claude/rules.md` R-024, R-047, R-048, R-050.
