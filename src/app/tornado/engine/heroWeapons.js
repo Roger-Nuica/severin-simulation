@@ -1,5 +1,6 @@
 // @ts-check
 import * as THREE from 'three';
+import { LIGHTING } from './lightingTuning.js';
 import { HOLE } from './player/blackHole.js';
 import { createBullets } from './hero/bullets.js';
 import { createFireGun } from './hero/fireGun.js';
@@ -61,7 +62,10 @@ const WEAPON_NAMES = { rifle: 'PLASMA RIFLE', minigun: 'MINIGUN', railgun: 'RAIL
 // Each weapon's colour on the HUD's WEAPON line (the railgun is yellow now).
 const WEAPON_COLOURS = { rifle: '', minigun: '#e8c46a', railgun: '#ffd83a', fire: '#ff8a3a', blackhole: '#c99bff', katana: '#9fe8ff' };
 // The railgun's yellow: its coils, its flash, its ring.
-const RAIL_YELLOW = new THREE.Color(2.4, 2.0, 0.35);
+// Held to ~1-1.5 so the core stays yellow instead of clipping to white.
+const RAIL_YELLOW = new THREE.Color(1.5, 1.15, 0.1);
+// The ring: a deeper, more saturated amber than the core, so it separates.
+const RAIL_RING = new THREE.Color(1.0, 0.45, 0.04).multiplyScalar(LIGHTING.railgunRingEmissive);
 
 export const MINIGUN = {
   ammo: 200,               // on request (2026-10-01): 200 again (it was 600)
@@ -430,7 +434,7 @@ export function createHeroWeapons(ctx, hero) {
     const ring = hero.keepGeo(new THREE.RingGeometry(3.2, 3.8, 40));
     ring.rotateX(-Math.PI / 2);
     reticle = new THREE.Mesh(ring, hero.keepMat(new THREE.MeshBasicMaterial({
-      color: RAIL_YELLOW.clone(), transparent: true, opacity: 0.8,
+      color: RAIL_RING.clone(), transparent: true, opacity: 0.8,
       blending: THREE.AdditiveBlending, depthWrite: false,
       polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3
     })));

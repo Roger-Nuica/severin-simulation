@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mulberry32 } from './roadsDecor.js';
 import { BUILDINGS, STOREY } from '../scale.js';
+import { LIGHTING } from '../lightingTuning.js';
 
 /**
  * ---------------------------------------------------------------------
@@ -34,7 +35,7 @@ const WINDOW_FRESNEL_COLOUR = new THREE.Color(0x9ec4e8);
 // maps it back to the same amber on screen -- so the pane looks the colour
 // it always did, but now carries a halo. Blacked-out panes scale to ~0.02,
 // nowhere near the threshold.
-const WINDOW_GLOW_GAIN = 2.4;
+const WINDOW_GLOW_GAIN = 2.4 * LIGHTING.buildingEmissiveScale;
 
 /**
  * @typedef {'house'|'townhouse'|'apartment'|'shop'} BuildingVariantName

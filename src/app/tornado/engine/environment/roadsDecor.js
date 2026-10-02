@@ -1,6 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { LIGHTING } from '../lightingTuning.js';
 import { createSoftDotTexture } from '../../utils/textures.js';
 
 /**
@@ -69,13 +70,13 @@ const STREETLIGHT_LAMP_COLOUR = 0xffc27a;
 // HDR gain so the globe crosses the bloom threshold in post.js (its
 // luminance goes from ~0.6 to ~2) -- the halo is the "glow"; the globe
 // itself is only a few pixels across at normal viewing distance.
-const STREETLIGHT_LAMP_HDR = 3.2;
+const STREETLIGHT_LAMP_HDR = 3.2 * LIGHTING.buildingEmissiveScale;
 // The pool of light each lamp throws on the ground: an additive decal
 // rather than a real PointLight, since 26 real lights would add a per-light
 // term to the fragment shader of every lit material in the scene.
 const STREETLIGHT_POOL_SIZE = 7;
 const STREETLIGHT_POOL_COLOUR = 0xffb866;
-const STREETLIGHT_POOL_OPACITY = 0.3;
+const STREETLIGHT_POOL_OPACITY = 0.3 * LIGHTING.buildingHaloScale;
 // Above the roads (0.01) and the grid (0.02), so the decal is never
 // z-fought by either.
 const STREETLIGHT_POOL_HEIGHT = 0.035;
