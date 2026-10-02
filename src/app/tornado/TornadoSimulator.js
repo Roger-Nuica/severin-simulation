@@ -296,6 +296,10 @@ export default function TornadoSimulator() {
                   looking at. */}
               <button id="btn-downburst" className="pill event" type="button" aria-pressed="false"
                 title="Downburst: a column of air slams down and blows everything one way · 30-45 s">⬇️ Downburst</button>
+              {/* engine/gravityRift.js: opens under whatever the camera is
+                  looking at. */}
+              <button id="btn-gravity-rift" className="pill event" type="button" aria-pressed="false"
+                title="Gravity Rift: inside a circle, cars, people and aliens float up, then gravity slams back and everything that went up explodes · about 12 s">🪐 Gravity Rift</button>
               {/* engine/strikeTargeting.js: click (or drag) the ground to
                   call lightning down; Esc or the tile again to stop. */}
               <button id="btn-strike" className="pill event" type="button" aria-pressed="false"

@@ -26,7 +26,7 @@ Explosions throw objects, damage buildings, start fires and can trigger one anot
 
 The Lightning tile turns the pointer into a strike reticle. The player can call strikes at a chosen point or sweep them across town. Lightning starts fires, electrocutes people, shorts Terminators, uproots trees, flips cars and faults power lines. Roger's railgun calls the same kind of bolt.
 
-The disaster panel offers distinct events rather than starting them with the storm: electrical weather, the Final Boss wedge, Doomsday, Fujiwhara, Ignite, earthquake, dam break, meteors, downburst, lightning, gas-main rupture and Landing Support. Earthquakes open a chasm and can expose lava; a tornado crossing lava becomes a Lavanado. A dam break sends a destructive flood through town, while a Blizzard freezes water, lava and living things. Meteors leave craters, and a downburst drives straight-line wind across a chosen area.
+The disaster panel offers distinct events rather than starting them with the storm: electrical weather, the Final Boss wedge, Doomsday, Fujiwhara, Ignite, earthquake, dam break, meteors, downburst, lightning, gas-main rupture and Landing Support. Earthquakes open a chasm and can expose lava; a tornado crossing lava becomes a Lavanado. A dam break sends a destructive flood through town, while a Blizzard freezes water, lava and living things. Meteors leave craters, and a downburst drives straight-line wind across a chosen area. A gravity rift lets go of gravity inside a circle: cars, people and aliens float up, then gravity slams back and everything that went up explodes where it lands.
 
 A waterspout rises over the lake behind the dam only when the player calls it (its button or a scenario); it never appears by itself during an Outbreak.
 

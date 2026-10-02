@@ -13,8 +13,9 @@ not a contract: when one is picked, it gets a plan and its numbers go into
 - [ ] **Solar storm / blackout** — auroras overhead, the power fails, lights go
   out, cars stall, Terminators and ships glitch for a few seconds. Ties in
   with the EMP and the power lines.
-- [ ] **Gravity rift** — inside a zone, cars, people and aliens float up, then
-  drop all at once.
+- [x] **Gravity rift** — inside a zone, cars, people and aliens float up, then
+  drop all at once and explode where they land (shipped 2026-10-02,
+  `engine/gravityRift.js`).
 - [ ] **Lake tsunami** — a giant wave rises from the lake and hits town from
   the side (separate from the dam break).
 
