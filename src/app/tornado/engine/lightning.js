@@ -1,5 +1,6 @@
 // @ts-check
 import * as THREE from 'three';
+import { LIGHTING } from './lightingTuning.js';
 
 /**
  * ===========================================================================
@@ -80,7 +81,7 @@ const PRIMARY_STRIKE_RANGE = 60;
  *   disposeBolt: (boltMesh: THREE.Group) => void,
  *   resetLightningStrikes: () => void,
  *   flashScreen: (at: THREE.Vector3, power: number, tint?: string) => void,
- *   strikeAt: (end: THREE.Vector3, power: number) => void
+ *   strikeAt: (end: THREE.Vector3, power: number, rail?: boolean) => void
  * }}
  */
 export function createLightningSystem(ctx) {
@@ -99,6 +100,7 @@ export function createLightningSystem(ctx) {
     // Seconds until each queued follow-up strike of a cluster.
     restrikes: /** @type {number[]} */ ([]),
     flashTimer: 0,
+    flashRail: false,
     flashDuration: 0.001,
     flashPeak: 0,
     overlayPeak: 0,
@@ -169,7 +171,7 @@ export function createLightningSystem(ctx) {
    * @param {number} radius
    * @returns {THREE.Mesh}
    */
-  function createBoltMesh(points, radius) {
+  function createBoltMesh(points, radius, rail = false) {
     const curve = new PolylineCurve(points);
     // The bolt is two nested tubes: an opaque yellow-white core, and a much
     // wider additive amber shell around it. The shell is what gives the bolt
@@ -185,17 +187,20 @@ export function createLightningSystem(ctx) {
     const coreMat = new THREE.MeshBasicMaterial({
       color: LIGHTNING_CORE_COLOUR, transparent: true, opacity: 1, depthWrite: false, fog: false
     });
-    coreMat.color.multiplyScalar(LIGHTNING_CORE_HDR);
+    // The railgun's bolt keeps a saturated yellow core: it does not clip to
+    // white and swallow the ring (lightingTuning.js).
+    if (rail) coreMat.color.setHex(0xffc21a).multiplyScalar(LIGHTING.railgunCoreHdr);
+    else coreMat.color.multiplyScalar(LIGHTNING_CORE_HDR);
     const core = new THREE.Mesh(coreGeo, coreMat);
     core.name = 'lightningBolt_core';
     group.add(core);
 
-    const glowGeo = new THREE.TubeGeometry(curve, Math.max(8, points.length * 2), radius * 2.7, 6, false);
+    const glowGeo = new THREE.TubeGeometry(curve, Math.max(8, points.length * 2), radius * (rail ? 2.7 * LIGHTING.railgunGlowScale : 2.7), 6, false);
     const glowMat = new THREE.MeshBasicMaterial({
-      color: LIGHTNING_GLOW_COLOUR, transparent: true, opacity: 0.3, depthWrite: false,
+      color: LIGHTNING_GLOW_COLOUR, transparent: true, opacity: rail ? 0.3 * LIGHTING.railgunGlowOpacity : 0.3, depthWrite: false,
       fog: false, blending: THREE.AdditiveBlending
     });
-    glowMat.color.multiplyScalar(LIGHTNING_GLOW_HDR);
+    glowMat.color.multiplyScalar(rail ? 1 : LIGHTNING_GLOW_HDR);
     const glow = new THREE.Mesh(glowGeo, glowMat);
     glow.name = 'lightningBolt_glow';
     group.add(glow);
@@ -204,7 +209,7 @@ export function createLightningSystem(ctx) {
     // caring how many meshes a bolt happens to be made of.
     group.userData.layers = [
       { material: coreMat, baseOpacity: 1 },
-      { material: glowMat, baseOpacity: 0.3 }
+      { material: glowMat, baseOpacity: glowMat.opacity }
     ];
     return group;
   }
@@ -232,7 +237,7 @@ export function createLightningSystem(ctx) {
     });
   }
 
-  function spawnBolt(start, end, power) {
+  function spawnBolt(start, end, power, rail = false) {
     // Bigger displacement and one more subdivision level than before (2^6
     // segments rather than 2^5), so the channel visibly zig-zags instead of
     // reading as a slightly wobbly straight line.
@@ -244,7 +249,7 @@ export function createLightningSystem(ctx) {
     // Roughly four times the old radius. The old 0.09-0.14 tube was about
     // three screen pixels wide from the default camera distance, which is why
     // it read as a thin scratch; this lands in the 10-20px range.
-    const mainMesh = createBoltMesh(mainPoints, 0.3 + power * 0.5);
+    const mainMesh = createBoltMesh(mainPoints, 0.3 + power * 0.5, rail);
     Lightning.boltGroup.add(mainMesh);
     Lightning.bolts.push({ mesh: mainMesh, life: mainLife, maxLife: mainLife });
 
@@ -258,7 +263,7 @@ export function createLightningSystem(ctx) {
       ));
       const branchPoints = buildBoltPath(branchStart, branchEnd, 3.5, 4);
       const branchLife = 0.12 + power * 0.1;
-      const branchMesh = createBoltMesh(branchPoints, 0.14 + power * 0.22);
+      const branchMesh = createBoltMesh(branchPoints, 0.14 + power * 0.22, rail);
       Lightning.boltGroup.add(branchMesh);
       Lightning.bolts.push({ mesh: branchMesh, life: branchLife, maxLife: branchLife });
     }
@@ -470,14 +475,14 @@ export function createLightningSystem(ctx) {
    * @param {number} power 0..1
    * @returns {void}
    */
-  function strikeAt(end, power) {
+  function strikeAt(end, power, rail = false) {
     if (!Lightning.boltGroup) return;
     const start = boltOrigin(end);
     const distance = Sim.three.camera.position.distanceTo(end);
     const proximity = 1 - THREE.MathUtils.clamp(distance / 220, 0, 1);
-    spawnBolt(start, end, power);
+    spawnBolt(start, end, power, rail);
     ctx.systems.weather.onLightningStrike(start, end, power);
-    lightUp(end, power, distance, 1 - proximity);
+    lightUp(end, power, distance, 1 - proximity, rail);
   }
 
   /**
@@ -488,16 +493,19 @@ export function createLightningSystem(ctx) {
    * @param {number} muffle 0..1
    * @returns {void}
    */
-  function lightUp(end, power, distance, muffle) {
+  function lightUp(end, power, distance, muffle, rail = false) {
     if (Lightning.overlay) Lightning.overlay.style.background = LIGHTNING_OVERLAY_CSS;
     Lightning.flashLight.position.set(end.x, Math.max(end.y, 4) + 12, end.z);
-    Lightning.flashPeak = 220 + power * 900;
-    Lightning.flashDuration = 0.12 + power * 0.14;
+    // The railgun's flash is a short spike on a limited light, not the storm's
+    // room-filling one (lightingTuning.js).
+    Lightning.flashRail = rail;
+    Lightning.flashPeak = (220 + power * 900) * (rail ? LIGHTING.railgunLightIntensity : 1);
+    Lightning.flashDuration = rail ? LIGHTING.railgunFlashSeconds : 0.12 + power * 0.14;
     Lightning.flashTimer = Lightning.flashDuration;
     // Trimmed from 0.05 + power * 0.3 to hold total screen brightness roughly
     // where it was now that strikes are about twice as frequent: the brief
     // asks for strong discrete flashes, not a strobe washing out the scene.
-    Lightning.overlayPeak = 0.04 + power * 0.22;
+    Lightning.overlayPeak = (0.04 + power * 0.22) * (rail ? LIGHTING.railgunLightIntensity : 1);
 
     // Only close, strong strikes are worth shaking the camera for — keeps
     // the effect an occasional punctuation mark rather than constant jitter.
@@ -541,6 +549,7 @@ export function createLightningSystem(ctx) {
     if (!(Lightning.flashTimer > 0 && Lightning.flashPeak > peak)) {
       if (Lightning.overlay) Lightning.overlay.style.background = LIGHTNING_OVERLAY_CSS;
       Lightning.flashLight.position.set(from.x, from.y - 6, from.z);
+      Lightning.flashRail = false;
       Lightning.flashPeak = peak;
       Lightning.flashDuration = 0.1 + power * 0.25;
       Lightning.flashTimer = Lightning.flashDuration;
@@ -584,6 +593,7 @@ export function createLightningSystem(ctx) {
     // Never cut a brighter flash short with a dimmer one.
     if (Lightning.flashTimer > 0 && Lightning.flashPeak > peak) return;
     Lightning.flashLight.position.set(at.x, Math.max(at.y, 4) + 12, at.z);
+    Lightning.flashRail = false;
     Lightning.flashPeak = peak;
     Lightning.flashDuration = 0.12 + p * 0.14;
     Lightning.flashTimer = Lightning.flashDuration;
@@ -642,6 +652,7 @@ export function createLightningSystem(ctx) {
       Lightning.flashTimer = Math.max(0, Lightning.flashTimer - dt);
       const tNorm = 1 - Lightning.flashTimer / Lightning.flashDuration;
       const flicker = 0.7 + 0.3 * Math.sin(tNorm * 40);
+      Lightning.flashLight.distance = Lightning.flashRail ? LIGHTING.railgunLightDistance : 0;
       Lightning.flashLight.intensity = Lightning.flashPeak * (1 - tNorm) * flicker;
       if (Lightning.overlay) {
         Lightning.overlay.style.opacity = String(Lightning.overlayPeak * Math.pow(1 - tNorm, 1.5));

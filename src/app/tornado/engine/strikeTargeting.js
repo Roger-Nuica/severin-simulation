@@ -200,13 +200,14 @@ export function createStrikeTargetingSystem(ctx) {
    * One bolt landing, and everything it does there.
    * @param {number} x
    * @param {number} z
+   * @param {boolean} [rail] Roger's railgun bolt (a tamer flash)
    * @returns {void}
    */
-  function strike(x, z) {
+  function strike(x, z, rail = false) {
     const s = ctx.systems;
     const at = new THREE.Vector3(x, 0, z);
     const power = STRIKE.power[0] + Math.random() * (STRIKE.power[1] - STRIKE.power[0]);
-    s.lightning.strikeAt(at, power);
+    s.lightning.strikeAt(at, power, rail);
     s.explosions.spawnImpactBurst(new THREE.Vector3(x, 0.8, z), 0.7);
     const { damageFromImpact, addDamageScore } = s.damage;
 
@@ -298,9 +299,9 @@ export function createStrikeTargetingSystem(ctx) {
     for (let i = queue.length - 1; i >= 0; i--) {
       queue[i].delay -= dt;
       if (queue[i].delay > 0) continue;
-      const { x, z } = queue[i];
+      const { x, z, rail } = queue[i];
       queue.splice(i, 1);
-      strike(x, z);
+      strike(x, z, rail);
     }
 
     if (state.on && reticle) {
@@ -335,7 +336,7 @@ export function createStrikeTargetingSystem(ctx) {
    * @returns {void}
    */
   function boltAt(x, z) {
-    queue.push({ x, z, delay: 0 });
+    queue.push({ x, z, delay: 0, rail: true });
   }
 
   /**
