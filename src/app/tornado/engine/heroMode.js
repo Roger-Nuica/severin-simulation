@@ -42,7 +42,8 @@ export { SHIP_DAMAGE } from './hero/config.js';
  * Enter (pullTrigger / releaseTrigger). The abilities are on Q E R
  * (engine/player/abilities.js): Q is Time Slow, five seconds of the world
  * at 10% (with the minigun in hand, Bullet Time: the world at 3%, its
- * bullets hanging in the air), E Teleport, R the EMP. The controls are read through engine/player/input.js
+ * bullets hanging in the air), E Teleport, R the EMP; G is the grappling
+ * hook (engine/player/grapple.js). The controls are read through engine/player/input.js
  * (hero/input.js consumeInput).
  *
  * The plasma rifle is drawn and put away with the right mouse button.
@@ -158,6 +159,10 @@ export { SHIP_DAMAGE } from './hero/config.js';
  *   rogerFacing: () => ({x: number, z: number, heading: number}|null),
  *   standable: (x: number, z: number) => boolean,
  *   freezeRoger: (seconds: number) => boolean,
+ *   zipRoger: (x: number, z: number, speed: number) => boolean,
+ *   rogerZipping: () => boolean,
+ *   stopZip: () => void,
+ *   solidAlong: (x: number, z: number, dx: number, dz: number, max: number) => number,
  *   rogerFrozen: () => boolean,
  *   rogerShielded: () => boolean,
  *   rogerPhase: () => string,
@@ -215,6 +220,15 @@ export function createHeroModeSystem(ctx) {
       // with no timer, cost or cooldown; it stays on (Restart included) until
       // V is pressed again.
       invincible: false,
+      // The grappling hook's zip (engine/player/grapple.js): Roger drawn along
+      // the rope to (zipX, zipZ) at zipSpeed m/s; zipTotal is the distance at
+      // the start, for the hop. Ends on arrival, against a wall, or when he
+      // stops being on his feet.
+      zipActive: false,
+      zipX: 0,
+      zipZ: 0,
+      zipSpeed: 0,
+      zipTotal: 0,
       dazeHeading: 0,
       dazeSpin: 0,
       flingX: 0,
@@ -417,7 +431,7 @@ export function createHeroModeSystem(ctx) {
       <div class="hero-row hero-door">🚗 ENTER — get in the car</div>
       <div class="hero-row hero-drive">🚗 DRIVING · E / Q / Esc — get out</div>
       <div class="hero-msg"></div>
-      <div class="hero-keys">W A S D run · Right-click raise / lower weapon · Wheel switch weapon<br>Click or Enter fire · rifle: hold 2 s for a MEGA BEAM · Q time slow (bullet time with the minigun) · E teleport · R EMP · V invincible<br>T Landing Support (then R samurai · T rocket · Esc cancel) · Enter at a car's glowing door to drive</div>`;
+      <div class="hero-keys">W A S D run · Right-click raise / lower weapon · Wheel switch weapon<br>Click or Enter fire · rifle: hold 2 s for a MEGA BEAM · Q time slow (bullet time with the minigun) · E teleport · R EMP · G grappling hook · V invincible<br>T Landing Support (then R samurai · T rocket · Esc cancel) · Enter at a car's glowing door to drive</div>`;
     container.appendChild(S.hud);
 
     S.over = document.createElement('div');
@@ -500,7 +514,8 @@ export function createHeroModeSystem(ctx) {
       cell: 100, plasmaTimer: 0, beamTimer: 0, recoil: 0, spread: 0,
       neutralised: false, dazeImmunity: 0, spawnShield: HERO.spawnShieldSeconds,
       burstTimer: 0, aimBlend: 0, threat: Infinity,
-      stepTimer: 0.5, hintTimer: HERO.hintSeconds, msgTimer: 0, aimKind: 'sky', frozen: 0
+      stepTimer: 0.5, hintTimer: HERO.hintSeconds, msgTimer: 0, aimKind: 'sky', frozen: 0,
+      zipActive: false
     });
     S.weapons.startRun();
     // A fresh energy bar for the run (engine/player/energy.js).
@@ -728,6 +743,21 @@ export function createHeroModeSystem(ctx) {
   }
 
   /**
+   * Roger drawn along the grappling hook's rope (engine/player/grapple.js)
+   * to (x, z), on foot and in play; hero/movement.js moves him there.
+   * @param {number} x
+   * @param {number} z
+   * @param {number} speed metres a second
+   * @returns {boolean} whether the zip started
+   */
+  function zipRoger(x, z, speed) {
+    const target = api.rogerTarget();
+    if (!target || !target.onFoot || S.state.frozen > 0 || S.state.phase === 'dazed') return false;
+    Object.assign(S.state, { zipActive: true, zipX: x, zipZ: z, zipSpeed: speed, zipTotal: Math.hypot(x - target.x, z - target.z) });
+    return true;
+  }
+
+  /**
    * Where Roger is and which way he looks (his aim when the weapon is up),
    * on foot and in play; null otherwise (for Teleport).
    * @returns {{x: number, z: number, heading: number}|null}
@@ -804,7 +834,8 @@ export function createHeroModeSystem(ctx) {
   }
 
   return {
-    initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, standable, freezeRoger, rogerFrozen: () => S.state.frozen > 0, rogerShielded: () => S.state.spawnShield > 0 || S.state.invincible, rogerPhase: () => S.state.phase, killRoger: api.killRoger, hitArea: api.hitArea, chipTornado: api.chipTornado,
+    initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, standable, freezeRoger,
+    zipRoger, rogerZipping: () => S.state.zipActive, stopZip: () => { S.state.zipActive = false; }, solidAlong: api.solidAlong, rogerFrozen: () => S.state.frozen > 0, rogerShielded: () => S.state.spawnShield > 0 || S.state.invincible, rogerPhase: () => S.state.phase, killRoger: api.killRoger, hitArea: api.hitArea, chipTornado: api.chipTornado,
     resetHero, disposeHero,
     // Co-op (engine/net/system.js): Roger's pose for the shared snapshot, and
     // the down-not-dead state while a teammate can still revive him.

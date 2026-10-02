@@ -82,6 +82,45 @@ export function createHeroMovement(ctx, S, api) {
   }
 
   /**
+   * How far along a level ray the first solid box is (someSolid): from
+   * (x, z) along the unit direction (dx, dz), up to `max` metres. A box the
+   * ray starts inside is not counted. For the grappling hook
+   * (engine/player/grapple.js).
+   * @param {number} x
+   * @param {number} z
+   * @param {number} dx
+   * @param {number} dz
+   * @param {number} max
+   * @returns {number} the distance, or Infinity when nothing is that near
+   */
+  function solidAlong(x, z, dx, dz, max) {
+    let best = Infinity;
+    someSolid((cx, cz, hw, hd) => {
+      let lo = 0;
+      let hi = max;
+      if (Math.abs(dx) < 1e-9) {
+        if (Math.abs(x - cx) > hw) return false;
+      } else {
+        const a = (cx - hw - x) / dx;
+        const b = (cx + hw - x) / dx;
+        lo = Math.max(lo, Math.min(a, b));
+        hi = Math.min(hi, Math.max(a, b));
+      }
+      if (Math.abs(dz) < 1e-9) {
+        if (Math.abs(z - cz) > hd) return false;
+      } else {
+        const a = (cz - hd - z) / dz;
+        const b = (cz + hd - z) / dz;
+        lo = Math.max(lo, Math.min(a, b));
+        hi = Math.min(hi, Math.max(a, b));
+      }
+      if (lo <= hi && lo > 0 && lo < best) best = lo;
+      return false;
+    });
+    return best;
+  }
+
+  /**
    * Out of any footprint along the shorter way, as the Terminator is.
    * @param {THREE.Vector3} p mutated in place
    * @param {number} pad
@@ -246,8 +285,31 @@ export function createHeroMovement(ctx, S, api) {
     let moved = 0;
     const x0 = p.x;
     const z0 = p.z;
+    // The grappling hook's zip (engine/player/grapple.js): only on his feet;
+    // anything else (a daze, a car, death) lets go of the rope.
+    const onFeet = S.state.phase === 'running' || S.state.phase === 'aiming';
+    if (S.state.zipActive && !onFeet) S.state.zipActive = false;
+    const zipping = S.state.zipActive;
+    let zipStep = 0;
+    let zipLeft = 0;
 
-    if (S.state.phase === 'running') {
+    if (zipping) {
+      const dx = S.state.zipX - p.x;
+      const dz = S.state.zipZ - p.z;
+      zipLeft = Math.hypot(dx, dz);
+      zipStep = S.state.zipSpeed * dt;
+      if (zipLeft <= zipStep || zipLeft < 1e-3) {
+        p.x = S.state.zipX;
+        p.z = S.state.zipZ;
+        S.state.zipActive = false;
+      } else {
+        p.x += (dx / zipLeft) * zipStep;
+        p.z += (dz / zipLeft) * zipStep;
+      }
+      // Facing the way the rope pulls (on foot; aiming, the mouse keeps the view).
+      if (S.state.phase === 'running' && zipLeft > 1e-3) S.state.heading = Math.atan2(dx, dz);
+      S.state.speed = 0;
+    } else if (S.state.phase === 'running') {
       const turn = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
       S.state.heading += turn * HERO.turnRate * dt;
       const want = S.keys.up ? HERO.runSpeed : S.keys.down ? -HERO.backSpeed : 0;
@@ -298,10 +360,17 @@ export function createHeroMovement(ctx, S, api) {
     }
     pushOut(p, HERO.pad * 0.5);
     moved = Math.hypot(p.x - x0, p.z - z0);
+    // Pulled into a wall short of the hook: the zip is over.
+    if (zipping && S.state.zipActive && dt > 0 && moved < zipStep * 0.3) S.state.zipActive = false;
     // Ran into a wall: the run cycle stops with him.
     if (S.state.phase === 'running' && moved < Math.abs(S.state.speed) * dt * 0.3) S.state.speed *= 0.5;
     S.roger.mesh.rotation.y = S.state.heading;
     poseRoger(moved, dt);
+    // A hop along the rope: up and down again over the zip.
+    if (zipping && S.state.zipTotal > 0) {
+      const u = THREE.MathUtils.clamp(1 - zipLeft / S.state.zipTotal, 0, 1);
+      p.y += Math.sin(Math.PI * u) * HERO.zipHop;
+    }
 
     S.nameTag.position.set(p.x, p.y + HERO.tagHeight, p.z);
     S.stars.visible = S.state.phase === 'dazed';
@@ -341,5 +410,5 @@ export function createHeroMovement(ctx, S, api) {
     return { x: p.x, z: p.z, onFoot: S.state.phase !== 'driving' };
   }
 
-  return { inBuilding, someSolid, blockedAt, pushOut, pickSpawn, pickBunker, poseRoger, daze, updateRoger, rogerTarget };
+  return { inBuilding, someSolid, solidAlong, blockedAt, pushOut, pickSpawn, pickBunker, poseRoger, daze, updateRoger, rogerTarget };
 }

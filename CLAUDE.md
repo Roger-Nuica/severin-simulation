@@ -110,6 +110,7 @@ Reuse the weapon, enemy, and damage contracts instead of building a parallel mel
 - `GAME_DESIGN.md` — player-facing gameplay narrative and design context
 - `.claude/rules.md` — implementation contracts, exact numeric gameplay values, and hard constraints
 - `FINDINGS.md` — measurements, benchmarks, and performance lessons
+- `BACKLOG.md` — feature ideas the owner wants kept (disasters and Roger abilities)
 - `PROJECT_HISTORY.md` — archived decision snapshots and the superseded roadmap; not a source of current behavior
 
 ## Architecture
