@@ -312,7 +312,7 @@ export function createCloudsSystem(ctx) {
    * Builds one cloud layer: `clusters` cloud formations around a ring, each
    * a flattened heap of overlapping puffs, as a single InstancedMesh.
    * @param {CloudLayerDef} def
-   * @returns {{mesh:THREE.InstancedMesh, def:CloudLayerDef, material:THREE.ShaderMaterial}}
+   * @returns {{mesh:THREE.InstancedMesh, def:CloudLayerDef, material:THREE.ShaderMaterial, puffs: Object[]}}
    */
   function buildLayer(def) {
     /** @type {{x:number, y:number, z:number, size:number, shade:number, variant:number, threshold:number, rotation:number}[]} */

@@ -8,4 +8,11 @@ type Abductee = import('./src/app/tornado/engine/aliens/config.js').Abductee;
 
 // Next inlines process.env.NODE_ENV at build time; there is no Node in the
 // browser, and no @types/node in this project.
-declare const process: { env: { NODE_ENV?: string } };
+declare const process: { env: { NODE_ENV?: string; NEXT_PUBLIC_RELAY_URL?: string } };
+
+declare module '*.css';
+
+interface Window {
+  /** Dev-only handle onto the running simulation (tornadoEngine.js). */
+  __tornadoDebug?: { Sim: unknown, ctx: unknown };
+}

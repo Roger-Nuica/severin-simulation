@@ -249,7 +249,7 @@ export function createInstancerSystem(ctx) {
     if (car.instanceParts !== undefined) return car.instanceParts;
     const parts = [];
     let ok = true;
-    car.mesh.traverse((mesh) => {
+    car.mesh.traverse((/** @type {any} */ mesh) => {
       if (!mesh.isMesh || !ok) return;
       const material = mesh.material;
       if (!material || Array.isArray(material) || !material.color) {
@@ -328,7 +328,7 @@ export function createInstancerSystem(ctx) {
     if (alien.instanceParts !== undefined) return alien.instanceParts;
     const parts = [];
     let ok = true;
-    alien.root.traverse((mesh) => {
+    alien.root.traverse((/** @type {any} */ mesh) => {
       if (!mesh.isMesh || !ok) return;
       const material = mesh.material;
       if (!material || Array.isArray(material) || !material.color || material.transparent || material.map) {
@@ -558,7 +558,7 @@ export function createInstancerSystem(ctx) {
     let list = shapeCandidates.get(root);
     if (list) return list;
     list = [];
-    root.traverse((mesh) => {
+    root.traverse((/** @type {any} */ mesh) => {
       if (!mesh.isMesh || mesh.isInstancedMesh || mesh.children.length) return;
       if (!plainMaterial(mesh.material)) return;
       const shape = shapeOf(mesh.geometry);

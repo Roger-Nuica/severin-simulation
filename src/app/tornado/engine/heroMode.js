@@ -150,6 +150,7 @@ export { SHIP_DAMAGE } from './hero/config.js';
  *   markers: () => ({bunker: THREE.Vector3, pursuers: THREE.Vector3[], roger: THREE.Vector3, car: Object|null}|null),
  *   terminatorDistance: () => number,
  *   drivingCar: () => ({mesh: THREE.Object3D, speed: number}|null),
+ *   chipTornado: (v: Object, hit: {type: string}) => boolean,
  *   notify: (text: string) => void,
  *   announce: (title: string, sub: string) => void,
  *   empSweep: (x: number, z: number, radius: number) => void,
@@ -163,6 +164,11 @@ export { SHIP_DAMAGE } from './hero/config.js';
  *   rogerPhase: () => string,
  *   killRoger: (title: string, sub: string, kind?: string) => void,
  *   hitArea: (x: number, z: number, radius: number, title: string, sub: string, source?: string) => void,
+ *   guestFlame: (gun: {tick: number}, dt: number, muzzle: THREE.Vector3, dir: THREE.Vector3) => void,
+ *   setCoopDown: (down: boolean) => void,
+ *   rogerPose: () => ({x: number, z: number, heading: number, weapon: string, driving: boolean}|null),
+ *   weapon: () => string,
+ *   bulletTime: (on: boolean) => void,
  *   resetHero: () => void,
  *   disposeHero: () => void
  * }}
@@ -546,7 +552,7 @@ export function createHeroModeSystem(ctx) {
 
     if (S.roger) {
       Sim.three.scene.remove(S.roger.mesh);
-      S.roger.mesh.traverse((child) => {
+      S.roger.mesh.traverse((/** @type {any} */ child) => {
         if (child.geometry) child.geometry.dispose();
         if (child.material && !S.runMaterials.includes(child.material)) child.material.dispose();
       });
@@ -652,7 +658,7 @@ export function createHeroModeSystem(ctx) {
     api.updateBurst(dt);
     api.updateCharge(dt);
     if (dt > 0) api.checkChasm();
-    if (S.state.phase === 'dying') return;
+    if (/** @type {string} */ (S.state.phase) === 'dying') return;
 
     if (S.state.phase === 'aiming') api.placeAimCamera(rawDt);
     else if (S.state.phase === 'driving') api.placeDriveCamera(rawDt);
@@ -673,7 +679,7 @@ export function createHeroModeSystem(ctx) {
     // (health/melee.js). A lethal touch is the old "caught" death.
     if (dt > 0 && !S.state.coopDown) {
       api.touchByPursuers(dt * ctx.systems.time.scale('world'));
-      if (S.state.phase === 'dying') return;
+      if (/** @type {string} */ (S.state.phase) === 'dying') return;
     }
     // Safe.
     const p = S.roger.mesh.position;

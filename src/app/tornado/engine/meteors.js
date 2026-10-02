@@ -292,7 +292,7 @@ export function createMeteorSystem(ctx) {
   /** @returns {void} */
   function disposeMeteors() {
     if (!S.group) return;
-    S.group.traverse((child) => {
+    S.group.traverse((/** @type {any} */ child) => {
       if (child.geometry && !child.isSprite) child.geometry.dispose();
       if (child.material) child.material.dispose();
     });

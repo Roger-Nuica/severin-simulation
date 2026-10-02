@@ -133,7 +133,7 @@ export function createSpaceshipDescent(ctx, S, api) {
     const ship = buildSaucer();
     ship.group.name = 'samurai_ship';
     for (const leg of ship.legs) leg.visible = false;
-    ship.group.traverse((child) => {
+    ship.group.traverse((/** @type {any} */ child) => {
       if (child.name === 'spaceship_hull') child.material.color.setHex(SHIP.hull);
     });
     for (const mat of ship.glow) mat.color.copy(SHIP.glow);

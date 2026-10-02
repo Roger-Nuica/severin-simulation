@@ -122,7 +122,6 @@ const UP = new THREE.Vector3(0, 1, 0);
  * @typedef {Object} KatanaRelease what a button release hands the slash logic
  * @property {number} dx swipe movement along x
  * @property {number} dy swipe movement along y
- * @property {number} hold real seconds held
  */
 
 /**

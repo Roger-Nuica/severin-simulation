@@ -1,3 +1,6 @@
+/** @typedef {import('./config.js').Fissure} Fissure */
+/** @typedef {import('./config.js').Vent} Vent */
+/** @typedef {import('./config.js').HotSpot} HotSpot */
 import * as THREE from 'three';
 import { FISSURE, RIFT, CALDERA, between, lerpRange, halfWidthAt, pointAlong } from './config.js';
 
@@ -211,7 +214,7 @@ export function createFissureEruption(ctx, S, api) {
    * Puts one vent out for good: the flood reached it. The mesh goes with it,
    * because a cold vent is a hole in the ground and there is already a
    * crater decal over the top of it.
-   * @param {Vent} vent
+   * @param {HotSpot} spot
    * @returns {void}
    */
   function quench(spot) {

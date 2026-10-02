@@ -28,6 +28,7 @@
 /**
  * @typedef {Object} TornadoInstance
  * @property {Object} Vortex the instance's state (see vortex.js)
+ * @property {() => void} initVortex
  * @property {(dt: number, t: number) => void} updateVortexVisuals
  * @property {(pos: import('three').Vector3, velocity: import('three').Vector3, dt: number) => void} applySubVortexForce
  * @property {(end: import('three').Vector3, power: number) => void} onLightningStrike

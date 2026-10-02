@@ -125,6 +125,7 @@ const SPARKS = {
  *   quench: () => void,
  *   damageMultiplier: () => number,
  *   groundContactAt: (x: number, z: number) => boolean,
+ *   burning: () => boolean,
  *   resetFirenado: () => void,
  *   disposeFirenado: () => void
  * }}

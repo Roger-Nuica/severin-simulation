@@ -60,7 +60,7 @@ export function createAlienAbduction(ctx, S, api) {
     if (at !== -1) Sim.objects.splice(at, 1);
     /** @type {THREE.MeshStandardMaterial[]} */
     const materials = [];
-    person.mesh.traverse((child) => {
+    person.mesh.traverse((/** @type {any} */ child) => {
       const m = child.material;
       if (m && m.emissive && !materials.includes(m)) materials.push(m);
     });
@@ -161,7 +161,7 @@ export function createAlienAbduction(ctx, S, api) {
     const root = ctx.systems.terminator.takeUnit(unit);
     /** @type {THREE.MeshStandardMaterial[]} */
     const materials = [];
-    root.traverse((child) => {
+    root.traverse((/** @type {any} */ child) => {
       const m = child.material;
       if (m && m.emissive && !materials.includes(m)) materials.push(m);
     });
@@ -298,7 +298,7 @@ export function createAlienAbduction(ctx, S, api) {
    */
   function disposePerson(person) {
     person.mesh.removeFromParent();
-    person.mesh.traverse((child) => {
+    person.mesh.traverse((/** @type {any} */ child) => {
       if (child.geometry) child.geometry.dispose();
       if (child.material) child.material.dispose();
     });

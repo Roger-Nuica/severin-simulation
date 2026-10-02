@@ -8,8 +8,8 @@ import { STORM } from './scale.js';
  * function below carries a JSDoc type signature.
  */
 
-/** @typedef {'debris'|'car'|'tree'|'building'|'person'|'cow'} ObjectType */
-/** @typedef {'intact'|'swaying'|'tipped'|'uprooted'|'airborne'|'roofLost'|'wallLost'|'collapsed'|'settled'} DamageState */
+/** @typedef {'debris'|'car'|'tree'|'building'|'person'|'cow'|'viaduct'|'viaductDebris'} ObjectType */
+/** @typedef {'intact'|'swaying'|'tipped'|'uprooted'|'airborne'|'roofLost'|'wallLost'|'collapsed'|'settled'|'flattened'} DamageState */
 /** @typedef {'branch'|'box'|'roofPiece'|'rock'|'treeTrunk'|'ice'} DebrisKind */
 /**
  * Per-object capture progression driven by updateCaptureState(): grounded
@@ -40,6 +40,7 @@ import { STORM } from './scale.js';
  * @property {number} poolIndex     // index into instanced pool, -1 if none
  * @property {number} lifeTimer     // seconds since becoming free/settled, for recycling
  * @property {CaptureState} captureState        // progressive capture state machine (see updateCaptureState)
+ * @property {boolean} [moving]                // the freight train only: whether it is under way
  * @property {number} [orbitAngle]              // radians; current position around the funnel while orbiting
  * @property {number} [orbitRadiusFactor]        // 0..1-ish; this object's personal fraction of the funnel radius while orbiting, for visual variety
  * @property {number} [orbitMaxHeight]           // world-space y above which an orbiting object is flung outward and released
@@ -138,6 +139,7 @@ export function createSim() {
       // time they enter the dazed state.
       peopleDazed: 0
     },
-    three: {}
+    // Filled by scene.js, which is the only writer.
+    three: /** @type {any} */ ({})
   };
 }

@@ -518,7 +518,7 @@ export function createTankerSystem(ctx) {
       if (idx !== -1) Sim.objects.splice(idx, 1);
     }
     parked = [];
-    group.traverse((child) => {
+    group.traverse((/** @type {any} */ child) => {
       if (child.geometry) child.geometry.dispose();
     });
     for (const mat of materials) mat.dispose();
@@ -571,9 +571,10 @@ export function createTankerSystem(ctx) {
   /**
    * For Roger's sights (heroMode.js): the tank and the cab, each an upright
    * cylinder standing on the road. Null once it has gone up.
-   * @returns {{x: number, z: number, radius: number, top: number}[]|null}
+   * @returns {{x: number, z: number, radius: number, top: number, detonate: () => void}[]|null}
    */
   function tankerTarget() {
+    /** @type {{x: number, z: number, radius: number, top: number, detonate: () => void}[]} */
     const out = [];
     const top = TANKER.tankRadius * 2 + TANKER.wheelRadius + 0.5;
     /**

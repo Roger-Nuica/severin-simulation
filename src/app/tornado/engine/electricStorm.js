@@ -80,7 +80,9 @@ import { createElectricEmp } from './electricStorm/emp.js';
  *   isActive: () => boolean,
  *   empRing: () => ({x: number, z: number, radius: number, strength: number}|null),
  *   resetElectricStorm: () => void,
- *   disposeElectricStorm: () => void
+ *   disposeElectricStorm: () => void,
+ *   surfaceArc: (from: THREE.Vector3, to: THREE.Vector3) => void,
+ *   electrocute: (person: Object) => void
  * }}
  */
 export function createElectricStormSystem(ctx) {
@@ -491,7 +493,7 @@ export function createElectricStormSystem(ctx) {
   /** @returns {void} */
   function disposeElectricStorm() {
     if (!S.group) return;
-    S.group.traverse((child) => {
+    S.group.traverse((/** @type {any} */ child) => {
       if (child.geometry) child.geometry.dispose();
     });
     for (const mat of S.materials) mat.dispose();

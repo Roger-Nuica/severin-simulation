@@ -278,7 +278,7 @@ export function createDownburstSystem(ctx) {
   }
 
   /**
-   * @param {[number, number]} range
+   * @param {ReadonlyArray<number>} range
    * @returns {number}
    */
   function between(range) {
@@ -301,7 +301,7 @@ export function createDownburstSystem(ctx) {
    * @returns {void}
    */
   function setButtonActive(on) {
-    const button = document.getElementById('btn-downburst');
+    const button = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-downburst'));
     if (!button) return;
     button.classList.toggle('active', on);
     button.setAttribute('aria-pressed', on ? 'true' : 'false');

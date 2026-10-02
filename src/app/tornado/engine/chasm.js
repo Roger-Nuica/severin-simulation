@@ -59,6 +59,7 @@ import { CHASM, LAVA_VERTEX, LAVA_FRAGMENT, WALL_ORDER, LID_ORDER, LID_Y, SOIL_T
  *   openChasm: () => void,
  *   updateChasms: (dt: number) => void,
  *   gapAt: (x: number, z: number) => number,
+ *   setFrozen: (on: boolean) => {mesh: THREE.Mesh}[],
  *   resetChasms: () => void,
  *   disposeChasms: () => void
  * }}
@@ -169,7 +170,7 @@ export function createChasmSystem(ctx) {
    * Builds the three meshes for a path, with index buffers fixed and the
    * positions filled in by poseChasm as it opens.
    * @param {Chasm['path']} path
-   * @returns {{walls: THREE.Mesh, lid: THREE.Mesh, rims: THREE.Mesh}}
+   * @returns {{walls: THREE.Mesh, lid: THREE.Mesh, rims: THREE.Mesh, lava: THREE.Mesh}}
    */
   function buildMeshes(path) {
     const n = path.length;
@@ -536,7 +537,7 @@ export function createChasmSystem(ctx) {
       // Gone: a person for good, anything else left out of sight.
       if (f.person) {
         f.mesh.removeFromParent();
-        f.mesh.traverse((child) => {
+        f.mesh.traverse((/** @type {any} */ child) => {
           if (child.geometry) child.geometry.dispose();
           if (child.material) child.material.dispose();
         });

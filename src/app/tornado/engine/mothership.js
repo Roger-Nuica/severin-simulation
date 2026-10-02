@@ -579,7 +579,7 @@ export function createMothershipSystem(ctx) {
     for (const mesh of [ship && ship.group, beam, foot, ...(keepScorch ? [] : scorches)]) {
       if (!mesh) continue;
       Sim.three.scene.remove(mesh);
-      mesh.traverse((child) => {
+      mesh.traverse((/** @type {any} */ child) => {
         if (child.geometry) child.geometry.dispose();
         if (child.material) child.material.dispose();
       });

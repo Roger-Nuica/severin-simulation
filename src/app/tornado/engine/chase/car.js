@@ -373,7 +373,7 @@ export function createChaseCarSystem(ctx) {
    * @returns {void}
    */
   function disposeCarMesh(mesh) {
-    mesh.traverse((child) => {
+    mesh.traverse((/** @type {any} */ child) => {
       // The wheel and detail geometry/materials are shared by every car (see
       // getCarWheelAssets/getCarDetailAssets), so disposing the chase car must
       // not tear them out from under the parked ones still drawing with them.

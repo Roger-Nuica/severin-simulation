@@ -1,3 +1,4 @@
+/** @typedef {import('./config.js').Vent} Vent */
 import * as THREE from 'three';
 import { pointScaleFor, markPoolDirty } from '../particlePool.js';
 import { FISSURE, CALDERA, FOUNTAIN, SPATTER, ASH, between, pointAlong } from './config.js';

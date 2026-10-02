@@ -1203,8 +1203,8 @@ export function createSimulation(container) {
     const target = Math.min(Sim.params.debrisCount, DEBRIS_CAP);
     for (let i = 0; i < target; i++) spawnAmbientDebris();
 
-    document.getElementById('btn-start').disabled = true;
-    document.getElementById('btn-pause').disabled = false;
+    /** @type {HTMLButtonElement} */ (document.getElementById('btn-start')).disabled = true;
+    /** @type {HTMLButtonElement} */ (document.getElementById('btn-pause')).disabled = false;
     document.getElementById('btn-pause').textContent = '⏸ Pause';
   }
   
@@ -1336,9 +1336,9 @@ export function createSimulation(container) {
     resetReinforcements();
     lifecycle.endPhase('reset');
 
-    document.getElementById('btn-start').disabled = false;
+    /** @type {HTMLButtonElement} */ (document.getElementById('btn-start')).disabled = false;
     stormLife.resetStormLife();
-    document.getElementById('btn-pause').disabled = true;
+    /** @type {HTMLButtonElement} */ (document.getElementById('btn-pause')).disabled = true;
     document.getElementById('btn-pause').textContent = '⏸ Pause';
   }
 

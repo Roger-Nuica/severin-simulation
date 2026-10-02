@@ -61,7 +61,7 @@ export function createTerminatorModel(ctx, S, api) {
 
     // Legs: thigh from the hip, shin from the knee, a flat foot.
     const legs = {};
-    for (const [side, key] of [[-1, 'L'], [1, 'R']]) {
+    for (const [side, key] of /** @type {[number, string][]} */ ([[-1, 'L'], [1, 'R']])) {
       const hip = new THREE.Group();
       hip.position.set(side * 0.12, 0.74, 0);
       body.add(hip);
@@ -87,7 +87,7 @@ export function createTerminatorModel(ctx, S, api) {
 
     // Arms from the shoulders.
     const arms = {};
-    for (const [side, key] of [[-1, 'L'], [1, 'R']]) {
+    for (const [side, key] of /** @type {[number, string][]} */ ([[-1, 'L'], [1, 'R']])) {
       const shoulder = new THREE.Group();
       shoulder.position.set(side * 0.24, 1.34, 0);
       body.add(shoulder);
@@ -112,7 +112,7 @@ export function createTerminatorModel(ctx, S, api) {
 
     return {
       root,
-      joints: { ...legs, ...arms, head, body },
+      joints: /** @type {Unit['joints']} */ ({ ...legs, ...arms, head, body }),
       eyeMat,
       phase: 'walking',
       heading: 0,

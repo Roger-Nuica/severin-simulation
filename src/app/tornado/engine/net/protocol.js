@@ -63,7 +63,7 @@ const inRange = (v, lo, hi) => num(v) && v >= lo && v <= hi;
 /**
  * Parses a raw frame to a plain object, or null when it is too big, not
  * JSON, or not an object.
- * @param {string|Buffer|ArrayBuffer} raw
+ * @param {string|Uint8Array|ArrayBuffer} raw
  * @param {number} [max]
  * @returns {Object|null}
  */

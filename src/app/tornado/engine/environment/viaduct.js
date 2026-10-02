@@ -201,7 +201,7 @@ export function createViaductSystem(ctx) {
       const idx = Sim.objects.indexOf(obj);
       if (idx !== -1) Sim.objects.splice(idx, 1);
     }
-    S.group.traverse((child) => {
+    S.group.traverse((/** @type {any} */ child) => {
       if (child.geometry) child.geometry.dispose();
     });
     for (const mat of S.materials) mat.dispose();

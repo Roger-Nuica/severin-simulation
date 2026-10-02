@@ -70,4 +70,5 @@ export const PAD = 0.6 * T800.scale * 0.3;
  * @property {number} watchZ
  * @property {Object|null} ignore a person it gave up on
  * @property {number} ignoreTimer
+ * @property {number} [bulletHits] shots taken so far (terminator/hits.js)
  */

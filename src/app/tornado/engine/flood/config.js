@@ -161,7 +161,7 @@ export function createCrackTexture() {
           length * 0.5, width * 0.6, depth - 1);
       }
     }
-    for (const [colour, extra] of [['rgba(200, 225, 235, 0.35)', 2.2], ['rgba(12, 10, 9, 0.95)', 0]]) {
+    for (const [colour, extra] of /** @type {[string, number][]} */ ([['rgba(200, 225, 235, 0.35)', 2.2], ['rgba(12, 10, 9, 0.95)', 0]])) {
       g.strokeStyle = colour;
       g.lineWidth = width + extra;
       g.beginPath();

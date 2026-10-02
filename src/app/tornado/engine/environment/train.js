@@ -609,7 +609,7 @@ export function createTrainSystem(ctx) {
     if (group) scene.remove(group);
     if (track) {
       scene.remove(track);
-      track.traverse((o) => {
+      track.traverse((/** @type {any} */ o) => {
         if (!o.isMesh) return;
         o.geometry.dispose();
         o.material.dispose();

@@ -32,7 +32,7 @@ export function createVortexShape(ctx, S, api) {
    *  - dropEnd .. 1: the rope swells out to full width with a slight
    *    overshoot, so it lands on its size rather than creeping up to it.
    * @param {number} b 0..1
-   * @returns {{drop: number, width: number, alpha: number, ground: number, crown: number}}
+   * @returns {{drop: number, width: number, alpha: number, ground: number, crown: number, shock: number}}
    */
   function birthShape(b) {
     if (b >= 1) return { drop: 1, width: 1, alpha: 1, ground: 1, crown: 1, shock: 0 };

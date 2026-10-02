@@ -25,10 +25,12 @@ import { createImpactDamage } from './damage/impact.js';
  * @param {Object} ctx
  * @returns {{
  *   updateDamage: (dt: number) => void,
+ *   updatePendingShocks: (dt: number) => void,
  *   resetDamage: () => void,
  *   damageFromImpact: (target: SimObject, at: THREE.Vector3, energy: number) => boolean,
  *   collapseBuilding: (obj: SimObject, depth: number) => void,
  *   addDamageScore: (points: number) => void,
+ *   flattenTree: (obj: SimObject, dirX: number, dirZ: number) => boolean,
  *   shockBuilding: (building: SimObject, shock: number, origin: THREE.Vector3) => void,
  *   IMPACT_MIN_ENERGY: number
  * }}

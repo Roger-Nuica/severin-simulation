@@ -39,6 +39,7 @@ export const FIRE_GUN = {
  *   flashMessage: (text: string) => void, rogerPosition: () => THREE.Vector3}} hero
  * @returns {{
  *   build: (addHandsAndMuzzle: (group: THREE.Group, z: number, colour: THREE.Color) => {muzzle: THREE.Object3D, flash: THREE.Mesh}) => {group: THREE.Group, muzzle: THREE.Object3D, flash: THREE.Mesh, pilot: THREE.Mesh},
+ *   breathe: (gun: {tick: number}, dt: number, muzzle: THREE.Vector3, aimDir: THREE.Vector3) => void,
  *   update: (dt: number, firing: boolean, muzzle: THREE.Vector3|null, aimDir: THREE.Vector3) => void,
  *   clear: () => void,
  *   dispose: () => void

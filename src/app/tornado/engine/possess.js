@@ -147,7 +147,7 @@ export function createPossessSystem(ctx) {
    */
   function setExclusiveButtonsDisabled(disabled) {
     for (const id of EXCLUSIVE_BUTTON_IDS) {
-      const button = document.getElementById(id);
+      const button = /** @type {HTMLButtonElement|null} */ (document.getElementById(id));
       if (button) button.disabled = disabled;
     }
   }

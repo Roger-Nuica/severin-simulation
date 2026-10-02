@@ -122,6 +122,10 @@ export const VEHICLE_KINDS = {
  * @property {number} beaconPhase
  * @property {Object|null} job whatever dispatched it, for its owner to read
  * @property {string} state owner-defined; this module only reads `lost`
+ * @property {SimObject|null} [target] what the emergency system sent it to (emergency/index.js)
+ * @property {number} [timer] seconds left on the job it is doing (emergency/index.js)
+ * @property {{x: number, z: number}} [home] where it parks (emergency/index.js)
+ * @property {number} [steamAccumulator] fractional steam puffs owed (emergency/index.js)
  */
 
 /**

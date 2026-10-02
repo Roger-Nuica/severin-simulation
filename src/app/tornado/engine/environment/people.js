@@ -179,7 +179,7 @@ export function createPeopleSystem(ctx) {
     // not directly to the scene, so removing it from the scene would be a
     // silent no-op and leave the figure still rendered.
     person.mesh.removeFromParent();
-    person.mesh.traverse((child) => {
+    person.mesh.traverse((/** @type {any} */ child) => {
       if (child.geometry) child.geometry.dispose();
       if (child.material) child.material.dispose();
     });

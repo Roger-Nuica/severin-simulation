@@ -230,7 +230,7 @@ export function createHeroModels(ctx, S, api) {
     const boot = keepMat(new THREE.MeshStandardMaterial({ color: 0x0c0b0a, roughness: 0.4, metalness: 0.2 }));
     let skin = null;
     const replaced = new Set();
-    obj.mesh.traverse((child) => {
+    obj.mesh.traverse((/** @type {any} */ child) => {
       if (!child.material) return;
       if (/_head/.test(child.name)) {
         skin = child.material;

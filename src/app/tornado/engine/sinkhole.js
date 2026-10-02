@@ -215,7 +215,7 @@ export function createSinkholeSystem(ctx) {
    * @returns {void}
    */
   function disposeHole(hole) {
-    hole.root.traverse((child) => {
+    hole.root.traverse((/** @type {any} */ child) => {
       if (child.geometry) child.geometry.dispose();
       if (child.material) child.material.dispose();
     });

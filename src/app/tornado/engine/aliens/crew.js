@@ -354,6 +354,7 @@ export function createAlienCrew(ctx, S, api) {
    * @returns {{kind: 'person'|'building', obj: Object, x: number, z: number, d: number}|null}
    */
   function nearestTarget(p) {
+    /** @type {{kind: 'person'|'building', obj: Object, x: number, z: number, d: number}|null} */
     let best = null;
     let bestD = ALIENS.raySight;
     for (const person of ctx.Environment.people) {

@@ -259,7 +259,7 @@ export function createAlienShip(ctx, S, api) {
     if (!S.ship) return;
     const geometries = new Set();
     const materials = new Set();
-    S.ship.group.traverse((child) => {
+    S.ship.group.traverse((/** @type {any} */ child) => {
       if (child.geometry) geometries.add(child.geometry);
       if (child.material) materials.add(child.material);
     });

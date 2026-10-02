@@ -97,6 +97,7 @@ const LAVA = {
  *   initLavanado: () => void,
  *   updateLavanado: (dt: number) => void,
  *   erupting: () => boolean,
+ *   contactAt: (x: number, z: number) => boolean,
  *   resetLavanado: () => void,
  *   disposeLavanado: () => void
  * }}

@@ -146,7 +146,7 @@ export function createMeteorRocks(ctx, S, api) {
    * @returns {void}
    */
   function disposeMeteor(meteor) {
-    meteor.mesh.traverse((child) => {
+    meteor.mesh.traverse((/** @type {any} */ child) => {
       // Sprites all share one quad owned by three.js itself; it is not ours
       // to free.
       if (child.geometry && !child.isSprite) child.geometry.dispose();

@@ -190,7 +190,7 @@ export function createShelterSystem(ctx) {
     materials.push(wallMat, plinthMat);
     for (const wall of walls) wall.material = wallMat;
     const roof = root.userData.pieces.roof;
-    roof.traverse((child) => {
+    roof.traverse((/** @type {any} */ child) => {
       if (!child.isMesh) return;
       const roofMat = new THREE.MeshStandardMaterial({ color: BUNKER_ROOF_COLOUR, roughness: 1 });
       materials.push(roofMat);
@@ -277,7 +277,7 @@ export function createShelterSystem(ctx) {
     // The environment group, not the scene, is the parent (see
     // people.js explodePerson).
     person.mesh.removeFromParent();
-    person.mesh.traverse((child) => {
+    person.mesh.traverse((/** @type {any} */ child) => {
       if (child.geometry) child.geometry.dispose();
       if (child.material) child.material.dispose();
     });

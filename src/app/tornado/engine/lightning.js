@@ -91,7 +91,7 @@ export function createLightningSystem(ctx) {
   const Lightning = {
     flashLight: /** @type {THREE.PointLight|null} */ (null),
     boltGroup: /** @type {THREE.Group|null} */ (null),
-    bolts: /** @type {{mesh:THREE.Mesh, life:number, maxLife:number}[]} */ ([]),
+    bolts: /** @type {{mesh:THREE.Group, life:number, maxLife:number}[]} */ ([]),
     overlay: /** @type {HTMLDivElement|null} */ (null),
     pendingThunder: /** @type {{delay:number, power:number, muffle:number}[]} */ ([]),
     activeAudioNodes: /** @type {AudioScheduledSourceNode[]} */ ([]),
@@ -169,7 +169,7 @@ export function createLightningSystem(ctx) {
   /**
    * @param {THREE.Vector3[]} points
    * @param {number} radius
-   * @returns {THREE.Mesh}
+   * @returns {THREE.Group}
    */
   function createBoltMesh(points, radius, rail = false) {
     const curve = new PolylineCurve(points);
@@ -231,7 +231,8 @@ export function createLightningSystem(ctx) {
    * @returns {void}
    */
   function disposeBolt(boltMesh) {
-    boltMesh.traverse((child) => {
+    boltMesh.traverse((object) => {
+      const child = /** @type {THREE.Mesh<THREE.BufferGeometry, THREE.Material>} */ (object);
       if (child.geometry) child.geometry.dispose();
       if (child.material) child.material.dispose();
     });

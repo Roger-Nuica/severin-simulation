@@ -87,7 +87,7 @@ import { createCrowdBehaviour } from './peopleMotion/behaviour.js';
 
 /**
  * @param {Object} ctx
- * @returns {{ updatePeopleMotion: (dt: number) => void }}
+ * @returns {{ updatePeopleMotion: (dt: number) => void, getMotion: (person: SimObject, index: number) => PersonMotion|null }}
  */
 export function createPeopleMotionSystem(ctx) {
   const { Sim } = ctx;

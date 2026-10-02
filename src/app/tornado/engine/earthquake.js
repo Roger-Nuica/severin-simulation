@@ -87,6 +87,7 @@ const DUST = {
  *   triggerEarthquake: () => void,
  *   resetEarthquake: () => void,
  *   disposeEarthquake: () => void,
+ *   kickDust: (x: number, z: number, puffs?: number, scale?: number) => void,
  *   earthquakeStrength: () => number
  * }}
  */
@@ -123,7 +124,7 @@ export function createEarthquakeSystem(ctx) {
     banner.innerHTML = '<span class="title"></span><span class="sub"></span>';
     bannerHost(container).appendChild(banner);
 
-    const quakeButton = document.getElementById('btn-earthquake');
+    const quakeButton = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-earthquake'));
     if (quakeButton) {
       quakeButton.addEventListener('click', () => triggerEarthquake(), { signal: ctx.signal });
       if (!EARTHQUAKE.enabled) {

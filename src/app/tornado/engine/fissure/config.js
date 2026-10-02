@@ -337,6 +337,7 @@ export const LAKE_FRAGMENT = /* glsl */`
  * @property {boolean} opened
  * @property {FloatUniform} reveal eased growthProgress, as the shader sees it
  * @property {FloatUniform} lava 0..1 how far its seam has heated up
+ * @property {boolean} rift whether it is the big rift rather than a branch crack
  * @property {THREE.Mesh} mesh
  */
 
@@ -354,6 +355,7 @@ export const LAKE_FRAGMENT = /* glsl */`
  * @property {number} level current glow, for spatter and lights
  * @property {number} seed per-vent random, for its flicker
  * @property {FloatUniform} lava
+ * @property {HotSpot} spot the entry it publishes to hotSpots()
  */
 
 /**

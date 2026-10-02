@@ -25,7 +25,7 @@ const BUILDING_GAP = 2.5;
 
 /**
  * @param {Object} ctx
- * @returns {{ Environment: Object, generateEnvironment: () => void, resetEnvironment: () => void }}
+ * @returns {{ Environment: Object, generateEnvironment: (seed?: number) => void, resetEnvironment: (seed?: number) => void }}
  */
 export function createEnvironmentSystem(ctx) {
   const { Sim } = ctx;
