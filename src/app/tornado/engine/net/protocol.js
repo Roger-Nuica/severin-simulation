@@ -45,8 +45,8 @@ export const ROOM = {
   idleMs: 30 * 60 * 1000
 };
 
-/** Weapon wheel order (R-049). */
-export const WEAPONS = ['rifle', 'minigun', 'railgun', 'fire', 'blackhole'];
+/** Weapon wheel order (R-049, plus the Katana that heroWeapons.js appends). */
+export const WEAPONS = ['rifle', 'minigun', 'railgun', 'fire', 'blackhole', 'katana'];
 
 export const SNAPSHOT_KINDS = ['players', 'tornadoes', 'terminators', 'aliens', 'ships', 'vehicles'];
 

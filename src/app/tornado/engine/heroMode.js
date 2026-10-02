@@ -781,6 +781,7 @@ export function createHeroModeSystem(ctx) {
       const p = S.roger.mesh.position;
       return { x: p.x, z: p.z, heading: S.state.heading, weapon: S.weapons ? S.weapons.current() : '', driving: S.state.phase === 'driving' };
     },
+    guestFlame: (/** @type {any} */ gun, /** @type {number} */ dt, /** @type {THREE.Vector3} */ muzzle, /** @type {THREE.Vector3} */ dir) => { if (S.weapons) S.weapons.guestFlame(gun, dt, muzzle, dir); },
     setCoopDown: (/** @type {boolean} */ down) => {
       if (!S.roger) return;
       S.state.coopDown = down;

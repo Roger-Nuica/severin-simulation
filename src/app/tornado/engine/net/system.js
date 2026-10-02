@@ -7,6 +7,8 @@ import { createEventEmitter, createEventDeduper } from './events.js';
 import { createPlayerRegistry, REVIVE } from './players.js';
 import { PROTOCOL_VERSION, LIMITS, WEAPONS } from './protocol.js';
 import { HERO } from '../hero/config.js';
+import { HOLE } from '../player/blackHole.js';
+import { ENERGY } from '../player/energy.js';
 
 /**
  * ===========================================================================
@@ -29,17 +31,23 @@ import { HERO } from '../hero/config.js';
  * diverge from the host's); the host's tornadoes, players, Terminators,
  * aliens, ships and moving vehicles are drawn as proxies, interpolated.
  *
- * Not implemented for the guest (documented, not silent): the Fire Gun and
- * Black Hole weapons, EMP and Time Slow (time is host-authoritative).
+ * The guest carries the whole wheel (rifle, minigun, railgun, Fire Gun, Black
+ * Hole Gun, Katana), each through the systems Roger's use. Not implemented
+ * for the guest: EMP and Time Slow (time is host-authoritative).
  */
 
 const SNAP_INTERVAL = 1 / LIMITS.snapshotHz;
 const INPUT_INTERVAL = 1 / 30;
-const GUEST_WEAPONS = [
-  { type: /** @type {const} */ ('plasma'), cooldown: 0.45, range: 140 },
-  { type: /** @type {const} */ ('bullet'), cooldown: 0.09, range: 100 },
-  { type: /** @type {const} */ ('bolt'), cooldown: 1.6, range: 220 }
-];
+/** Hitscan weapons: the damage type each answers with in the enemy registry. */
+const GUEST_WEAPONS = {
+  rifle: { type: /** @type {const} */ ('plasma'), cooldown: 0.45, range: 140 },
+  minigun: { type: /** @type {const} */ ('bullet'), cooldown: 0.09, range: 100 },
+  railgun: { type: /** @type {const} */ ('bolt'), cooldown: 1.6, range: 220 }
+};
+const KATANA = { cooldown: 0.5, reach: 3.6, halfAngle: 0.9 };
+const HOLE_COOLDOWN = 0.6;
+const HOLE_MIN_RANGE = 12;
+const EYE = 1.4;
 const KILL_SCORE = 20;
 /** The car Roger drives is the one co-op vehicle (Hero Mode car flow). */
 const CAR_ID = 9000;
@@ -76,7 +84,7 @@ export function createNetSystem(ctx) {
     bypass: false,
     holdRevive: false,
     pendingWelcome: false,
-    /** @type {Map<string, {obj: any, cd: number, tpCd: number, lastAbil: number, lastUse: boolean}>} */
+    /** @type {Map<string, {obj: any, cd: number, tpCd: number, lastAbil: number, lastUse: boolean, flame: {tick: number}}>} */
     avatars: new Map(),
     /** @type {WeakMap<object, number>} */
     ids: new WeakMap(),
@@ -113,6 +121,9 @@ export function createNetSystem(ctx) {
   /** @type {Record<string, HTMLElement|null>} */
   const ui = {};
   const hero = () => ctx.systems.heroMode;
+  // Scratch for the guest's flame (per instance, never module state).
+  const aimVec = new THREE.Vector3();
+  const muzzleVec = new THREE.Vector3();
 
   // ---------------------------------------------------------------------
   // Small helpers
@@ -321,7 +332,7 @@ export function createNetSystem(ctx) {
     marker.position.y = 2.5;
     obj.mesh.add(marker);
     Sim.three.scene.add(obj.mesh);
-    S.avatars.set(id, { obj, cd: 0, tpCd: 0, lastAbil: 0, lastUse: false });
+    S.avatars.set(id, { obj, cd: 0, tpCd: 0, lastAbil: 0, lastUse: false, flame: { tick: 0 } });
   }
 
   /** @param {string} id */
@@ -453,7 +464,7 @@ export function createNetSystem(ctx) {
         p.heading = input.yaw;
         p.weapon = input.weapon;
         if (ctl.move && dt > 0) moveGuest(p, input, dt);
-        if (ctl.aim && input.fire) guestFire(p, a, input);
+        if (ctl.aim && input.fire) guestFire(p, a, input, dt);
         const edge = input.abil & ~a.lastAbil;
         a.lastAbil = input.abil;
         // Bit 2: Teleport. Bits 1 and 4 (Time Slow, EMP) are host-only.
@@ -549,42 +560,105 @@ export function createNetSystem(ctx) {
   }
 
   /**
-   * One shot from a guest: a ray from the eyes, nearest enemy whose hitbox it
-   * crosses, resolved through the shared enemy registry so every enemy's own
-   * `accepts` and damage handler apply (no new damage path).
+   * The nearest enemy a ray from the guest's eyes crosses (a standing
+   * cylinder: the kind's hitbox, else a person-sized default).
    * @param {import('./players.js').Player} p
-   * @param {{cd: number}} a
    * @param {import('./protocol.js').PlayerInput} input
+   * @param {number} range
+   * @returns {{e: any, kind: any, t: number}|null}
    */
-  function guestFire(p, a, input) {
-    const w = GUEST_WEAPONS[input.weapon];
-    if (!w) {
-      if (a.cd <= 0) { a.cd = 1; sendEvent('notice', { text: 'That weapon is not available in co-op' }, p.id); }
-      return;
-    }
-    if (a.cd > 0) return;
-    a.cd = w.cooldown;
-    const ox = p.x, oy = 1.4, oz = p.z;
+  function scan(p, input, range) {
+    const ox = p.x, oy = EYE, oz = p.z;
     const cp = Math.cos(input.pitch);
     const dx = Math.sin(input.yaw) * cp, dy = Math.sin(input.pitch), dz = Math.cos(input.yaw) * cp;
-    let best = null, bestKind = null, bestT = w.range;
+    /** @type {{e: any, kind: any, t: number}|null} */
+    let best = null;
+    let bestT = range;
+    const hx = Math.hypot(dx, dz) || 1e-6;
     ctx.systems.enemies.each((/** @type {any} */ e, /** @type {any} */ kind) => {
       const q = kind.position(e);
       const box = kind.hitbox ? kind.hitbox(e) : { x: q.x, z: q.z, radius: 1.2, top: 2.4 };
       // Closest approach of the ray to the cylinder axis, in the ground plane.
-      const hx = Math.hypot(dx, dz) || 1e-6;
       const t = ((box.x - ox) * dx + (box.z - oz) * dz) / (hx * hx);
       if (t < 0 || t > bestT) return;
       const px = ox + dx * t, pz = oz + dz * t, py = oy + dy * t;
       if (Math.hypot(px - box.x, pz - box.z) > box.radius || py < 0 || py > box.top) return;
-      best = e; bestKind = kind; bestT = t;
+      best = { e, kind, t };
+      bestT = t;
     });
-    if (best && bestKind) {
-      const stopped = ctx.systems.enemies.hit(best, bestKind, { type: w.type, at: { x: ox + dx * bestT, y: oy + dy * bestT, z: oz + dz * bestT } });
-      if (stopped) {
-        ctx.systems.damage.addDamageScore(KILL_SCORE);
-        sendEvent('score', { id: Number(p.id), points: KILL_SCORE });
+    return best;
+  }
+
+  /** @param {number} points @param {string} id */
+  function credit(points, id) {
+    ctx.systems.damage.addDamageScore(points);
+    sendEvent('score', { id: Number(id), points });
+  }
+
+  /**
+   * One trigger pull from a guest, whatever is in their hand. Every weapon
+   * resolves through the paths Roger's use: the enemy registry (so each
+   * enemy's own `accepts` and damage handler decide), the building-fire and
+   * black-hole systems, and damage.addDamageScore. Nothing hits a player
+   * (friendly fire is off).
+   * @param {import('./players.js').Player} p
+   * @param {{cd: number, flame: {tick: number}}} a
+   * @param {import('./protocol.js').PlayerInput} input
+   * @param {number} dt
+   */
+  function guestFire(p, a, input, dt) {
+    const name = WEAPONS[input.weapon];
+    const ox = p.x, oz = p.z;
+    const cp = Math.cos(input.pitch);
+    const dx = Math.sin(input.yaw) * cp, dy = Math.sin(input.pitch), dz = Math.cos(input.yaw) * cp;
+    if (name === 'fire') {
+      // Held: the same flame, sound and burning as Roger's, from the guest.
+      aimVec.set(dx, dy, dz);
+      muzzleVec.set(ox, EYE, oz);
+      hero().guestFlame(a.flame, dt, muzzleVec, aimVec);
+      return;
+    }
+    if (a.cd > 0) return;
+    if (name === 'rifle' || name === 'minigun' || name === 'railgun') {
+      const w = /** @type {NonNullable<typeof GUEST_WEAPONS[keyof typeof GUEST_WEAPONS]>} */ (GUEST_WEAPONS[name]);
+      a.cd = w.cooldown;
+      const hit = scan(p, input, w.range);
+      if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: EYE + dy * hit.t, z: oz + dz * hit.t } })) credit(KILL_SCORE, p.id);
+    } else if (name === 'katana') {
+      a.cd = KATANA.cooldown;
+      // A cut in front of the guest: the nearest enemy inside the arc takes a blade hit.
+      let target = null;
+      let bestD = KATANA.reach;
+      ctx.systems.enemies.each((/** @type {any} */ e, /** @type {any} */ kind) => {
+        if (!kind.accepts.includes('blade')) return;
+        const q = kind.position(e);
+        const d = Math.hypot(q.x - ox, q.z - oz);
+        if (d > bestD) return;
+        const off = Math.atan2(q.x - ox, q.z - oz) - input.yaw;
+        if (Math.abs(Math.atan2(Math.sin(off), Math.cos(off))) > KATANA.halfAngle) return;
+        target = { e, kind, q };
+        bestD = d;
+      });
+      if (target) {
+        const t = /** @type {{e: any, kind: any, q: {x: number, z: number}}} */ (target);
+        if (ctx.systems.enemies.hit(t.e, t.kind, { type: 'blade', amount: 1, at: { x: t.q.x, z: t.q.z } })) credit(KILL_SCORE, p.id);
       }
+    } else if (name === 'blackhole') {
+      a.cd = HOLE_COOLDOWN;
+      // Where the aim meets the ground, or the enemy it is on.
+      let gx = 0, gz = 0, ok = false;
+      const hit = scan(p, input, 200);
+      if (hit) { const q = hit.kind.position(hit.e); gx = q.x; gz = q.z; ok = true; }
+      else if (dy < -0.02) {
+        const t = EYE / -dy;
+        gx = ox + dx * t; gz = oz + dz * t; ok = true;
+      }
+      if (!ok) { sendEvent('notice', { text: 'BLACK HOLE GUN — aim at the ground or a target' }, p.id); return; }
+      if (Math.hypot(gx - ox, gz - oz) < HOLE_MIN_RANGE) { sendEvent('notice', { text: 'TOO CLOSE — aim further out' }, p.id); return; }
+      const cost = HOLE.cost * 10;
+      if (!ENERGY.infinite && p.energy < cost) { sendEvent('notice', { text: `BLACK HOLE GUN — needs ${cost}% energy` }, p.id); return; }
+      const result = ctx.systems.blackHole.fire(Math.max(-HERO.bound, Math.min(HERO.bound, gx)), Math.max(-HERO.bound, Math.min(HERO.bound, gz)));
+      if (result && !ENERGY.infinite) p.energy -= cost;
     }
   }
 
@@ -811,7 +885,7 @@ export function createNetSystem(ctx) {
     const row = S.peerRow;
     const state = row ? (row[4] === 0 ? 'UP' : row[4] === 1 ? 'DOWN — wait for a revive' : 'DEAD') : '…';
     const ms = S.peerMission;
-    S.hud.innerHTML = `<b>PLAYER ${S.myId}</b> · ${state}<br>WEAPON ${WEAPONS[S.weapon] || ''}${S.weapon > 2 ? ' (host only)' : ''} · ENERGY ${row ? row[6] : 100}%<br>SCORE ${S.peerScore.toLocaleString()}${ms ? `<br>MISSION ${ms.id}: ${ms.value}/${ms.goal}` : ''}<br><small>WASD move · mouse look (click to lock) · click fire · wheel weapon · E teleport · F revive</small>`;
+    S.hud.innerHTML = `<b>PLAYER ${S.myId}</b> · ${state}<br>WEAPON ${WEAPONS[S.weapon] || ''} · ENERGY ${row ? row[6] : 100}%<br>SCORE ${S.peerScore.toLocaleString()}${ms ? `<br>MISSION ${ms.id}: ${ms.value}/${ms.goal}` : ''}<br><small>WASD move · mouse look (click to lock) · click fire · wheel weapon · E teleport · F revive</small>`;
   }
 
   // ---------------------------------------------------------------------

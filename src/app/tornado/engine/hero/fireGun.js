@@ -116,8 +116,8 @@ export function createFireGun(ctx, hero) {
    * @param {THREE.Vector3} dir
    * @returns {void}
    */
-  function scorch(dir) {
-    const r = hero.rogerPosition();
+  function scorch(dir, origin) {
+    const r = origin || hero.rogerPosition();
     const fire = ctx.systems.buildingFire;
     for (const b of ctx.Environment.buildings) {
       if (b.damageState === 'collapsed' || fire.isBurning(b)) continue;
@@ -178,6 +178,28 @@ export function createFireGun(ctx, hero) {
     if (tickClock <= 0) tickClock = FIRE_GUN.tick;
   }
 
+  /**
+   * A co-op guest's flame (engine/net/system.js): the same particles, sound
+   * and burning as Roger's, from their own position. Their own tick clock,
+   * so two guns do not share one.
+   * @param {{tick: number}} gun the guest's clock holder
+   * @param {number} dt
+   * @param {THREE.Vector3} muzzle
+   * @param {THREE.Vector3} aimDir
+   * @returns {void}
+   */
+  function breathe(gun, dt, muzzle, aimDir) {
+    from.copy(muzzle).addScaledVector(aimDir, FIRE_GUN.ahead);
+    flames.emit(from, aimDir, Math.round(FIRE_GUN.rate * dt + Math.random()));
+    ctx.systems.creatureSounds.loop('fireGun', from, 0.9);
+    gun.tick -= dt;
+    for (let n = 0; gun.tick <= 0 && n < 4; n++) {
+      gun.tick += FIRE_GUN.tick;
+      scorch(aimDir, muzzle);
+    }
+    if (gun.tick <= 0) gun.tick = FIRE_GUN.tick;
+  }
+
   /** @returns {void} */
   function clear() {
     flames.clear();
@@ -189,5 +211,5 @@ export function createFireGun(ctx, hero) {
     flames.release();
   }
 
-  return { build, update, clear, dispose };
+  return { build, update, breathe, clear, dispose };
 }

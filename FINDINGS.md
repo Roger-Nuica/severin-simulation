@@ -281,8 +281,10 @@ Measured/derived, not a GPU benchmark (the container has none):
   guest shot, one pass per frame for the catch test, and the snapshot build
   every ~67 ms. No allocation in the hot enemy/`Sim.objects` loops; the
   snapshot and the guest's input objects are the only per-tick allocations.
-- **Known limits.** The guest has the rifle, minigun and railgun only (the
-  Fire Gun and Black Hole stay host-only); EMP and Time Slow are host-only
+- **Known limits.** The guest carries the whole weapon wheel (rifle, minigun,
+  railgun, Fire Gun, Black Hole Gun, Katana; the Katana is a simple arc cut
+  through the 'blade' hit, not Roger's full slash/Blade Mode); EMP and Time
+  Slow are host-only
   (time is host-authoritative). Aliens target Roger, not the guest. The
   peer's local simulation stays idle and draws the host's world as proxies,
   so cars thrown by the storm appear as proxy boxes beside their (static)
