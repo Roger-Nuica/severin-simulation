@@ -63,7 +63,8 @@ export function createHeroInput(ctx, S, api) {
    *  - in a car: E, Q or Esc gets out, and nothing else works;
    *  - Esc: the weapon down;
    *  - mouse wheel: the next or the previous weapon;
-   *  - Q E R: the abilities (engine/player/abilities.js) -- Time Slow (Bullet
+   *  - V: Invincible on / off (hero/screen.js toggleInvincible);
+ *  - Q E R: the abilities (engine/player/abilities.js) -- Time Slow (Bullet
    *    Time with the minigun), Teleport, EMP -- not while dying, safe or
    *    driving; the Katana keeps Q as Time Slow like every other weapon;
    *  - right button: raise / lower the weapon; left button: fire while it is
@@ -97,6 +98,12 @@ export function createHeroInput(ctx, S, api) {
           // Held: the charge carries on from the first press.
           if (e.repeat) break;
           const code = e.code;
+          // V: Invincible on / off, whenever he is in play (driving and
+          // frozen included).
+          if (code === 'KeyV' && phase() !== 'dying' && phase() !== 'won') {
+            api.toggleInvincible();
+            break;
+          }
           if (phase() === 'driving') {
             if (code === 'KeyE' || code === 'KeyQ' || code === 'Escape') api.exitCar();
             break;

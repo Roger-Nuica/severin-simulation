@@ -40,8 +40,8 @@ export { SHIP_DAMAGE } from './hero/config.js';
  * aliens too), the Fire Gun and the Black Hole Gun (heroWeapons.js). Each
  * is raised with the right mouse button and fired with the left button or
  * Enter (pullTrigger / releaseTrigger). The abilities are on Q E R
- * (engine/player/abilities.js): Q is Time Slow, seven seconds of the world
- * at 30% (with the minigun in hand, Bullet Time: the world at 3%, its
+ * (engine/player/abilities.js): Q is Time Slow, five seconds of the world
+ * at 10% (with the minigun in hand, Bullet Time: the world at 3%, its
  * bullets hanging in the air), E Teleport, R the EMP. The controls are read through engine/player/input.js
  * (hero/input.js consumeInput).
  *
@@ -211,6 +211,10 @@ export function createHeroModeSystem(ctx) {
       // waits until he has walked away, or he would be straight back in.
       chaseDoorArmed: true,
       spawnShield: 0,
+      // Invincible (V): nothing hurts, kills, dazes or freezes him. A toggle
+      // with no timer, cost or cooldown; it stays on (Restart included) until
+      // V is pressed again.
+      invincible: false,
       dazeHeading: 0,
       dazeSpin: 0,
       flingX: 0,
@@ -404,6 +408,7 @@ export function createHeroModeSystem(ctx) {
       <div class="hero-row hero-partner" hidden>PARTNER <span class="hero-cell hero-hbar hero-pbar"><i></i></span> <span class="hero-hpct hero-ppct"></span></div>
       <div class="hero-row hero-energy">ENERGY <span class="hero-ebar">${'<i></i>'.repeat(ENERGY.segments)}</span> <span class="hero-epct"></span></div>
       <div class="hero-row hero-abilities"></div>
+      <div class="hero-row hero-invincible">🛡 INVINCIBLE · V to turn off</div>
       <div class="hero-row">PLASMA <span class="hero-cell"><i></i></span> <span class="hero-cellpct"></span></div>
       <div class="hero-row hero-charge">CHARGE <span class="hero-cell hero-chargebar"><i></i></span> <span class="hero-chargepct"></span></div>
       <div class="hero-row">BUNKER <span class="hero-arrow">▲</span> <span class="hero-dist"></span></div>
@@ -412,7 +417,7 @@ export function createHeroModeSystem(ctx) {
       <div class="hero-row hero-door">🚗 ENTER — get in the car</div>
       <div class="hero-row hero-drive">🚗 DRIVING · E / Q / Esc — get out</div>
       <div class="hero-msg"></div>
-      <div class="hero-keys">W A S D run · Right-click raise / lower weapon · Wheel switch weapon<br>Click or Enter fire · rifle: hold 2 s for a MEGA BEAM · Q time slow (bullet time with the minigun) · E teleport · R EMP<br>T Landing Support (then R samurai · T rocket · Esc cancel) · Enter at a car's glowing door to drive</div>`;
+      <div class="hero-keys">W A S D run · Right-click raise / lower weapon · Wheel switch weapon<br>Click or Enter fire · rifle: hold 2 s for a MEGA BEAM · Q time slow (bullet time with the minigun) · E teleport · R EMP · V invincible<br>T Landing Support (then R samurai · T rocket · Esc cancel) · Enter at a car's glowing door to drive</div>`;
     container.appendChild(S.hud);
 
     S.over = document.createElement('div');
@@ -741,7 +746,7 @@ export function createHeroModeSystem(ctx) {
    */
   function freezeRoger(seconds) {
     const target = api.rogerTarget();
-    if (!target || !target.onFoot || S.state.frozen > 0) return false;
+    if (!target || !target.onFoot || S.state.frozen > 0 || S.state.invincible) return false;
     S.state.frozen = seconds;
     return true;
   }
@@ -799,7 +804,7 @@ export function createHeroModeSystem(ctx) {
   }
 
   return {
-    initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, standable, freezeRoger, rogerFrozen: () => S.state.frozen > 0, rogerShielded: () => S.state.spawnShield > 0, rogerPhase: () => S.state.phase, killRoger: api.killRoger, hitArea: api.hitArea, chipTornado: api.chipTornado,
+    initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, standable, freezeRoger, rogerFrozen: () => S.state.frozen > 0, rogerShielded: () => S.state.spawnShield > 0 || S.state.invincible, rogerPhase: () => S.state.phase, killRoger: api.killRoger, hitArea: api.hitArea, chipTornado: api.chipTornado,
     resetHero, disposeHero,
     // Co-op (engine/net/system.js): Roger's pose for the shared snapshot, and
     // the down-not-dead state while a teammate can still revive him.

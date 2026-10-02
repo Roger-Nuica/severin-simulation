@@ -23,6 +23,7 @@
  *   Q E R               the abilities (engine/player/abilities.js): Time
  *                       Slow (or Bullet Time with the minigun), Teleport, EMP
  *   Esc                 lower the weapon; with E and Q, get out of a car
+ *   V                   Invincible on / off (hero/input.js)
  *   T                   Landing Support (engine/spaceship/targeting.js, which
  *                       reads it itself, before this: while its marker is
  *                       down, R, T and Esc are its own)

@@ -20,9 +20,10 @@ import { createKatanaTargets } from './targets.js';
  *    chip (a plain `blade` hit, D1: see targets.js). The strike lands
  *    STRIKE_DELAY seconds after the press, at the blade's strike (the
  *    model's wind-up), not at the press.
- *  - The auto-lunge: during that wind-up Roger slides up to LUNGE_MAX metres
- *    towards the nearest cuttable alien in front, stopping LUNGE_STOP metres
- *    short. Every step is tested with the movement helpers (blockedAt,
+ *  - The auto-lunge: during that wind-up Roger slides towards the nearest
+ *    cuttable alien in front (looked for up to LUNGE_MAX metres away), at
+ *    most LUNGE_SLIDE metres -- a nudge, barely noticed -- stopping
+ *    LUNGE_STOP metres short. Every step is tested with the movement helpers (blockedAt,
  *    pushOut) so he never enters a building or leaves HERO.bound, and nothing
  *    runs while he is dazed, frozen, driving or dying.
  *  - The cooldown is COOLDOWN seconds on the weapons' real-time clock
@@ -44,14 +45,16 @@ import { createKatanaTargets } from './targets.js';
  * `cancel`; no allocation happens per slash or per frame (R-048).
  */
 
-/** How far the blade reaches from Roger, metres. */
-const REACH = 3.0;
+/** How far the blade reaches from Roger, metres (3 until 2026-10-02). */
+const REACH = 6.0;
 /** Half-angle of the forward arc the cut lands in, cosine of 60 degrees. */
 const COS_STRIKE_ARC = 0.5;
 /** Half-angle of the arc the lunge looks in, cosine of 45 degrees (narrower, so the cut still lands). */
 const COS_LUNGE_ARC = Math.SQRT1_2;
 /** The furthest an alien can be for Roger to lunge at it, metres. */
 const LUNGE_MAX = 6.0;
+/** The furthest the lunge slides him, metres: a nudge (it was up to LUNGE_MAX until 2026-10-02). */
+const LUNGE_SLIDE = 0.4;
 /** How close the lunge brings him to the alien's centre, metres (inside REACH). */
 const LUNGE_STOP = 1.6;
 /** The blade's height above Roger's feet, metres. */
@@ -232,7 +235,7 @@ export function createKatanaSlash(ctx, env) {
     }
     for (let i = 0; i < f.parryCount; i++) f.parryable[i] = null;
     if (best === Infinity) return false;
-    pending.lunge = Math.min(LUNGE_MAX, Math.max(0, best - LUNGE_STOP));
+    pending.lunge = Math.min(LUNGE_SLIDE, Math.max(0, best - LUNGE_STOP));
     pending.lungeSpeed = pending.lunge / STRIKE_DELAY;
     return true;
   }

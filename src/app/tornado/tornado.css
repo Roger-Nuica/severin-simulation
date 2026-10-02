@@ -1792,6 +1792,9 @@ body.ship-cutscene .minimap {
 /* Hero Mode: the EMP-charge line, and the tracker once nothing is hunting. */
 .hero-hud .hero-emp { display: none; color: #9fe4ff; text-shadow: 0 0 8px rgba(80, 200, 255, 0.8); }
 .hero-hud.charged .hero-emp { display: flex; }
+/* Hero Mode: Invincible (V), shown for as long as it is on. */
+.hero-hud .hero-invincible { display: none; color: #ffe27a; text-shadow: 0 0 8px rgba(255, 210, 80, 0.8); }
+.hero-hud.invincible .hero-invincible { display: flex; }
 /* Hero Mode: the car prompts -- at a glowing door, and while driving. */
 .hero-hud .hero-door, .hero-hud .hero-drive { display: none; color: #ffd35a; }
 .hero-hud.door .hero-door { display: flex; animation: hero-door-pulse 0.9s ease-in-out infinite alternate; }

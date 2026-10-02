@@ -138,6 +138,18 @@ export function createHeroScreen(ctx, S, api) {
   }
 
   /**
+   * V: Invincible on or off. No timer, cost or cooldown -- it stays as set.
+   * Every way to hurt Roger checks it: the health API (through
+   * heroMode.rogerShielded), killRoger, the EMP wave, the tornado's daze and
+   * the freezes.
+   * @returns {void}
+   */
+  function toggleInvincible() {
+    S.state.invincible = !S.state.invincible;
+    flashMessage(S.state.invincible ? 'INVINCIBLE · nothing can hurt Roger' : 'Invincible off');
+  }
+
+  /**
    * Roger is dead: struck down where he stands (or, for 'fall', over the edge
    * of the chasm), the controls gone, and after a moment GAME OVER with
    * Restart and Exit.
@@ -150,6 +162,8 @@ export function createHeroScreen(ctx, S, api) {
     if (!S.Hero.active || !S.roger || S.state.phase === 'dying' || S.state.phase === 'won') return;
     // The spawn shield: nothing gets him in his first seconds.
     if (S.state.spawnShield > 0) return;
+    // Invincible (V): nothing gets him at all.
+    if (S.state.invincible) return;
     // Co-op: while a teammate is up Roger goes down, not out (engine/net/system.js).
     if (ctx.systems.net && ctx.systems.net.interceptRogerDeath(kind)) return;
     if (S.state.phase === 'aiming') api.leaveAim();
@@ -479,6 +493,7 @@ export function createHeroScreen(ctx, S, api) {
     S.hud.classList.toggle('danger', threat < 25);
     const charge = ctx.systems.empCharge ? ctx.systems.empCharge.chargedTimeLeft() : 0;
     S.hud.classList.toggle('charged', charge > 0);
+    S.hud.classList.toggle('invincible', !!S.state.invincible);
     if (charge > 0) S.hud.querySelector('.hero-emptime').textContent = `${Math.ceil(charge)} s`;
     if (S.state.msgTimer > 0) {
       S.state.msgTimer -= rawDt;
@@ -507,5 +522,5 @@ export function createHeroScreen(ctx, S, api) {
     }
   }
 
-  return { showBanner, notify, flashMessage, killRoger, hitArea, announce, checkChasm, updateDeath, hurtFlash, clearHurt, placeFollowCamera, placeAimCamera, placeDeathCamera, updateHud };
+  return { showBanner, notify, flashMessage, toggleInvincible, killRoger, hitArea, announce, checkChasm, updateDeath, hurtFlash, clearHurt, placeFollowCamera, placeAimCamera, placeDeathCamera, updateHud };
 }

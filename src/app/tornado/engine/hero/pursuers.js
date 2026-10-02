@@ -347,7 +347,7 @@ export function createHeroPursuers(ctx, S, api) {
       api.flashMessage('EMP WAVE — the car shielded Roger');
       return;
     }
-    if (S.state.spawnShield > 0) return;
+    if (S.state.spawnShield > 0 || S.state.invincible) return;
     ctx.systems.empCharge.arcAround(r, 3);
     ctx.systems.powerArcSound.playZap(1);
     ctx.systems.health.damagePlayer({

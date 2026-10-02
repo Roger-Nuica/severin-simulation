@@ -253,7 +253,7 @@ export function createHeroCar(ctx, S, api) {
     S.nameTag.position.set(p.x, HERO.tagHeight + 1, p.z);
 
     for (const { Vortex } of ctx.tornadoes.active) {
-      if (Vortex.neutralized || Vortex.birth < 0.3 || S.state.dazeImmunity > 0) continue;
+      if (Vortex.neutralized || Vortex.birth < 0.3 || S.state.dazeImmunity > 0 || S.state.invincible) continue;
       const reach = Sim.params.radius * HERO.dazeReach * (Vortex.sizeMul || 1) * Vortex.birth;
       if (Math.hypot(p.x - Vortex.center.x, p.z - Vortex.center.z) < reach) {
         exitCar();
