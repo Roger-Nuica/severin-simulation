@@ -360,6 +360,8 @@ export function createTrainSystem(ctx) {
   function updateSpeed(train, dt) {
     const ahead = blockAhead(train);
     let want = train.speed;
+    // A solar storm (engine/solarStorm.js): the line has no power.
+    if (ctx.systems.solarStorm && ctx.systems.solarStorm.stalled()) want = 0;
     if (ahead !== Infinity) {
       // Just enough to stop by the gap: v^2 = 2 a d.
       want = Math.min(want, Math.sqrt(2 * TRAIN.brake * Math.max(0, ahead - TRAIN.stopGap)));

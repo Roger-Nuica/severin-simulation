@@ -130,7 +130,7 @@ export function hideBuildingWindows(root, wallName) {
  * @param {Object} ctx
  * @returns {{
  *   createBuilding: (x: number, z: number, seed: number, room?: {hx: number, hz: number}) => Object,
- *   windowUniforms: {uGlowGain: {value: number}, uDaylight: {value: number}, uDayGlass: {value: THREE.Color}}
+ *   windowUniforms: {uGlowGain: {value: number}, uDaylight: {value: number}, uDayGlass: {value: THREE.Color}, uOutage: {value: THREE.Vector4}, uFlicker: {value: number}}
  * }}
  */
 export function createBuildingsSystem(ctx) {
@@ -147,7 +147,14 @@ export function createBuildingsSystem(ctx) {
     uDaylight: { value: 0 },
     // Daylight glass: sky reflected in a dark pane, the same for lit and
     // unlit windows -- nobody's lights show at noon.
-    uDayGlass: { value: new THREE.Color(0x2f3c4f) }
+    uDayGlass: { value: new THREE.Color(0x2f3c4f) },
+    // A power cut sweeping across town (engine/solarStorm.js): xy the way it
+    // travels, z how far along it the blackout has reached, w how far the
+    // power has come back behind it. A pane is dark between the two. Both
+    // fronts far behind the town (the default) is no cut at all.
+    uOutage: { value: new THREE.Vector4(1, 0, -1e4, -1e4) },
+    // The lights browning out before the cut: multiplies the glow.
+    uFlicker: { value: 1 }
   };
 
   /**
@@ -179,6 +186,8 @@ export function createBuildingsSystem(ctx) {
       shader.uniforms.uGlowGain = windowUniforms.uGlowGain;
       shader.uniforms.uDaylight = windowUniforms.uDaylight;
       shader.uniforms.uDayGlass = windowUniforms.uDayGlass;
+      shader.uniforms.uOutage = windowUniforms.uOutage;
+      shader.uniforms.uFlicker = windowUniforms.uFlicker;
 
       // MeshBasicMaterial computes no normal varying of its own (it has no
       // lighting to use one for), so the world normal and view vector are
@@ -189,7 +198,8 @@ export function createBuildingsSystem(ctx) {
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', `#include <common>
 varying vec3 vWinNormal;
-varying vec3 vWinView;`)
+varying vec3 vWinView;
+varying vec2 vWinGround;`)
         .replace('#include <begin_vertex>', `#include <begin_vertex>
 mat4 winModel = modelMatrix;
 #ifdef USE_INSTANCING
@@ -197,7 +207,8 @@ mat4 winModel = modelMatrix;
 #endif
 vec4 winWorldPos = winModel * vec4( transformed, 1.0 );
 vWinNormal = normalize( mat3( winModel ) * normal );
-vWinView = normalize( cameraPosition - winWorldPos.xyz );`);
+vWinView = normalize( cameraPosition - winWorldPos.xyz );
+vWinGround = winWorldPos.xz;`);
 
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>
@@ -207,8 +218,11 @@ uniform vec3 uFresnelColour;
 uniform float uGlowGain;
 uniform float uDaylight;
 uniform vec3 uDayGlass;
+uniform vec4 uOutage;
+uniform float uFlicker;
 varying vec3 vWinNormal;
-varying vec3 vWinView;`)
+varying vec3 vWinView;
+varying vec2 vWinGround;`)
         // Injected after <color_fragment>, which is where diffuseColor has
         // just been multiplied by the per-instance colour -- so diffuseColor
         // here IS the pane's lit/dark state and can gate the highlight
@@ -222,6 +236,14 @@ varying vec3 vWinView;`)
   // this ramp and lose the reflection along with the glow; lit panes
   // (~1.0) keep it in full.
   float winLitMask = smoothstep( 0.02, 0.2, winLit );
+  // The power cut: each pane goes at its own moment as the front passes
+  // (a hash of where it is staggers a facade over a few metres), and comes
+  // back the same way behind the second front.
+  float winAlong = dot( vWinGround, uOutage.xy );
+  float winJitter = fract( sin( dot( floor( vWinGround * 1.7 ), vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ) * 9.0;
+  float winOut = step( winAlong + winJitter, uOutage.z ) * step( uOutage.w, winAlong + winJitter );
+  diffuseColor.rgb *= ( 1.0 - 0.985 * winOut ) * uFlicker;
+  winLitMask *= 1.0 - winOut;
   // Gain before the rim, so only the interior glow goes HDR: the rim is sky
   // reflected off glass and should not bloom.
   diffuseColor.rgb = mix( diffuseColor.rgb * uGlowGain, uDayGlass, uDaylight );

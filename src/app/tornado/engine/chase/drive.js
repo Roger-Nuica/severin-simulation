@@ -120,7 +120,12 @@ export function createChaseDriveSystem(ctx) {
    */
   function stepChaseDriveInput(dt) {
     const k = Chase.keys;
-    if (k.forward && !k.back) {
+    // A solar storm (engine/solarStorm.js): the engine is dead; it coasts.
+    const dead = !!(ctx.systems.solarStorm && ctx.systems.solarStorm.stalled());
+    if (dead) {
+      const decel = CHASE_TUNE.brakeDecel * 0.5 * dt;
+      Chase.speed = Chase.speed > 0 ? Math.max(0, Chase.speed - decel) : Math.min(0, Chase.speed + decel);
+    } else if (k.forward && !k.back) {
       Chase.speed += CHASE_TUNE.accel * dt;
     } else if (k.back && !k.forward) {
       Chase.speed -= CHASE_TUNE.accel * dt;

@@ -260,7 +260,8 @@ export function createAliensSystem(ctx) {
     banner: null,
     // Worked out once a frame (updateAliens) for every alien: Smooth Criminal
     // on (engine/smoothCriminal.js), and whether any human is left.
-    frame: { peace: false, noHumans: false },
+    // jam: the solar storm's hold on the ship, 0..1 (engine/solarStorm.js).
+    frame: { peace: false, noHumans: false, jam: 0 },
 
     rampTop: new THREE.Vector3(),
 
@@ -559,6 +560,10 @@ export function createAliensSystem(ctx) {
     S.state.timer += dt;
     S.state.clock += dt;
     S.frame.peace = !!(ctx.systems.smoothCriminal && ctx.systems.smoothCriminal.peace());
+    // A solar storm (engine/solarStorm.js): the ship's systems stutter. Over
+    // half, it holds its fire and takes nobody, sagging in the air.
+    S.frame.jam = ctx.systems.solarStorm ? ctx.systems.solarStorm.jamAt(S.state.x, S.state.z) : 0;
+    const jammed = S.frame.jam > 0.5;
     S.frame.noHumans = !ctx.Environment.people.some(person => person.mesh.parent && !person.abducted && !person.electrocuted);
     if (S.state.bannerTimer > 0) {
       S.state.bannerTimer -= dt;
@@ -577,7 +582,7 @@ export function createAliensSystem(ctx) {
         ctx.systems.explosions.spawnImpactBurst(S.scratch.copy(g.position).add(new THREE.Vector3((Math.random() - 0.5) * 22, 3, (Math.random() - 0.5) * 22)), 0.9);
       }
       if (S.shipTracker) {
-        api.updateTracker(S.shipTracker, S.trackerFrom.set(S.state.x, g.position.y + 0.6, S.state.z), S.state.phase === 'hovering' && !S.frame.peace, dt);
+        api.updateTracker(S.shipTracker, S.trackerFrom.set(S.state.x, g.position.y + 0.6, S.state.z), S.state.phase === 'hovering' && !S.frame.peace && !jammed, dt);
       }
       if (S.state.phase === 'arriving') {
         g.position.y = api.arrivalHeight(S.state.timer);
@@ -586,10 +591,13 @@ export function createAliensSystem(ctx) {
           S.state.timer = 0;
         }
       } else {
-        // A slow bob and turn while it hangs there.
-        g.position.y = ALIENS.hoverHeight + 0.35 * Math.sin(S.state.timer * 1.3);
+        // A slow bob and turn while it hangs there; jammed, it sags and rocks.
+        const jam = S.frame.jam;
+        g.position.y = ALIENS.hoverHeight + 0.35 * Math.sin(S.state.timer * 1.3) - jam * 3.5;
+        g.rotation.z = jam * 0.09 * Math.sin(S.state.timer * 7.3);
       }
-      const glow = 1.6 + 0.5 * Math.sin(S.state.timer * 4);
+      // Its lights stutter while jammed.
+      const glow = (1.6 + 0.5 * Math.sin(S.state.timer * 4)) * (1 - S.frame.jam * (Math.random() < 0.55 ? 0.92 : 0.2));
       for (const mat of S.ship.glow) mat.color.copy(ALIENS.glow).multiplyScalar(glow / 2);
       if (S.light) {
         S.light.position.set(S.state.x, g.position.y - 2, S.state.z);
@@ -629,19 +637,19 @@ export function createAliensSystem(ctx) {
           // there is no crew left at all, when the glow does it alone.
           const crewFree = S.aliens.some(alien => alien.phase === 'patrol');
           const crewLeft = S.state.spawned < ALIENS.count || S.aliens.some(alien => alien.phase !== 'dead' && alien.phase !== 'burning');
-          if (S.state.nextAbduct <= 0 && (crewFree || !crewLeft) && !S.frame.peace) {
+          if (S.state.nextAbduct <= 0 && (crewFree || !crewLeft) && !S.frame.peace && !jammed) {
             S.state.nextAbduct = ALIENS.abductEvery;
             const victim = api.pickVictim();
             if (victim) api.abduct(victim);
           }
         }
         // Terminators near the crew are taken aboard too.
-        if (!S.frame.peace) api.grabTerminators();
+        if (!S.frame.peace && !jammed) api.grabTerminators();
         // The nuclear plants (engine/nuclear.js): a shot at the nearest one
         // still standing, every so often.
         S.state.plantTimer += dt;
         const nuclear = ctx.systems.nuclear;
-        if (nuclear && S.state.plantTimer >= ALIENS.shipPlantFirst && !S.frame.peace) {
+        if (nuclear && S.state.plantTimer >= ALIENS.shipPlantFirst && !S.frame.peace && !jammed) {
           const plant = nuclear.nearestIntact(S.state.x, S.state.z);
           if (plant) {
             S.state.plantTimer = ALIENS.shipPlantFirst - ALIENS.shipPlantEvery;

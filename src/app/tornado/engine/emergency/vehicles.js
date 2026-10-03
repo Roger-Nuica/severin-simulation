@@ -539,6 +539,10 @@ export function createVehicleSystem(ctx) {
     if (ahead < DRIVE.lookahead) {
       wanted = Math.min(wanted, Math.max(0, (ahead - DRIVE.gap) * 2.4));
     }
+    // A solar storm (engine/solarStorm.js): the engine has died. It rolls to
+    // a stop and waits, without counting itself stuck.
+    const dead = !!(ctx.systems.solarStorm && ctx.systems.solarStorm.stalled());
+    if (dead) wanted = 0;
     vehicle.speed += THREE.MathUtils.clamp(
       wanted - vehicle.speed, -DRIVE.brake * dt, DRIVE.accel * dt
     );
@@ -556,7 +560,7 @@ export function createVehicleSystem(ctx) {
 
     // Rubble in the road, or a route that has become nonsense because what it
     // was driving to has gone. Either way, ask again.
-    if (vehicle.speed < DRIVE.stuckSpeed) {
+    if (vehicle.speed < DRIVE.stuckSpeed && !dead) {
       vehicle.stuck += dt;
       if (vehicle.stuck > DRIVE.stuckSeconds) {
         vehicle.stuck = 0;

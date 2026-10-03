@@ -271,6 +271,9 @@ export function createViaductTraffic(ctx, S, api) {
       // What the driver can see, and how fast that lets them go.
       let target = TRAFFIC.speed;
       let braking = false;
+      // A solar storm (engine/solarStorm.js): the engine has died, and the
+      // car rolls to a stop where it is.
+      if (ctx.systems.solarStorm && ctx.systems.solarStorm.stalled()) target = 0;
 
       const edge = distanceToBrokenEdge(car.along, car.lane, segment || null);
       if (edge === null) {

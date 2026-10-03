@@ -296,6 +296,11 @@ export default function TornadoSimulator() {
                   looking at. */}
               <button id="btn-downburst" className="pill event" type="button" aria-pressed="false"
                 title="Downburst: a column of air slams down and blows everything one way · 30-45 s">⬇️ Downburst</button>
+              {/* engine/solarStorm.js: aurora and a town-wide blackout;
+                  engines and machines stall, and Roger's EMP runs down the
+                  power lines while it lasts. */}
+              <button id="btn-solar" className="pill event" type="button" aria-pressed="false"
+                title="Solar Storm: a flare, then aurora overhead and a blackout across town · cars stall, Terminators and ships lock up · in Hero Mode your EMP (R) runs down the power lines · ~40 s">☀️ Solar Storm</button>
               {/* engine/strikeTargeting.js: click (or drag) the ground to
                   call lightning down; Esc or the tile again to stop. */}
               <button id="btn-strike" className="pill event" type="button" aria-pressed="false"

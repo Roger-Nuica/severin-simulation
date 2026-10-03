@@ -1,5 +1,6 @@
 // @ts-check
 import * as THREE from 'three';
+import { SOLAR } from '../solarStorm.js';
 
 /**
  * ===========================================================================
@@ -19,6 +20,11 @@ import * as THREE from 'three';
  *
  * 3 segments (30%), 5 s cooldown. If Roger dies or the run ends while it
  * is charging, it fizzles.
+ *
+ * During a solar storm (engine/solarStorm.js) it is amplified: the pulse
+ * reaches SOLAR.amplify.radiusScale times as far, its ring goes green, and
+ * it runs down the power lines -- the poles near him fire one after
+ * another, nearest first, each an EMP of its own (solarStorm chainEmp).
  */
 
 export const EMP = {
@@ -31,6 +37,9 @@ export const EMP = {
   ringSeconds: 0.6,
   colour: new THREE.Color(0.5, 1.4, 3.2)
 };
+
+// The ring of an amplified pulse (a solar storm): aurora green.
+const AMPLIFIED_COLOUR = new THREE.Color(0.4, 3.0, 1.6);
 
 /**
  * @param {Object} ctx
@@ -55,6 +64,7 @@ export function createEmpSystem(ctx) {
   let charge = -1;       // seconds into the charge; -1 idle
   let wave = 1;          // 0..1 through the ring; 1 idle
   let zap = 0;
+  let reach = EMP.radius; // the ring's full radius: wider when amplified
 
   /**
    * The pulse at (x, z): every enemy that answers to an EMP in the radius.
@@ -63,10 +73,15 @@ export function createEmpSystem(ctx) {
    * @returns {number} how many were stopped
    */
   function pulse(x, z) {
-    const stopped = ctx.systems.area.hitEnemiesInRadius({ x, z, radius: EMP.radius }, { type: 'emp', at: { x, z } });
-    if (ctx.systems.powerLines) ctx.systems.powerLines.faultAt(x, z, EMP.lineRadius);
+    const storm = ctx.systems.solarStorm;
+    const amplified = !!(storm && storm.amplified());
+    reach = EMP.radius * (amplified ? SOLAR.amplify.radiusScale : 1);
+    const stopped = ctx.systems.area.hitEnemiesInRadius({ x, z, radius: reach }, { type: 'emp', at: { x, z } });
+    // Amplified, it runs along the lines instead of bringing one down.
+    const poles = amplified ? storm.chainEmp(x, z) : 0;
+    if (!amplified && ctx.systems.powerLines) ctx.systems.powerLines.faultAt(x, z, EMP.lineRadius);
     const at = new THREE.Vector3(x, 2, z);
-    ctx.systems.lightning.flashScreen(at, 0.55, '#8fd0ff');
+    ctx.systems.lightning.flashScreen(at, amplified ? 0.8 : 0.55, amplified ? '#8fffd0' : '#8fd0ff');
     ctx.systems.gamefeel.event('gas', at);
     if (ctx.systems.shockwaveSound) ctx.systems.shockwaveSound.playShockwave();
     if (ctx.systems.powerArcSound) ctx.systems.powerArcSound.playZap(1);
@@ -75,8 +90,10 @@ export function createEmpSystem(ctx) {
       ring.position.set(x, 0.3, z);
       dome.position.set(x, 0, z);
       ring.visible = dome.visible = true;
+      for (const m of [ring, dome]) /** @type {THREE.MeshBasicMaterial} */ (m.material).color.copy(amplified ? AMPLIFIED_COLOUR : EMP.colour);
     }
-    ctx.events.emit('notice', { text: stopped ? `⚡ EMP · ${stopped} knocked out` : '⚡ EMP' });
+    const label = amplified ? `⚡ SOLAR EMP · into the grid (${poles} poles)` : '⚡ EMP';
+    ctx.events.emit('notice', { text: stopped ? `${label} · ${stopped} knocked out` : label });
     return stopped;
   }
 
@@ -141,7 +158,7 @@ export function createEmpSystem(ctx) {
     }
     if (wave < 1 && ring && dome) {
       wave = Math.min(1, wave + rawDt / EMP.ringSeconds);
-      const r = EMP.radius * (1 - (1 - wave) * (1 - wave));
+      const r = reach * (1 - (1 - wave) * (1 - wave));
       ring.scale.setScalar(Math.max(0.1, r));
       dome.scale.set(Math.max(0.1, r), Math.max(0.1, r * 0.35), Math.max(0.1, r));
       /** @type {THREE.MeshBasicMaterial} */ (ring.material).opacity = 0.95 * (1 - wave);

@@ -355,7 +355,11 @@ export function createAlienWaves(ctx, S, api) {
   function updateHunter(h, dt) {
     const g = h.group;
     h.timer += dt;
-    const glow = 1.4 + 0.6 * Math.sin(h.timer * 6);
+    // A solar storm (engine/solarStorm.js): its systems stutter -- lights
+    // flickering, the hull sagging and rocking; over half, it holds its fire.
+    const jam = h.phase === 'hunting' && ctx.systems.solarStorm ? ctx.systems.solarStorm.jamAt(g.position.x, g.position.z) : 0;
+    h.jam = jam;
+    const glow = (1.4 + 0.6 * Math.sin(h.timer * 6)) * (1 - jam * (Math.random() < 0.55 ? 0.92 : 0.2));
     for (const mat of h.glow) mat.color.copy(ALIENS.hunterGlow).multiplyScalar(glow / 2);
     if (h.phase === 'arriving') {
       const u = Math.min(1, h.timer / ALIENS.hunterArriveSeconds);
@@ -385,11 +389,12 @@ export function createAlienWaves(ctx, S, api) {
     if (h.damage > 0 && Math.random() < dt * 4) {
       ctx.systems.explosions.spawnImpactBurst(S.scratch.copy(g.position).add(new THREE.Vector3((Math.random() - 0.5) * 7, 2.5, (Math.random() - 0.5) * 7)), 0.7);
     }
-    // Smooth Criminal: hanging where it is, holding its fire.
-    if (S.frame.peace) {
-      g.position.y = ALIENS.hunterHeight + 0.6 * Math.sin(h.timer * 1.7);
-      h.spin += dt * 0.8;
-      g.rotation.set(0, h.spin, 0);
+    // Smooth Criminal: hanging where it is, holding its fire. Jammed by a
+    // solar storm, the same, sagging and rocking.
+    if (S.frame.peace || jam > 0.5) {
+      g.position.y = ALIENS.hunterHeight + 0.6 * Math.sin(h.timer * 1.7) - jam * 4;
+      h.spin += dt * 0.8 * (1 - jam * 0.8);
+      g.rotation.set(jam * 0.16 * Math.sin(h.timer * 9.1), h.spin, jam * 0.14 * Math.sin(h.timer * 7.3));
       api.updateTracker(h.tracker, S.trackerFrom.set(g.position.x, g.position.y + 0.4, g.position.z), false, dt);
       return;
     }
@@ -406,9 +411,9 @@ export function createAlienWaves(ctx, S, api) {
       h.retarget = 2;
       h.target = nearestPerson(g.position.x, g.position.z);
     }
-    g.position.y = ALIENS.hunterHeight + 0.6 * Math.sin(h.timer * 1.7);
+    g.position.y = ALIENS.hunterHeight + 0.6 * Math.sin(h.timer * 1.7) - jam * 4;
     h.spin += dt * 0.8;
-    g.rotation.y = h.spin;
+    g.rotation.set(jam * 0.16 * Math.sin(h.timer * 9.1), h.spin, jam * 0.14 * Math.sin(h.timer * 7.3));
     const t = h.target;
     if (t) {
       const q = t.mesh.position;
@@ -448,7 +453,7 @@ export function createAlienWaves(ctx, S, api) {
    */
   function attackPlant(h, plant, nuclear, dt) {
     const g = h.group;
-    g.position.y = ALIENS.hunterHeight + 0.6 * Math.sin(h.timer * 1.7);
+    g.position.y = ALIENS.hunterHeight + 0.6 * Math.sin(h.timer * 1.7) - (h.jam || 0) * 4;
     h.spin += dt * 0.8;
     g.rotation.y = h.spin;
     const dx = plant.x - g.position.x;

@@ -79,6 +79,8 @@ export { lightningPath, BOLT_VERTEX, BOLT_FRAGMENT } from './powerLines/config.j
  *   initPowerLines: () => void,
  *   updatePowerLines: (dt: number) => void,
  *   faultAt: (x: number, z: number, radius: number) => boolean,
+ *   surgeAt: (x: number, z: number, radius: number) => THREE.Vector3|null,
+ *   standingPoles: () => {x: number, z: number}[],
  *   debrisStrike: (from: THREE.Vector3, to: THREE.Vector3) => boolean,
  *   disconnectBuilding: (building: SimObject, seed: boolean) => void,
  *   resetPowerLines: () => void,
@@ -318,6 +320,6 @@ export function createPowerLinesSystem(ctx) {
   }
 
   return {
-    initPowerLines, updatePowerLines, faultAt: api.faultAt, debrisStrike: api.debrisStrike, disconnectBuilding: api.disconnectBuilding, resetPowerLines, disposePowerLines
+    initPowerLines, updatePowerLines, faultAt: api.faultAt, surgeAt: api.surgeAt, standingPoles: api.standingPoles, debrisStrike: api.debrisStrike, disconnectBuilding: api.disconnectBuilding, resetPowerLines, disposePowerLines
   };
 }
