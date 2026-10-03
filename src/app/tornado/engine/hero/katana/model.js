@@ -298,7 +298,7 @@ export function createKatanaRig(ctx, S, kit) {
     // clear of the jacket.
     sheath.rotation.set(-0.12, 0, 0.55);
     // Behind the Storm Core on his back (hero/rogerLook.js), clear of it.
-    sheath.position.set(0.04, 1.22, -0.45);
+    sheath.position.set(0.04, 1.22, -0.34);
   }
 
   /**

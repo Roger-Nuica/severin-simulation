@@ -5,24 +5,28 @@ import * as THREE from 'three';
  * ===========================================================================
  * SECTION HM.2 -- Roger's suit, shared by every Roger on screen
  * ===========================================================================
- * The Storm Ranger (2026-10-03, on request: "be creative, a unique avatar";
- * it replaced the black leather jacket, jeans and pompadour, which read as
- * a black blob behind him on a phone):
- *   - a deep-navy under-suit, athletic build;
- *   - armour plates in the player's colour (gold for the host): a chest
- *     plate, shoulder pauldrons, gauntlets, knee guards, a crest on the helmet;
- *   - a helmet over the top and back of the head with a glowing visor band
- *     and ear discs, the face showing under it;
- *   - glowing lines that bloom: the visor, a tornado emblem in a ring on the
- *     chest, the belt, the cuffs, the boot soles;
- *   - on his back, the Storm Core: a glass capsule on a gold mount, a little
- *     tornado spinning inside it (hero/movement.js poseRoger spins it, faster
- *     as he runs). The follow camera sits behind him, so this is the view of
- *     him the player has most.
- * Lifted out of hero/models.js `buildRoger` so a co-op player's figure (the
- * host's view of the guest, the guest's own view of both) is the same Roger,
- * not a second design: a guest's plates and lights are in their colour
- * (net/rogerView.js rogerStyle `tee`). Per-figure disposal lives here as well.
+ * The Storm Ranger, second cut (2026-10-03, on request: the first cut's
+ * bulging arms, ball pauldrons and stick legs "look horrible", "uncanny").
+ * Rather than padding the town's capsule-and-stick figure, Roger now has a
+ * body of his own built over its joints, in a clean, stylised hero suit:
+ *   - a shaped torso (narrow waist, chest, sloped shoulders, oval in section
+ *     rather than a round pillar), a pelvis, a neck -- no bulges anywhere;
+ *   - legs with a knee: a thigh hung from the hip and a shin on a knee joint
+ *     (the walk bends it, hero/movement.js and net/rogerView.js `kneeBend`),
+ *     ending in shaped boots instead of boxes;
+ *   - slim arms with a small shoulder cap, a forearm guard with a lit cuff,
+ *     a gloved hand;
+ *   - a closed helmet with a dark glass visor and a thin lit line across the
+ *     eyes: no face to look odd, the look of a game hero;
+ *   - pearl armour shells, accents in the player's colour (gold for the
+ *     host), lights in cyan (in the player's colour for a guest);
+ *   - on his back, the Storm Core: a glass capsule with a little tornado
+ *     spinning inside (hero/movement.js poseRoger spins it, faster as he runs).
+ * The person's own limb meshes stay as the joints the poses turn (same names,
+ * same pivots, so the walk, aim pose and Katana grip are unchanged); their
+ * own material is swapped for an invisible one and the suit hangs on them.
+ * Lifted out of hero/models.js `buildRoger` so a co-op player's figure is the
+ * same Roger (net/rogerView.js rogerStyle `tee`). Disposal lives here as well.
  */
 
 /**
@@ -31,50 +35,78 @@ import * as THREE from 'three';
  * @property {<M extends THREE.Material>(m: M) => M} mat
  */
 
-/** The host's colours; a guest's `tee` replaces the plates and the light. */
+/** The host's colours; a guest's `tee` replaces the accents and the lights. */
 const SUIT = Object.freeze({
-  under: 0x1a2440,
-  shell: 0x111827,
-  plate: 0xe8b23a,
+  under: 0x2a3654,
+  shell: 0xdfe5ee,
+  accent: 0xe8b23a,
   light: 0x59f3ff,
-  boot: 0x0c111c
+  visor: 0x070b12,
+  boot: 0x171d29
 });
 
+// Where the shoulders are, against the torso's sides (the Katana and the
+// rifle read the arm's own position, hero/katana/model.js placeKatana), and
+// how far the arms hang out at rest.
+const SHOULDER_X = 0.31;
+const ARM_REST = 0.1;
+// The person's legs are short (hips 0.7 up a 1.82 figure); Roger's hips sit
+// higher, for the longer legs a hero is drawn with. The knee, in the leg's
+// frame, halves the leg.
+const HIP_Y = 0.86;
+const HIP_X = 0.1;
+const KNEE_Y = -0.42;
+// The helmet, smaller than the person's head, so the figure is not a toy.
+const HELMET_R = 0.145;
+const HEAD_Y = 1.65;
+
 /**
- * Dresses a `people.createPerson` figure as Roger, the Storm Ranger:
- * replaces its clothes and adds the armour, the helmet, the lights and the
- * Storm Core. The limbs keep the names the walk and aim poses look up.
+ * A torso profile for a lathe, bottom to top: [radius, height] in the
+ * torso's frame (centred 1.1 above the feet): the waist over the hips, the
+ * chest, the shoulders sloping into the neck.
+ */
+const TORSO_PROFILE = [
+  [0, -0.22], [0.15, -0.22], [0.144, -0.14], [0.15, -0.03], [0.178, 0.07],
+  [0.196, 0.17], [0.2, 0.25], [0.186, 0.32], [0.14, 0.375], [0.07, 0.4], [0, 0.4]
+];
+// The torso's section is an oval: wider than deep.
+const TORSO_WIDE = 1.25;
+const TORSO_DEEP = 0.74;
+
+/**
+ * Dresses a `people.createPerson` figure as Roger, the Storm Ranger: hides
+ * the person's own shapes and builds the suit on its joints. The limbs keep
+ * the names the walk and aim poses look up.
  * @param {THREE.Object3D} root The figure's root (the person's `mesh`).
  * @param {Keeper} keep Registers every material and geometry made.
- * @param {{tee?: number|null}} [opts] `tee`: a guest's colour, for the plates and the lights (null or absent: the host's gold and cyan).
- * @returns {{torso: THREE.Object3D, core: THREE.Object3D}} The parts the caller keeps: the torso, and the Storm Core's spinning tornado.
+ * @param {{tee?: number|null}} [opts] `tee`: a guest's colour, for the accents and the lights (null or absent: the host's gold and cyan).
+ * @returns {{torso: THREE.Object3D, core: THREE.Object3D, kneeL: THREE.Object3D, kneeR: THREE.Object3D}} The parts the caller keeps: the torso, the Storm Core's spinning tornado and the knees.
  */
 export function dressAsRoger(root, keep, opts = {}) {
   const guest = typeof opts.tee === 'number';
-  const under = keep.mat(new THREE.MeshStandardMaterial({ color: SUIT.under, roughness: 0.55, metalness: 0.15 }));
-  const shell = keep.mat(new THREE.MeshStandardMaterial({ color: SUIT.shell, roughness: 0.25, metalness: 0.6 }));
-  const plate = keep.mat(new THREE.MeshStandardMaterial({
-    color: guest ? /** @type {number} */ (opts.tee) : SUIT.plate, roughness: 0.3, metalness: 0.75
-  }));
-  const light = keep.mat(new THREE.MeshBasicMaterial({ color: guest ? /** @type {number} */ (opts.tee) : SUIT.light, toneMapped: false }));
-  const visor = keep.mat(new THREE.MeshBasicMaterial({
-    color: guest ? /** @type {number} */ (opts.tee) : SUIT.light, toneMapped: false, side: THREE.DoubleSide
-  }));
-  const boot = keep.mat(new THREE.MeshStandardMaterial({ color: SUIT.boot, roughness: 0.4, metalness: 0.35 }));
+  const tint = guest ? /** @type {number} */ (opts.tee) : null;
+  const under = keep.mat(new THREE.MeshStandardMaterial({ color: SUIT.under, roughness: 0.62, metalness: 0.1 }));
+  const shell = keep.mat(new THREE.MeshStandardMaterial({ color: SUIT.shell, roughness: 0.32, metalness: 0.3 }));
+  const accent = keep.mat(new THREE.MeshStandardMaterial({ color: tint ?? SUIT.accent, roughness: 0.3, metalness: 0.7 }));
+  const light = keep.mat(new THREE.MeshBasicMaterial({ color: tint ?? SUIT.light, toneMapped: false }));
+  const visor = keep.mat(new THREE.MeshStandardMaterial({ color: SUIT.visor, roughness: 0.08, metalness: 0.9 }));
+  const boot = keep.mat(new THREE.MeshStandardMaterial({ color: SUIT.boot, roughness: 0.45, metalness: 0.3 }));
   const glass = keep.mat(new THREE.MeshStandardMaterial({
     color: 0xcff8ff, transparent: true, opacity: 0.28, roughness: 0.05, metalness: 0.2, depthWrite: false
   }));
   const swirl = keep.mat(new THREE.MeshBasicMaterial({
-    color: guest ? /** @type {number} */ (opts.tee) : SUIT.light, transparent: true, opacity: 0.85, toneMapped: false,
+    color: tint ?? SUIT.light, transparent: true, opacity: 0.85, toneMapped: false,
     blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
   }));
+  // The person's own shapes: kept as the joints, never drawn.
+  const hidden = keep.mat(new THREE.MeshBasicMaterial({ visible: false }));
 
   const replaced = new Set();
   root.traverse((/** @type {any} */ child) => {
-    // The head keeps its skin (the face under the visor).
-    if (!child.material || /_head/.test(child.name)) return;
+    if (!child.material) return;
     replaced.add(child.material);
-    child.material = under;
+    child.material = hidden;
+    child.castShadow = false;
   });
   for (const material of replaced) material.dispose();
 
@@ -95,78 +127,122 @@ export function dressAsRoger(root, keep, opts = {}) {
     parent.add(mesh);
     return mesh;
   };
-  const part = (/** @type {string} */ suffix) => root.children.find(c => c.name.endsWith(suffix));
+  const part = (/** @type {string} */ suffix) => /** @type {THREE.Object3D} */ (root.children.find(c => c.name.endsWith(suffix)));
+  /** A lathe from [radius, height] pairs, optionally only round the front. */
+  const lathe = (/** @type {number[][]} */ points, grow = 0, phiStart = 0, phiLength = Math.PI * 2) => new THREE.LatheGeometry(
+    points.map(([r, y]) => new THREE.Vector2(r > 0 ? r + grow : 0, y)), 20, phiStart, phiLength
+  );
 
-  // The build: a broad, deep chest, the arms further out to clear it.
+  // The torso: the shaped body, a chest shell over its front, the emblem.
   const torso = part('_torso');
-  torso.scale.set(1.3, 1.05, 1.15);
-  // Chest plate with the emblem: a little tornado in a ring.
-  const chest = add(torso, new THREE.BoxGeometry(0.3, 0.26, 0.07), plate, 0, 0.1, 0.17, true);
-  chest.rotation.x = -0.12;
-  const emblem = add(torso, new THREE.ConeGeometry(0.05, 0.12, 12), light, 0, 0.1, 0.215);
+  const body = add(torso, lathe(TORSO_PROFILE), under, 0, 0, 0, true);
+  body.scale.set(TORSO_WIDE, 1, TORSO_DEEP);
+  const chestProfile = TORSO_PROFILE.slice(4, 9);
+  const chest = add(torso, lathe(chestProfile, 0.012, -1.05, 2.1), shell, 0, 0, 0, true);
+  chest.scale.copy(body.scale);
+  // Its lower edge in the accent colour.
+  const rim = add(torso, new THREE.CylinderGeometry(0.191, 0.191, 0.022, 20, 1, true, -1.05, 2.1), accent, 0, 0.075, 0);
+  rim.scale.copy(body.scale);
+  // The emblem: a little tornado in a lit ring, on the breastbone.
+  const emblemZ = 0.196 * TORSO_DEEP + 0.018;
+  const emblem = add(torso, new THREE.ConeGeometry(0.036, 0.085, 12), light, 0, 0.17, emblemZ);
   emblem.rotation.x = Math.PI;
-  emblem.scale.z = 0.35;
-  add(torso, new THREE.TorusGeometry(0.075, 0.011, 6, 24), light, 0, 0.1, 0.212);
+  emblem.scale.z = 0.3;
+  add(torso, new THREE.TorusGeometry(0.056, 0.008, 6, 24), light, 0, 0.17, emblemZ - 0.003);
   // The belt, its light, the buckle.
-  add(torso, new THREE.CylinderGeometry(0.205, 0.205, 0.06, 18), shell, 0, -0.2, 0);
-  add(torso, new THREE.CylinderGeometry(0.208, 0.208, 0.012, 18), light, 0, -0.2, 0);
-  add(torso, new THREE.BoxGeometry(0.07, 0.07, 0.03), plate, 0, -0.2, 0.2);
+  const belt = add(torso, new THREE.CylinderGeometry(0.158, 0.16, 0.05, 20), boot, 0, -0.19, 0);
+  belt.scale.set(TORSO_WIDE, 1, TORSO_DEEP);
+  const beltLight = add(torso, new THREE.CylinderGeometry(0.161, 0.161, 0.01, 20, 1, true), light, 0, -0.19, 0);
+  beltLight.scale.copy(belt.scale);
+  add(torso, new THREE.CylinderGeometry(0.03, 0.03, 0.015, 14), accent, 0, -0.19, 0.16 * TORSO_DEEP + 0.006).rotation.x = Math.PI / 2;
 
+  // The pelvis, on the root so it stays square while the shoulders roll.
+  add(root, new THREE.SphereGeometry(0.16, 16, 10), under, 0, 0.9, 0, true).scale.set(1.12, 0.6, 0.7);
+
+  // Arms: a shoulder cap, the sleeve, a forearm guard with a lit cuff, a glove.
   for (const side of [-1, 1]) {
     const arm = part(side < 0 ? '_armL' : '_armR');
-    arm.position.x = side * 0.35;
-    // Pauldron, the upper arm built up, a gauntlet with a lit cuff, a fist.
-    // (Built round the arm rather than scaling it, which would shear the
-    // rifle in his hand.)
-    add(arm, new THREE.SphereGeometry(0.13, 12, 8), plate, 0, 0.02, 0, true).scale.set(1.15, 0.78, 1.1);
-    add(arm, new THREE.SphereGeometry(0.085, 10, 8), under, 0, -0.17, 0.01).scale.set(1, 1.45, 1.05);
-    add(arm, new THREE.CylinderGeometry(0.07, 0.06, 0.2, 10), plate, 0, -0.39, 0);
-    add(arm, new THREE.CylinderGeometry(0.073, 0.073, 0.018, 10), light, 0, -0.3, 0);
-    add(arm, new THREE.SphereGeometry(0.06, 8, 6), shell, 0, -0.52, 0);
-    const leg = part(side < 0 ? '_legL' : '_legR');
-    leg.scale.set(1.2, 1, 1.2);
-    // Knee guard, boot, glowing sole.
-    add(leg, new THREE.BoxGeometry(0.12, 0.13, 0.05), plate, 0, -0.32, 0.075);
-    add(leg, new THREE.BoxGeometry(0.135, 0.15, 0.24), boot, 0, -0.62, 0.035);
-    add(leg, new THREE.BoxGeometry(0.14, 0.022, 0.25), light, 0, -0.69, 0.035);
+    arm.position.x = side * SHOULDER_X;
+    arm.rotation.z = side * ARM_REST;
+    add(arm, new THREE.SphereGeometry(0.074, 14, 10), shell, -side * 0.008, -0.025, 0, true).scale.set(1, 1.05, 1);
+    add(arm, new THREE.CapsuleGeometry(0.052, 0.17, 4, 10), under, 0, -0.13, 0, true);
+    add(arm, new THREE.CapsuleGeometry(0.05, 0.12, 4, 10), shell, 0, -0.355, 0, true);
+    add(arm, new THREE.CylinderGeometry(0.053, 0.053, 0.012, 12, 1, true), light, 0, -0.43, 0);
+    add(arm, new THREE.SphereGeometry(0.052, 10, 8), boot, 0, -0.49, 0.004).scale.set(0.9, 1.15, 1);
   }
 
-  // The helmet: a shell over the top and back of the head, a lit visor band
-  // across the eyes, a crest, ear discs. The face shows under the visor.
-  const head = part('_head');
-  add(head, new THREE.SphereGeometry(0.176, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.56), shell, 0, 0.012, -0.012, true);
-  add(head, new THREE.CylinderGeometry(0.169, 0.169, 0.055, 24, 1, true, -Math.PI * 0.42, Math.PI * 0.84), visor, 0, 0.02, 0);
-  add(head, new THREE.BoxGeometry(0.03, 0.085, 0.27), plate, 0, 0.175, -0.02);
+  // Legs: a thigh from the hip, the knee joint, a shin guard, a boot.
+  /** @type {THREE.Object3D[]} */
+  const knees = [];
   for (const side of [-1, 1]) {
-    const ear = add(head, new THREE.CylinderGeometry(0.048, 0.048, 0.035, 14), plate, side * 0.17, 0.0, 0);
+    const leg = part(side < 0 ? '_legL' : '_legR');
+    leg.position.set(side * HIP_X, HIP_Y, 0);
+    add(leg, new THREE.CapsuleGeometry(0.078, 0.26, 4, 10), under, 0, -0.2, 0, true);
+    const knee = new THREE.Group();
+    knee.name = `${root.name}_knee${side < 0 ? 'L' : 'R'}`;
+    knee.position.y = KNEE_Y;
+    leg.add(knee);
+    knees.push(knee);
+    add(knee, new THREE.SphereGeometry(0.068, 12, 8), under, 0, 0, 0);
+    add(knee, new THREE.CapsuleGeometry(0.064, 0.24, 4, 10), shell, 0, -0.17, 0, true);
+    // The boot: a cuff with a lit band, then the foot, rounded at the toe and
+    // heel; its sole on the ground when the leg is straight.
+    add(knee, new THREE.CylinderGeometry(0.07, 0.066, 0.08, 12), boot, 0, -0.34, 0);
+    const foot = add(knee, new THREE.CapsuleGeometry(0.056, 0.12, 4, 10), boot, 0, -0.392, 0.045, true);
+    foot.rotation.x = Math.PI / 2;
+    foot.scale.set(1.05, 1, 0.82);
+    add(knee, new THREE.CylinderGeometry(0.071, 0.071, 0.012, 12, 1, true), light, 0, -0.31, 0);
+  }
+
+  // The helmet: closed, a dark glass visor across the face with a thin lit
+  // line at the eyes, a low crest in the accent colour, lit ear discs.
+  const head = part('_head');
+  head.position.y = HEAD_Y;
+  const R = HELMET_R;
+  add(head, new THREE.CylinderGeometry(0.058, 0.068, 0.12, 12), under, 0, -R - 0.02, 0);
+  const helmetShape = new THREE.Vector3(0.94, 1.06, 1.04);
+  add(head, new THREE.SphereGeometry(R, 22, 16), shell, 0, 0, 0, true).scale.copy(helmetShape);
+  const front = Math.PI / 2;
+  add(head, new THREE.SphereGeometry(R + 0.004, 22, 10, front - 1.05, 2.1, Math.PI * 0.34, Math.PI * 0.3), visor, 0, 0, 0.003)
+    .scale.copy(helmetShape);
+  add(head, new THREE.SphereGeometry(R + 0.006, 22, 2, front - 0.85, 1.7, Math.PI * 0.455, Math.PI * 0.035), light, 0, 0, 0.003)
+    .scale.copy(helmetShape);
+  add(head, new THREE.BoxGeometry(0.022, 0.026, 0.2), accent, 0, R * 1.06 - 0.002, -0.01);
+  for (const side of [-1, 1]) {
+    const ear = add(head, new THREE.CylinderGeometry(0.036, 0.036, 0.02, 16), accent, side * (R * 0.94 - 0.002), -0.005, -0.01);
     ear.rotation.z = Math.PI / 2;
-    const dot = add(head, new THREE.CylinderGeometry(0.022, 0.022, 0.04, 10), light, side * 0.172, 0.0, 0);
+    const dot = add(head, new THREE.CylinderGeometry(0.015, 0.015, 0.024, 10), light, side * R * 0.94, -0.005, -0.01);
     dot.rotation.z = Math.PI / 2;
   }
 
-  // The Storm Core on his back: a gold mount, a glass capsule, a little
-  // tornado spinning inside. In the root's frame (the torso is scaled).
-  add(root, new THREE.BoxGeometry(0.2, 0.36, 0.04), plate, 0, 1.17, -0.255, true);
-  add(root, new THREE.CapsuleGeometry(0.075, 0.2, 4, 12), glass, 0, 1.17, -0.335);
-  for (const y of [1.02, 1.32]) add(root, new THREE.CylinderGeometry(0.086, 0.086, 0.03, 14), plate, 0, y, -0.335);
+  // The Storm Core on his back: a slim mount, a glass capsule, a little
+  // tornado spinning inside. In the root's frame, against the shoulder blades.
+  const back = 0.2 * TORSO_DEEP;
+  add(root, new THREE.BoxGeometry(0.16, 0.3, 0.035), shell, 0, 1.2, -back - 0.01, true);
+  add(root, new THREE.CapsuleGeometry(0.06, 0.17, 4, 12), glass, 0, 1.2, -back - 0.085);
+  for (const y of [1.06, 1.34]) add(root, new THREE.CylinderGeometry(0.07, 0.07, 0.026, 14), accent, 0, y, -back - 0.085);
   const core = new THREE.Group();
-  core.position.set(0, 1.17, -0.335);
+  core.position.set(0, 1.2, -back - 0.085);
   root.add(core);
-  const funnel = add(core, new THREE.ConeGeometry(0.062, 0.24, 12, 1, true), swirl, 0, 0, 0);
+  const funnel = add(core, new THREE.ConeGeometry(0.05, 0.2, 12, 1, true), swirl, 0, 0, 0);
   funnel.rotation.x = Math.PI;
-  const inner = add(core, new THREE.ConeGeometry(0.03, 0.2, 8, 1, true), light, 0, 0.01, 0);
+  const inner = add(core, new THREE.ConeGeometry(0.024, 0.17, 8, 1, true), light, 0, 0.01, 0);
   inner.rotation.set(Math.PI, 0, 0.12);
-  return { torso, core };
+  return { torso, core, kneeL: knees[0], kneeR: knees[1] };
 }
 
 /**
- * Finds a Roger's four limbs by name.
+ * Finds a Roger's four limbs and two knees by name.
  * @param {THREE.Object3D} root The figure's root.
- * @returns {{legL: THREE.Object3D, legR: THREE.Object3D, armL: THREE.Object3D, armR: THREE.Object3D}} The limbs.
+ * @returns {{legL: THREE.Object3D, legR: THREE.Object3D, armL: THREE.Object3D, armR: THREE.Object3D, kneeL: THREE.Object3D, kneeR: THREE.Object3D}} The limbs.
  */
 export function rogerLimbs(root) {
   const limb = (/** @type {string} */ suffix) => /** @type {THREE.Object3D} */ (root.children.find((c) => c.name.endsWith(suffix)));
-  return { legL: limb('_legL'), legR: limb('_legR'), armL: limb('_armL'), armR: limb('_armR') };
+  const legL = limb('_legL');
+  const legR = limb('_legR');
+  // The knees hang in the legs (dressAsRoger).
+  const knee = (/** @type {THREE.Object3D} */ leg, /** @type {string} */ suffix) => /** @type {THREE.Object3D} */ (leg.children.find((c) => c.name.endsWith(suffix)));
+  return { legL, legR, armL: limb('_armL'), armR: limb('_armR'), kneeL: knee(legL, '_kneeL'), kneeR: knee(legR, '_kneeR') };
 }
 
 /**

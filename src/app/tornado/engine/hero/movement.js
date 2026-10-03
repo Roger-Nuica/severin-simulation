@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { PERSON_SCALE } from '../environment/people.js';
 import { HERO, STREETS_ALONG_X, STREETS_ALONG_Z } from './config.js';
 import { steerRun } from './touchMath.js';
+import { kneeBend } from '../net/rogerView.js';
 
 /**
  * ===========================================================================
@@ -174,8 +175,8 @@ export function createHeroMovement(ctx, S, api) {
   /**
    * Poses the figure: a swagger rather than the town's plain run, on
    * request -- the shoulders rolling against the stride, the hips swaying
-   * side to side, a spring in the step, legs a little apart, elbows out
-   * over the big arms -- whose rate is the ground
+   * side to side, a spring in the step, the knees bending as each leg swings
+   * through (net/rogerView.js kneeBend) -- whose rate is the ground
    * covered; the rifle held up while aiming; and the dazed stagger with arms
    * out. (It used to be a stiff lean-forward run.)
    * @param {number} moved world units covered this frame
@@ -192,6 +193,10 @@ export function createHeroMovement(ctx, S, api) {
     const legAmp = moving ? 0.4 + 0.7 * frac : 0;
     L.legL.rotation.set(s * legAmp, 0, moving ? -0.06 : -0.03);
     L.legR.rotation.set(-s * legAmp, 0, moving ? 0.06 : 0.03);
+    if (L.kneeL) {
+      L.kneeL.rotation.x = kneeBend(S.state.cycle, moving ? 0.35 + 0.65 * frac : 0, true);
+      L.kneeR.rotation.x = kneeBend(S.state.cycle, moving ? 0.35 + 0.65 * frac : 0, false);
+    }
     const root = S.roger.mesh;
     // The spring: up on each step, twice a stride.
     root.position.y = Math.abs(c) * 0.13 * frac * PERSON_SCALE;
@@ -228,10 +233,9 @@ export function createHeroMovement(ctx, S, api) {
       L.armR.rotation.set(-1.45, 0, 0.05);
       L.armL.rotation.set(-1.25, 0, -0.45);
     } else {
-      // Arms swinging wide past the chest, elbows out; hanging loose
-      // (still wide of the body) when he stands.
+      // Arms swinging past the body, a little out from it.
       const armAmp = moving ? 0.35 + 0.65 * frac : 0;
-      const out = S.roger.armSplay + 0.12 + 0.1 * frac;
+      const out = S.roger.armSplay + 0.04 + 0.06 * frac;
       L.armL.rotation.set(-s * armAmp, s * 0.25 * frac, -out);
       L.armR.rotation.set(s * armAmp, s * 0.25 * frac, out);
       if (katanaHeld) S.katanaRig.applyArms(L.armL, L.armR);

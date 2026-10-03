@@ -4,7 +4,7 @@ import { createSpinningStarsTexture } from '../../utils/textures.js';
 import { HERO } from './config.js';
 import { HEALTH } from '../health/config.js';
 import { createKatanaRig } from './katana/model.js';
-import { dressAsRoger } from './rogerLook.js';
+import { dressAsRoger, rogerLimbs } from './rogerLook.js';
 
 /**
  * ===========================================================================
@@ -170,9 +170,9 @@ export function createHeroModels(ctx, S, api) {
   }
 
   /**
-   * Roger as the Storm Ranger (hero/rogerLook.js dressAsRoger: armour,
-   * a helmet with a lit visor, the Storm Core on his back; since 2026-10-03,
-   * replacing the leather jacket and pompadour) -- with the rifle in his
+   * Roger as the Storm Ranger (hero/rogerLook.js dressAsRoger: a shaped
+   * suit with knees, a closed helmet with a glass visor, the Storm Core on
+   * his back; since 2026-10-03, replacing the leather jacket and pompadour) -- with the rifle in his
    * right hand, the bars over his head, and a ring of stars for when he is
    * dazed. Everything is added to createPerson's figure, so the limbs the
    * walk and the aim pose move are the same ones.
@@ -188,8 +188,7 @@ export function createHeroModels(ctx, S, api) {
     obj.torso = dressed.torso;
     obj.core = dressed.core;
     // createPerson names its parts after the root it was built with.
-    const limb = (/** @type {string} */ part) => obj.mesh.children.find(c => c.name.endsWith(part));
-    obj.limbs = { legL: limb('_legL'), legR: limb('_legR'), armL: limb('_armL'), armR: limb('_armR') };
+    obj.limbs = rogerLimbs(obj.mesh);
     obj.armSplay = Math.abs(obj.limbs.armL.rotation.z);
     S.rifle = buildRifle();
     obj.limbs.armR.add(S.rifle);
