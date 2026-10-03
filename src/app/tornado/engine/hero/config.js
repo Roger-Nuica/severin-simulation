@@ -31,8 +31,6 @@ export const HERO = {
   // the backdrop's buildings in plain view beyond it.
   bound: 288,
   spawnFunnelClearance: 60,
-  bunkerDistance: [90, 190],
-  winRadius: 4,
   // The camera, over his shoulder at a life-size man's distance.
   followBack: PERSON.height * 3.4,
   followHeight: PERSON.height * 1.8,
@@ -43,8 +41,10 @@ export const HERO = {
   cameraProbes: 8,
   cameraClearance: 0.6,
   cameraMinBack: PERSON.height * 1.2,
-  // His name tag and the stars when dazed, over his head.
-  tagHeight: PERSON.height * 1.35,
+  // The health and energy bars over his head (hero/models.js buildOverhead;
+  // he has no name tag any more), and the stars when dazed.
+  overheadHeight: PERSON.height * 1.24,
+  overheadWidth: 0.78,
   starsHeight: PERSON.height * 1.16,
   starsSize: PERSON.height * 0.5,
   // Where his shots leave from when there is no rifle to measure.
@@ -60,8 +60,6 @@ export const HERO = {
   // along the rope goes at its middle.
   zipHop: PERSON.height * 0.5,
   // The plasma beam.
-  cellCost: 25,                    // % of the cell a shot takes
-  cellRecharge: 16,                // %/sec back
   plasmaCooldown: 0.35,
   beamSeconds: 0.55,
   beamRange: 420,
@@ -98,8 +96,10 @@ export const HERO = {
   chasmMargin: 0.3,
   chasmStagger: 0.55,
   overAfter: 1.6,
-  // The pursuers: this many machines hunting him at once (it was one), set
-  // off this far behind him on bearings this far apart.
+  // The pursuers (hero/pursuers.js): this many machines, set off this far
+  // behind him on bearings this far apart. None are sent at the start of a
+  // run since 2026-10-03 (the panel's Terminator squad does the hunting);
+  // the numbers stay for spawnPursuers.
   pursuers: 2,
   pursuerSpread: 0.8,              // radians between their spawn bearings
   pursuerDistance: 55,
@@ -126,10 +126,8 @@ export const HERO = {
   doorSpotReach: 16,               // the nearest car's door lights up this near
   exitOffset: 2.2,
   wheelRadius: 0.46,               // cars.js CAR_WHEEL_RADIUS
-  // The outcomes.
-  winScore: 5000,
-  doubleScore: 15000,              // safe, and the tornado neutralised too
-  endSeconds: 2.6,
+  // The cut to the Terminators coming in (hero/screen.js placeShowcaseCamera): seconds a shot.
+  showcaseShot: 1.6,
   bannerSeconds: 3.4,
   hintSeconds: 7
 };

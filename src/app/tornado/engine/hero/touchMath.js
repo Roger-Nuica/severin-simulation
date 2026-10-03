@@ -18,8 +18,8 @@
 
 /** Tuning, in one place. */
 export const TOUCH = Object.freeze({
-  /** Joystick travel, CSS px from the centre to the rim. */
-  stickRadius: 56,
+  /** Joystick travel, CSS px from the centre to the rim (56 until 2026-10-03: shorter is quicker to full speed). */
+  stickRadius: 48,
   /** Below this share of the travel the stick reads as centred. */
   deadZone: 0.14,
   /** A W A S D boolean is held past this share of the travel on its axis. */
@@ -29,7 +29,7 @@ export const TOUCH = Object.freeze({
   /** Radians per CSS px of a drag on foot: turns Roger (and the camera behind him). */
   turnPerPx: 0.006,
   /** How fast Roger swings round to the stick on foot, radians per second. */
-  steerRate: 5,
+  steerRate: 6.5,
   /** Aim assist: the cone it helps inside (radians either side of the crosshair) and its reach (m). */
   assistCone: 0.16,
   assistRange: 160,
@@ -50,8 +50,8 @@ export function wrapAngle(a) {
 /**
  * A thumb's offset from the joystick's centre as a stick value: x right,
  * y down (screen), each -1..1, length at most 1. Inside the dead zone it is
- * zero; past it the travel is rescaled from 0 and eased (a light push walks,
- * a full one runs) so small corrections stay small.
+ * zero; past it the travel is rescaled from 0 and eased a little (a light
+ * push walks, a full one runs, and half way is already a brisk jog).
  * @param {number} dx CSS px
  * @param {number} dy CSS px
  * @param {number} [radius]
@@ -62,7 +62,7 @@ export function stickFromDrag(dx, dy, radius = TOUCH.stickRadius, deadZone = TOU
   const len = Math.hypot(dx, dy) / radius;
   if (len <= deadZone || len === 0) return { x: 0, y: 0, mag: 0 };
   const k = Math.min(1, (Math.min(1, len) - deadZone) / (1 - deadZone));
-  const mag = k * (0.35 + 0.65 * k);
+  const mag = k * (0.55 + 0.45 * k);
   const nx = dx / (len * radius);
   const ny = dy / (len * radius);
   return { x: nx * mag, y: ny * mag, mag };

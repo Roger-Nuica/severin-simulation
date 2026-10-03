@@ -25,15 +25,13 @@ export function createHeroPlasma(ctx, S, api) {
   const { Sim, container } = ctx;
 
   /**
-   * The trigger goes down: the charge starts (if there is a shot in the cell).
+   * The trigger goes down: the charge starts. The rifle has no ammunition
+   * or cell to run dry (removed 2026-10-03, on request): only its short
+   * cooldown between shots.
    * @returns {void}
    */
   function beginCharge() {
     if (S.state.phase !== 'aiming' || S.state.charging) return;
-    if (S.state.cell < HERO.cellCost) {
-      api.flashMessage('PLASMA CELL RECHARGING');
-      return;
-    }
     S.state.charging = true;
     S.state.charge = 0;
     S.state.megaReady = false;
@@ -129,7 +127,7 @@ export function createHeroPlasma(ctx, S, api) {
     S.viewRifle.group.visible = S.weapons.current() === 'rifle';
     S.weapons.showView(true);
     S.roger.mesh.visible = false;
-    S.nameTag.visible = false;
+    S.overhead.visible = false;
     const cam = Sim.three.camera;
     S.state.savedFov = cam.fov;
     if (S.crosshair) S.crosshair.classList.add('visible');
@@ -158,7 +156,7 @@ export function createHeroPlasma(ctx, S, api) {
     if (S.rifle) S.rifle.visible = false;
     S.state.heading = S.state.yaw;
     if (S.roger) S.roger.mesh.visible = true;
-    if (S.nameTag) S.nameTag.visible = true;
+    if (S.overhead) S.overhead.visible = true;
     if (S.viewRifle) S.viewRifle.group.visible = false;
     if (S.katanaRig) S.katanaRig.placeView(Sim.three.camera, false);
     S.weapons.showView(false);
@@ -422,12 +420,7 @@ export function createHeroPlasma(ctx, S, api) {
    */
   function firePlasma(level) {
     if (S.state.plasmaTimer > 0 || !S.viewRifle) return;
-    if (S.state.cell < HERO.cellCost) {
-      api.flashMessage('PLASMA CELL RECHARGING');
-      return;
-    }
     const mega = level >= HERO.chargeSeconds;
-    S.state.cell -= HERO.cellCost;
     S.state.plasmaTimer = HERO.plasmaCooldown;
     S.state.beamMega = mega;
     S.state.beamLength = mega ? HERO.megaBeamSeconds : HERO.beamSeconds;
@@ -751,19 +744,18 @@ export function createHeroPlasma(ctx, S, api) {
   }
 
   /**
-   * Per frame: the beam burning down, the muzzle flash, the cell refilling,
-   * the recoil settling.
+   * Per frame: the beam burning down, the muzzle flash, the rifle's charge
+   * readout, the recoil settling.
    * @param {number} dt
    * @returns {void}
    */
   function updatePlasma(dt) {
     if (S.state.plasmaTimer > 0) S.state.plasmaTimer -= dt;
-    S.state.cell = Math.min(100, S.state.cell + HERO.cellRecharge * dt);
     S.state.recoil = Math.max(0, S.state.recoil - dt * 6);
     S.state.spread = Math.max(0, S.state.spread - dt * 3);
     updateRings(dt);
     if (S.viewRifle) {
-      api.drawCellPanel(S.viewRifle);
+      api.drawChargePanel(S.viewRifle);
       const f = S.viewRifle.flash;
       // While charging, the flash is the growing orb (updateCharge).
       if (f.visible && !S.state.charging) {

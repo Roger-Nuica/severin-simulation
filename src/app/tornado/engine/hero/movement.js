@@ -8,8 +8,8 @@ import { steerRun } from './touchMath.js';
  * ===========================================================================
  * SECTION HM.2 — Roger on foot
  * ===========================================================================
- * Where he may stand (not inside a building), where he comes in and where
- * the bunker is, his walk and his swagger, being dazed.
+ * Where he may stand (not inside a building), where he comes in, his walk
+ * and his swagger, being dazed.
  */
 
 /**
@@ -167,26 +167,6 @@ export function createHeroMovement(ctx, S, api) {
     return fallback;
   }
 
-  /**
-   * One shelter door (shelters.js) for this run: a good run away from
-   * Roger, or the farthest there is.
-   * @param {number} x
-   * @param {number} z
-   * @returns {{x: number, z: number}}
-   */
-  function pickBunker(x, z) {
-    const doors = ctx.Environment.buildings.filter(b => b.shelter && b.damageState !== 'collapsed')
-      .flatMap(b => b.shelterEntrances || []);
-    if (!doors.length) return { x: -x || 60, z: -z || 60 };
-    const [lo, hi] = HERO.bunkerDistance;
-    const good = doors.filter(d => {
-      const dist = Math.hypot(d.x - x, d.z - z);
-      return dist >= lo && dist <= hi;
-    });
-    if (good.length) return good[Math.floor(Math.random() * good.length)];
-    return doors.reduce((a, b) => (Math.hypot(a.x - x, a.z - z) > Math.hypot(b.x - x, b.z - z) ? a : b));
-  }
-
   // ---------------------------------------------------------------------
   // Roger
   // ---------------------------------------------------------------------
@@ -195,7 +175,7 @@ export function createHeroMovement(ctx, S, api) {
    * Poses the figure: a swagger rather than the town's plain run, on
    * request -- the shoulders rolling against the stride, the hips swaying
    * side to side, a spring in the step, legs a little apart, elbows out
-   * over the big arms, the quiff bouncing -- whose rate is the ground
+   * over the big arms -- whose rate is the ground
    * covered; the rifle held up while aiming; and the dazed stagger with arms
    * out. (It used to be a stiff lean-forward run.)
    * @param {number} moved world units covered this frame
@@ -219,7 +199,9 @@ export function createHeroMovement(ctx, S, api) {
     // Hips swaying over the planted foot, shoulders rolling against the legs.
     root.rotation.z = moving ? s * 0.07 * (0.5 + frac) : 0;
     if (S.roger.torso) S.roger.torso.rotation.y = moving ? -s * 0.28 * (0.4 + frac) : 0;
-    if (S.roger.quiff) S.roger.quiff.rotation.x = -0.35 + Math.abs(c) * 0.12 * frac;
+    // The little tornado in the Storm Core on his back (hero/rogerLook.js),
+    // spinning faster as he runs.
+    if (S.roger.core) S.roger.core.rotation.y += dt * (5 + 9 * frac);
 
     // The Katana's rig (hero/katana/model.js) shows the sheath while it is the
     // weapon in hand and takes the arms once it is drawn; a daze or the rifle's
@@ -386,7 +368,7 @@ export function createHeroMovement(ctx, S, api) {
       p.y += Math.sin(Math.PI * u) * HERO.zipHop;
     }
 
-    S.nameTag.position.set(p.x, p.y + HERO.tagHeight, p.z);
+    S.overhead.position.set(p.x, p.y + HERO.overheadHeight, p.z);
     S.stars.visible = S.state.phase === 'dazed';
     if (S.stars.visible) {
       S.stars.position.set(p.x, HERO.starsHeight + Math.sin(S.state.timer * 2.2) * 0.06, p.z);
@@ -424,5 +406,5 @@ export function createHeroMovement(ctx, S, api) {
     return { x: p.x, z: p.z, onFoot: S.state.phase !== 'driving' };
   }
 
-  return { inBuilding, someSolid, solidAlong, blockedAt, pushOut, pickSpawn, pickBunker, poseRoger, daze, updateRoger, rogerTarget };
+  return { inBuilding, someSolid, solidAlong, blockedAt, pushOut, pickSpawn, poseRoger, daze, updateRoger, rogerTarget };
 }

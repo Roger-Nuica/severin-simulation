@@ -27,6 +27,9 @@ import { TOUCH, stickFromDrag, heldFromStick, pickAimTarget, wrapAngle } from '.
  *                telekinesis (C, again to throw): each lit while running,
  *                dimmed while it cools down or energy is short.
  *   🚗           at a car's glowing door, get in; driving, get out.
+ *   🤖           send in the Terminators (the panel's btn-terminator: five,
+ *                each from a different side round Roger); dimmed while a
+ *                squad is still standing.
  *   ✕            leave Hero Mode.
  *
  * Nothing here changes the game: the controls fill the same record the
@@ -74,7 +77,7 @@ export function createHeroTouch(ctx, S, api) {
   const { Sim, container } = ctx;
   /** @type {HTMLDivElement|null} */
   let root = null;
-  /** @type {{base: HTMLDivElement, knob: HTMLDivElement, fire: HTMLButtonElement, aim: HTMLButtonElement, weapon: HTMLButtonElement, car: HTMLButtonElement, abilities: {code: string, el: HTMLButtonElement}[]}|null} */
+  /** @type {{base: HTMLDivElement, knob: HTMLDivElement, fire: HTMLButtonElement, aim: HTMLButtonElement, weapon: HTMLButtonElement, car: HTMLButtonElement, bots: HTMLButtonElement, abilities: {code: string, el: HTMLButtonElement}[]}|null} */
   let ui = null;
   let enabled = false;
   let active = false;
@@ -121,6 +124,7 @@ export function createHeroTouch(ctx, S, api) {
     const weapon = button('ht-weapon', '<b>⇄</b><span class="ht-wname"></span>', 'Next weapon');
     const car = button('ht-car', '🚗<span>DRIVE</span>', 'Get in or out of the car');
     const exit = button('ht-exit', '✕', 'Leave Hero Mode');
+    const bots = button('ht-bots', '🤖', 'Send in the Terminators');
     const abilityBox = document.createElement('div');
     abilityBox.className = 'ht-abilities';
     const abilities = ABILITIES.map((a) => {
@@ -128,9 +132,9 @@ export function createHeroTouch(ctx, S, api) {
       abilityBox.appendChild(el);
       return { code: a.code, el };
     });
-    root.append(base, abilityBox, weapon, aim, car, fire, exit);
+    root.append(base, abilityBox, weapon, aim, car, fire, bots, exit);
     container.appendChild(root);
-    ui = { base, knob, fire, aim, weapon, car, abilities };
+    ui = { base, knob, fire, aim, weapon, car, bots, abilities };
 
     const opts = { signal: ctx.signal };
     /** A button that acts on press (and optionally on release), never the browser's tap. */
@@ -160,6 +164,10 @@ export function createHeroTouch(ctx, S, api) {
       else tapKey('Enter');
     });
     hold(exit, () => document.getElementById('btn-hero')?.click());
+    hold(bots, () => {
+      const panelButton = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-terminator'));
+      if (panelButton && !panelButton.disabled) panelButton.click();
+    });
     for (const a of abilities) hold(a.el, () => tapKey(a.code));
 
     // The thumbs on the game itself: the canvas (Hero Mode turns the orbit
@@ -308,6 +316,8 @@ export function createHeroTouch(ctx, S, api) {
     const wname = /** @type {HTMLElement} */ (ui.weapon.querySelector('.ht-wname'));
     if (wname.textContent !== name) wname.textContent = name;
     root?.classList.toggle('driving', driving);
+    const panelButton = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-terminator'));
+    ui.bots.classList.toggle('off', !panelButton || panelButton.disabled);
     const abilities = ctx.systems.abilities;
     for (const a of ui.abilities) {
       const st = abilities.buttonState ? abilities.buttonState(a.code) : null;

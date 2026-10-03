@@ -371,7 +371,7 @@ export default function TornadoSimulator() {
             other two rather than among the one-off events. */}
         <div className="buttons hero-row">
           <button id="btn-hero" type="button" aria-pressed="false"
-            title="Play as Roger: run to the marked bunker with the Terminators on your heels. Right-click raises a weapon, left-click or Enter fires, Q switches weapon.">🦸 Hero</button>
+            title="Play as Roger, free in town. Send in the Terminators from the panel when you are ready. Right-click raises a weapon, left-click or Enter fires, the wheel switches weapon.">🦸 Hero</button>
           {/* engine/smoothCriminal.js: a stage in the middle of town, the
               song, and everyone dancing. Up here beside Hero, on request,
               rather than among the disasters. */}
