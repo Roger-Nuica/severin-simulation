@@ -2114,3 +2114,141 @@ body.ship-cutscene .minimap {
   transition: opacity 0.25s; pointer-events: none;
 }
 .coop-toast.visible { opacity: 1; }
+
+/* ===========================================================================
+   Hero Mode on a touch screen (engine/hero/touch.js). body.hero-touch-on is on
+   for the run: the panel, the co-op box and the install button step aside,
+   the HUD becomes a strip along the top, and the joystick and buttons sit
+   under the thumbs. Every button is at least 44 px; corners keep clear of
+   the notch and the home bar.
+   =========================================================================== */
+.hero-touch {
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  position: fixed; inset: 0; z-index: 20;
+  display: none; pointer-events: none;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+.hero-touch.visible { display: block; }
+body.hero-touch-on canvas { touch-action: none; }
+body.hero-touch-on #ui-panel,
+body.hero-touch-on .coop-panel,
+body.hero-touch-on .pwa-install,
+body.hero-touch-on #fps { display: none !important; }
+
+/* The joystick: resting at the lower left, or under the thumb while it is down. */
+.ht-stick {
+  position: absolute; left: calc(92px + var(--safe-l)); bottom: calc(92px + var(--safe-b));
+  width: 128px; height: 128px; margin: -64px 0 0 -64px; transform: translateY(50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 211, 90, 0.10), rgba(12, 16, 25, 0.35) 70%);
+  border: 2px solid rgba(255, 211, 90, 0.35);
+  opacity: 0.55; transition: opacity 0.15s ease;
+}
+.ht-stick.live { opacity: 0.95; transform: none; }
+.ht-knob {
+  position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffe7a8, #e0892f);
+  box-shadow: 0 0 16px rgba(255, 190, 80, 0.55), 0 4px 10px rgba(0, 0, 0, 0.5);
+}
+
+.ht-btn {
+  position: absolute; pointer-events: auto; touch-action: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  min-width: 48px; min-height: 48px; padding: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 211, 90, 0.55);
+  background: rgba(12, 16, 25, 0.62);
+  color: #ffe7a8;
+  font: 800 11px/1 system-ui, -apple-system, 'Segoe UI', sans-serif; letter-spacing: 1px;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  transition: transform 0.08s ease, background 0.12s ease;
+}
+.ht-btn.pressed { transform: scale(0.92); background: rgba(255, 190, 80, 0.38); }
+.ht-fire {
+  right: calc(20px + var(--safe-r)); bottom: calc(24px + var(--safe-b));
+  width: 88px; height: 88px;
+  border-color: rgba(255, 90, 60, 0.85);
+  background: radial-gradient(circle at 40% 35%, rgba(255, 110, 70, 0.55), rgba(120, 20, 10, 0.6));
+  color: #fff; font-size: 14px; letter-spacing: 2px;
+}
+.ht-fire.pressed { background: radial-gradient(circle, rgba(255, 170, 90, 0.85), rgba(200, 40, 20, 0.8)); }
+.ht-aim { right: calc(118px + var(--safe-r)); bottom: calc(30px + var(--safe-b)); width: 64px; height: 64px; }
+.ht-aim.on { background: rgba(14, 70, 36, 0.78); border-color: rgba(90, 255, 140, 0.9); color: #b8ffd0; }
+.ht-weapon {
+  right: calc(20px + var(--safe-r)); bottom: calc(124px + var(--safe-b));
+  width: 112px; height: 48px; border-radius: 24px;
+  flex-direction: row; gap: 5px; padding: 0 10px;
+}
+.ht-weapon b { font-size: 15px; }
+.ht-weapon .ht-wname {
+  font-size: 9px; line-height: 1.15; letter-spacing: 0.4px; max-width: 76px; text-align: left;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ht-car {
+  right: calc(118px + var(--safe-r)); bottom: calc(112px + var(--safe-b));
+  width: 64px; height: 64px; display: none; font-size: 20px;
+  border-color: rgba(255, 211, 90, 0.95);
+  animation: ht-car-pulse 0.9s ease-in-out infinite alternate;
+}
+.ht-car span { font-size: 9px; }
+.ht-car.shown { display: flex; }
+@keyframes ht-car-pulse { from { box-shadow: 0 0 0 rgba(255, 211, 90, 0); } to { box-shadow: 0 0 18px rgba(255, 211, 90, 0.8); } }
+.ht-exit {
+  top: calc(10px + var(--safe-t)); right: calc(10px + var(--safe-r));
+  width: 44px; height: 44px; min-width: 44px; min-height: 44px; font-size: 18px;
+}
+/* The abilities: a column over the weapon button (portrait), a row along the top (landscape). */
+.ht-abilities {
+  position: absolute; right: calc(20px + var(--safe-r)); bottom: calc(184px + var(--safe-b));
+  display: flex; flex-direction: column-reverse; gap: 8px; align-items: flex-end;
+}
+.ht-ability { position: relative; width: 52px; height: 52px; }
+.ht-ability b { font-size: 18px; font-weight: 400; }
+.ht-ability span { font-size: 8px; letter-spacing: 0.5px; }
+.ht-ability i {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font: 800 16px/1 system-ui, sans-serif; font-style: normal; color: #fff;
+}
+.ht-ability.running { background: rgba(127, 214, 255, 0.4); border-color: #7fd6ff; box-shadow: 0 0 14px rgba(127, 214, 255, 0.7); }
+.ht-ability.cooling b, .ht-ability.cooling span { opacity: 0.25; }
+.ht-ability.cooling { border-color: rgba(255, 255, 255, 0.2); }
+.ht-ability.short { opacity: 0.45; }
+.hero-touch.driving .ht-abilities, .hero-touch.driving .ht-aim, .hero-touch.driving .ht-weapon, .hero-touch.driving .ht-fire { display: none; }
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .ht-abilities { flex-direction: row; top: calc(10px + var(--safe-t)); bottom: auto; right: calc(64px + var(--safe-r)); }
+  .ht-ability { width: 48px; height: 48px; }
+  .ht-stick { left: calc(100px + var(--safe-l)); bottom: calc(80px + var(--safe-b)); }
+}
+
+/* The Hero HUD as a strip along the top. */
+body.hero-touch-on .hero-hud {
+  top: calc(8px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px));
+  right: calc(62px + env(safe-area-inset-right, 0px)); bottom: auto;
+  min-width: 0; max-width: none; padding: 5px 9px;
+  flex-direction: row; flex-wrap: wrap; gap: 3px 12px;
+  font-size: 9px; letter-spacing: 0.6px; border-radius: 10px;
+}
+body.hero-touch-on .hero-hud .hero-row { gap: 4px; }
+body.hero-touch-on .hero-hud .hero-cell { width: 44px; height: 5px; }
+body.hero-touch-on .hero-hud .hero-ebar i { width: 5px; height: 6px; }
+body.hero-touch-on .hero-hud .hero-arrow { font-size: 11px; }
+body.hero-touch-on .hero-hud .hero-name,
+body.hero-touch-on .hero-hud .hero-weapon,
+body.hero-touch-on .hero-hud .hero-abilities,
+body.hero-touch-on .hero-hud .hero-keys,
+body.hero-touch-on .hero-hud .hero-charge { display: none; }
+body.hero-touch-on .hero-hud .hero-msg { flex-basis: 100%; min-height: 0; font-size: 10px; }
+body.hero-touch-on .hero-hud.aiming { opacity: 0.85; }
+body.hero-touch-on .minimap {
+  width: 96px; height: 96px; right: auto; bottom: auto;
+  left: calc(8px + env(safe-area-inset-left, 0px)); top: calc(78px + env(safe-area-inset-top, 0px));
+}
+body.hero-touch-on .hero-banner { top: 31%; max-width: 88vw; }
+body.hero-touch-on .hero-banner .title { font-size: 24px; letter-spacing: 3px; }
+body.hero-touch-on .hero-banner .sub { font-size: 10px; white-space: normal; line-height: 1.35; }

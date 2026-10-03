@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { PERSON_SCALE } from '../environment/people.js';
 import { HERO, STREETS_ALONG_X, STREETS_ALONG_Z } from './config.js';
+import { steerRun } from './touchMath.js';
 
 /**
  * ===========================================================================
@@ -310,9 +311,19 @@ export function createHeroMovement(ctx, S, api) {
       if (S.state.phase === 'running' && zipLeft > 1e-3) S.state.heading = Math.atan2(dx, dz);
       S.state.speed = 0;
     } else if (S.state.phase === 'running') {
-      const turn = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
-      S.state.heading += turn * HERO.turnRate * dt;
-      const want = S.keys.up ? HERO.runSpeed : S.keys.down ? -HERO.backSpeed : 0;
+      let want;
+      if (S.stick.x || S.stick.y) {
+        // The touch joystick (hero/touch.js): the way it points on screen,
+        // from the camera, and as fast as it is pushed.
+        const cam = Sim.three.camera.position;
+        const steer = steerRun(S.state.heading, Math.atan2(p.x - cam.x, p.z - cam.z), S.stick.x, S.stick.y, dt);
+        S.state.heading = steer.heading;
+        want = HERO.runSpeed * steer.speed;
+      } else {
+        const turn = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
+        S.state.heading += turn * HERO.turnRate * dt;
+        want = S.keys.up ? HERO.runSpeed : S.keys.down ? -HERO.backSpeed : 0;
+      }
       const step = HERO.accel * dt;
       S.state.speed = S.state.speed < want ? Math.min(want, S.state.speed + step) : Math.max(want, S.state.speed - step * 1.5);
       p.x += Math.sin(S.state.heading) * S.state.speed * dt;
@@ -344,18 +355,21 @@ export function createHeroMovement(ctx, S, api) {
       S.state.heading = S.state.yaw;
       const fx = Math.sin(S.state.yaw);
       const fz = Math.cos(S.state.yaw);
-      const ahead = (S.keys.up ? 1 : 0) - (S.keys.down ? 1 : 0);
-      const across = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
+      const analog = S.stick.x || S.stick.y;
+      // The touch joystick walks as far as it is pushed; keys walk full pace.
+      const ahead = analog ? -S.stick.y : (S.keys.up ? 1 : 0) - (S.keys.down ? 1 : 0);
+      const across = analog ? -S.stick.x : (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
       // Left of forward is (fz, -fx) with this module's heading convention.
       let mx = fx * ahead + fz * across;
       let mz = fz * ahead - fx * across;
       const len = Math.hypot(mx, mz);
-      S.state.speed = len > 0 ? HERO.aimWalkSpeed : 0;
+      const pace = HERO.aimWalkSpeed * (analog ? Math.min(1, len) : 1);
+      S.state.speed = len > 0 ? pace : 0;
       if (len > 0) {
         mx /= len;
         mz /= len;
-        p.x += mx * HERO.aimWalkSpeed * dt;
-        p.z += mz * HERO.aimWalkSpeed * dt;
+        p.x += mx * pace * dt;
+        p.z += mz * pace * dt;
       }
     }
     pushOut(p, HERO.pad * 0.5);
