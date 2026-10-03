@@ -3,6 +3,7 @@ import { bannerHost } from '../utils/banners.js';
 import { createHeroWeapons, MINIGUN } from './heroWeapons.js';
 import { HERO, EXCLUSIVE_BUTTONS } from './hero/config.js';
 import { createHeroModels } from './hero/models.js';
+import { createHeroTouch } from './hero/touch.js';
 import { createHeroMovement } from './hero/movement.js';
 import { createHeroInput } from './hero/input.js';
 import { createHeroPlasma } from './hero/plasma.js';
@@ -273,6 +274,10 @@ export function createHeroModeSystem(ctx) {
     },
     // W A S D: the only movement keys, in every mode (the arrows do nothing).
     keys: { up: false, down: false, left: false, right: false },
+    /** The touch joystick, analog (hero/touch.js): x right, y down; zero from the keyboard. */
+    stick: { x: 0, y: 0 },
+    /** The touch controls are on for this run (hero/touch.js). */
+    touchActive: false,
   
     /** @type {Object|null} Roger: a people.js figure, never in Sim.objects */
     roger: null,
@@ -357,6 +362,7 @@ export function createHeroModeSystem(ctx) {
     createHeroCar(ctx, S, api),
     createHeroPursuers(ctx, S, api),
     createHeroScreen(ctx, S, api),
+    createHeroTouch(ctx, S, api),
     {  }
   );
 
@@ -475,6 +481,9 @@ export function createHeroModeSystem(ctx) {
     S.banner.className = 'hero-banner';
     S.banner.innerHTML = '<span class="title"></span><span class="sub"></span>';
     bannerHost(container).appendChild(S.banner);
+
+    // On a phone or tablet: the joystick and buttons (hero/touch.js).
+    api.buildTouch();
   }
 
   /** @returns {void} */
@@ -540,8 +549,11 @@ export function createHeroModeSystem(ctx) {
       S.button.setAttribute('aria-pressed', 'true');
     }
     if (S.hud) S.hud.classList.add('visible');
+    api.showTouch(true);
     api.placeFollowCamera(1);
-    api.showBanner('HERO MODE', 'Get Roger to the bunker. Something is coming for him.');
+    api.showBanner('HERO MODE', S.touchActive
+      ? 'Get Roger to the bunker. Left thumb runs · right thumb looks · FIRE.'
+      : 'Get Roger to the bunker. Something is coming for him.');
   }
 
   /**
@@ -559,6 +571,7 @@ export function createHeroModeSystem(ctx) {
     S.Hero.active = false;
     if (S.over) S.over.classList.remove('visible');
     api.clearHurt();
+    api.showTouch(false);
     api.detachKeys();
     // Time Slow (or any ability) let go with the run.
     ctx.systems.abilities.cancelAll();
@@ -635,6 +648,8 @@ export function createHeroModeSystem(ctx) {
     const dt = Sim.state.paused ? 0 : rawDt;
     // What the player did since the last frame (engine/player/input.js).
     api.consumeInput();
+    // The touch controls' aim assist and buttons (hero/touch.js).
+    api.updateTouch(rawDt);
     // The abilities' clocks run on the player's time, dying included, or the
     // world would stay slow under the GAME OVER card.
     ctx.systems.abilities.updateAbilities(dt);
@@ -838,6 +853,7 @@ export function createHeroModeSystem(ctx) {
   function disposeHero() {
     resetHero();
     if (S.weapons) S.weapons.dispose();
+    api.disposeTouch();
     for (const el of [S.hud, S.crosshair, S.banner, S.over, S.hurt]) if (el && el.parentNode) el.parentNode.removeChild(el);
     S.hud = S.crosshair = S.banner = S.over = S.hurt = S.hurtDir = null;
     S.button = null;

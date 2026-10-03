@@ -7,6 +7,17 @@ export const metadata = {
   description: 'Interactive 3D tornado simulator built with Three.js',
 };
 
+// The phone's viewport: the page fills the screen under the notch and the
+// home bar, and a pinch or a double tap never zooms it (Hero Mode's thumbs
+// are on the game: engine/hero/touch.js).
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover'
+};
+
 // RootLayout is a Server Component (no 'use client') — this app has only
 // one page, so it just provides the <html>/<body> shell and the global
 // stylesheet.

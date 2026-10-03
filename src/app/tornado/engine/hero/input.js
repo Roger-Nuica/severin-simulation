@@ -1,6 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
 import { HERO } from './config.js';
+import { TOUCH } from './touchMath.js';
 
 /**
  * ===========================================================================
@@ -82,6 +83,9 @@ export function createHeroInput(ctx, S, api) {
     S.keys.down = held.down;
     S.keys.left = held.left;
     S.keys.right = held.right;
+    // The touch joystick's analog value (hero/touch.js; zero from the keyboard).
+    S.stick.x = input.stick.x;
+    S.stick.y = input.stick.y;
     const phase = () => S.state.phase;
     // The Katana is drawn from the sheath on the back as soon as it is the
     // weapon in hand, and only ever on foot, upright and unfrozen (running or
@@ -188,6 +192,9 @@ export function createHeroInput(ctx, S, api) {
       S.state.yaw -= look.dx * HERO.lookSensitivity;
       S.state.pitch = THREE.MathUtils.clamp(S.state.pitch - look.dy * HERO.lookSensitivity, HERO.pitchMin, HERO.pitchMax);
     }
+    // A touch drag on foot turns him (and the follow camera behind him).
+    const turn = input.takeTurn();
+    if (turn && phase() === 'running') S.state.heading -= turn * TOUCH.turnPerPx;
     // Cuts, the lunge and the plane go where he looks.
     if (katanaFirstPerson) S.state.heading = S.state.yaw;
     // The same drain feeds the Katana's virtual cursor and swipe: in first

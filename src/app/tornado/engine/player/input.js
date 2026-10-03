@@ -29,6 +29,12 @@
  *   T                   Landing Support (engine/spaceship/targeting.js, which
  *                       reads it itself, before this: while its marker is
  *                       down, R, T and Esc are its own)
+ *
+ * On a touch screen (hero/touch.js) the same record is filled from the
+ * on-screen controls: the joystick sets `held` and the analog `stick`,
+ * buttons push the same events a key or a click would (`push`), a drag on
+ * the right of the screen adds to the look (`addLook`) while aiming, or to
+ * `turn` on foot (Roger turns, the follow camera with him).
  */
 
 // Keys whose browser default (scrolling, a menu) is stopped while the player
@@ -50,7 +56,12 @@ const MOVE_KEYS = { KeyW: 'up', KeyS: 'down', KeyA: 'left', KeyD: 'right' };
  * @param {Object} ctx
  * @returns {{
  *   held: {up: boolean, down: boolean, left: boolean, right: boolean},
+ *   stick: {x: number, y: number},
  *   attachInput: () => void,
+ *   push: (e: InputEvent) => void,
+ *   addLook: (dx: number, dy: number) => void,
+ *   addTurn: (dx: number) => void,
+ *   takeTurn: () => number,
  *   detachInput: () => void,
  *   drain: () => InputEvent[],
  *   takeLook: () => {dx: number, dy: number},
@@ -63,6 +74,10 @@ export function createPlayerInput(ctx) {
   /** @type {InputEvent[]} */
   let queue = [];
   const look = { dx: 0, dy: 0 };
+  /** The touch joystick, analog: x right, y down, length at most 1 (0, 0 from the keyboard). */
+  const stick = { x: 0, y: 0 };
+  /** A touch drag on foot, CSS px, not yet taken. */
+  let turn = 0;
   /** @type {AbortController|null} the listeners of this attachment */
   let attached = null;
 
@@ -78,6 +93,7 @@ export function createPlayerInput(ctx) {
   /** @returns {void} */
   function releaseHeld() {
     held.up = held.down = held.left = held.right = false;
+    stick.x = stick.y = 0;
   }
 
   /**
@@ -152,6 +168,39 @@ export function createPlayerInput(ctx) {
     releaseHeld();
     queue = [];
     look.dx = look.dy = 0;
+    turn = 0;
+  }
+
+  /**
+   * An event from the touch controls, the same shape as the DOM's.
+   * @param {InputEvent} e
+   * @returns {void}
+   */
+  function push(e) {
+    if (attached) queue.push(e);
+  }
+
+  /**
+   * A touch look drag (aiming), in mouse pixels.
+   * @param {number} dx
+   * @param {number} dy
+   * @returns {void}
+   */
+  function addLook(dx, dy) {
+    look.dx += dx;
+    look.dy += dy;
+  }
+
+  /** @param {number} dx a touch drag on foot, CSS px @returns {void} */
+  function addTurn(dx) {
+    turn += dx;
+  }
+
+  /** @returns {number} the touch turn since the last call, CSS px */
+  function takeTurn() {
+    const out = turn;
+    turn = 0;
+    return out;
   }
 
   /** @returns {InputEvent[]} everything since the last call, oldest first */
@@ -173,5 +222,5 @@ export function createPlayerInput(ctx) {
     detachInput();
   }
 
-  return { held, attachInput, detachInput, drain, takeLook, disposeInput };
+  return { held, stick, attachInput, detachInput, drain, takeLook, disposeInput, push, addLook, addTurn, takeTurn };
 }

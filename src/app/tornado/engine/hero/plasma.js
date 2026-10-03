@@ -135,6 +135,8 @@ export function createHeroPlasma(ctx, S, api) {
     if (S.crosshair) S.crosshair.classList.add('visible');
     if (S.hud) S.hud.classList.add('aiming');
     const canvas = Sim.three.renderer.domElement;
+    // On a touch screen the right thumb looks (hero/touch.js): no lock.
+    if (S.touchActive) return;
     try {
       const request = canvas.requestPointerLock && canvas.requestPointerLock();
       if (request && typeof request.catch === 'function') request.catch(() => {});
