@@ -7,6 +7,7 @@ import { T800 } from './terminator/config.js';
 import { createTerminatorModel } from './terminator/model.js';
 import { createTerminatorMovement } from './terminator/movement.js';
 import { createTerminatorHits } from './terminator/hits.js';
+import { squadSpawnPoints } from './terminator/spawn.js';
 
 /**
  * ===========================================================================
@@ -140,9 +141,13 @@ export function createTerminatorSystem(ctx) {
       S.button.addEventListener('click', () => {
         const before = S.units.length ? S.units[0] : null;
         spawnTerminator();
-        // Called in from the panel: the camera glides over to the first of them.
         const first = S.units.length ? S.units[0] : null;
-        if (first && first !== before) ctx.systems.camera.glideTo(() => (first.root.parent ? first.root.position : null), CHARACTERS.terminator.height);
+        if (!first || first === before) return;
+        // In Hero Mode the camera cuts to two of them coming in, then back to
+        // Roger (heroMode.js showcase); otherwise it glides over to the first.
+        const hero = ctx.systems.heroMode;
+        if (ctx.Hero && ctx.Hero.active && hero && hero.showcase) hero.showcase(S.units.slice(0, 2).map((u) => u.root.position));
+        else ctx.systems.camera.glideTo(() => (first.root.parent ? first.root.position : null), CHARACTERS.terminator.height);
       }, { signal: ctx.signal });
     }
     // In the shared register of enemies (engine/enemies.js): the plasma
@@ -205,23 +210,26 @@ export function createTerminatorSystem(ctx) {
   }
 
   /**
-   * Sends a squad in from all round the edge of town. The button is greyed
-   * while any of them is still standing, and the wrecks left by the last
-   * squad are cleared away.
+   * Sends a squad of T800.squad in, each from a different side
+   * (terminator/spawn.js): round the edge of town, or in Hero Mode round
+   * Roger, a block or two out. The button is greyed while any of them is
+   * still standing, and the wrecks left by the last squad are cleared away.
    * @returns {void}
    */
   function spawnTerminator() {
     if (aliveCount() > 0) return;
     removeUnits();
-    const base = Math.random() * Math.PI * 2;
+    const roger = ctx.Hero && ctx.Hero.active && ctx.systems.heroMode ? ctx.systems.heroMode.rogerPose() : null;
+    const points = roger
+      ? squadSpawnPoints(roger.x, roger.z, T800.squad, T800.heroSpawnRadius, T800.bound, Math.random)
+      : squadSpawnPoints(0, 0, T800.squad, T800.spawnRadius, T800.bound, Math.random, 0.16);
     for (let i = 0; i < T800.squad; i++) {
       const unit = api.build();
-      const a = base + (i / T800.squad) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
       const p = unit.root.position;
-      p.set(Math.cos(a) * T800.spawnRadius, 0, Math.sin(a) * T800.spawnRadius);
+      p.set(points[i].x, 0, points[i].z);
       api.collideBuildings(p);
-      // Facing the middle of town.
-      unit.heading = Math.atan2(-p.x, -p.z);
+      // Facing Roger in Hero Mode, the middle of town otherwise.
+      unit.heading = roger ? Math.atan2(roger.x - p.x, roger.z - p.z) : Math.atan2(-p.x, -p.z);
       unit.root.rotation.y = unit.heading;
       unit.watchX = p.x;
       unit.watchZ = p.z;
@@ -230,7 +238,9 @@ export function createTerminatorSystem(ctx) {
       // Booting up as it comes in (sound/creatures.js).
       ctx.systems.creatureSounds.play('boot', p, { size: 1.2, pitch: 0.9 + i * 0.05 });
     }
-    showBanner('TERMINATORS ONLINE', `${T800.squad} of them · only an EMP from the Electric Tornado can stop them`);
+    showBanner('TERMINATORS ONLINE', roger
+      ? `${T800.squad} of them · coming for Roger from every side`
+      : `${T800.squad} of them · only an EMP from the Electric Tornado can stop them`);
     if (S.button) S.button.disabled = true;
   }
 

@@ -23,9 +23,10 @@ import { createSoftDotTexture } from '../../utils/textures.js';
  *    cooldown. It runs dry and he comes down under gravity, carried on by
  *    the speed he has, steering a little.
  *
- * The pack is the San Andreas kind: a frame on his back, a fuel tank across
- * it, two fat thrusters out at his hips on struts with bell nozzles, and a
- * control arm from each to a grip in front of him, which he holds while it
+ * The pack is the San Andreas kind, fitted to the Storm Ranger suit: two
+ * slim fuel tanks either side of the Storm Core on his back, a yoke round
+ * to two thrusters at his hips with bell nozzles, and a control arm from
+ * each to a grip in front of him, which he holds while it
  * burns -- upright, legs dangling.
  *
  * Over the houses, the shops and the townhouses, and onto a roof if he comes
@@ -366,7 +367,6 @@ export function createHeroJetpack(ctx, S, api) {
     const coreMat = api.keepMat(new THREE.MeshBasicMaterial({
       color: 0xbfe4ff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false
     }));
-    const box = (/** @type {number} */ w, /** @type {number} */ h, /** @type {number} */ d) => api.keepGeo(new THREE.BoxGeometry(w, h, d));
     const cyl = (/** @type {number} */ rt, /** @type {number} */ rb, /** @type {number} */ h, open = false) => api.keepGeo(new THREE.CylinderGeometry(rt, rb, h, 14, 1, open));
     /**
      * A rod from a to b (local units).
@@ -393,51 +393,52 @@ export function createHeroJetpack(ctx, S, api) {
 
     const pack = new THREE.Group();
     pack.name = 'hero_jetpack';
-    // The frame on his back and the tank across it, in Roger's own frame
-    // (feet at 0, +z ahead).
-    const plate = new THREE.Mesh(box(0.36, 0.5, 0.06), dark);
-    plate.position.set(0, 1.25, -0.36);
-    const tank = new THREE.Mesh(cyl(0.09, 0.09, 0.46), metal);
-    tank.rotation.z = Math.PI / 2;
-    tank.position.set(0, 1.38, -0.44);
-    tank.castShadow = true;
-    const band = new THREE.Mesh(cyl(0.093, 0.093, 0.04), warn);
-    band.rotation.z = Math.PI / 2;
-    band.position.set(0, 1.38, -0.44);
-    pack.add(plate, tank, band);
+    // Fitted to the Storm Ranger suit (hero/rogerLook.js: a slim torso, the
+    // Storm Core on the back at 1.2 m): two slim fuel tanks either side of
+    // the core, leaving it in view, and a yoke from them down to the hips.
+    // Roger's own frame: feet at 0, +z ahead.
     /** @type {THREE.Mesh[]} */
     const flames = [];
     /** @type {THREE.Mesh[]} */
     const cores = [];
     for (const side of [-1, 1]) {
-      // The strut round to the hip, the thruster on it.
-      const hip = new THREE.Vector3(side * 0.43, 0.98, -0.05);
-      pack.add(rod(new THREE.Vector3(side * 0.14, 1.12, -0.38), new THREE.Vector3(side * 0.43, 1.02, -0.12), 0.025, chrome));
-      const pod = new THREE.Mesh(cyl(0.12, 0.12, 0.38), metal);
-      pod.position.copy(hip);
+      const tank = new THREE.Mesh(cyl(0.05, 0.05, 0.36), metal);
+      tank.position.set(side * 0.13, 1.2, -0.2);
+      tank.castShadow = true;
+      const tankCap = new THREE.Mesh(api.keepGeo(new THREE.SphereGeometry(0.05, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2)), chrome);
+      tankCap.position.set(0, 0.18, 0);
+      tank.add(tankCap);
+      const band = new THREE.Mesh(cyl(0.052, 0.052, 0.03), warn);
+      band.position.set(0, 0.06, 0);
+      tank.add(band);
+      pack.add(tank);
+      // The yoke, from the tank round the waist to the thruster.
+      pack.add(rod(new THREE.Vector3(side * 0.13, 1.08, -0.2), new THREE.Vector3(side * 0.29, 1.06, -0.08), 0.02, chrome));
+      const pod = new THREE.Mesh(cyl(0.09, 0.09, 0.32), metal);
+      pod.position.set(side * 0.3, 0.98, -0.06);
       pod.castShadow = true;
-      const cap = new THREE.Mesh(api.keepGeo(new THREE.SphereGeometry(0.12, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2)), chrome);
-      cap.position.set(0, 0.19, 0);
+      const cap = new THREE.Mesh(api.keepGeo(new THREE.SphereGeometry(0.09, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2)), chrome);
+      cap.position.set(0, 0.16, 0);
       pod.add(cap);
-      const ring = new THREE.Mesh(cyl(0.125, 0.125, 0.04), warn);
-      ring.position.set(0, 0.08, 0);
+      const ring = new THREE.Mesh(cyl(0.094, 0.094, 0.03), warn);
+      ring.position.set(0, 0.07, 0);
       pod.add(ring);
-      const bell = new THREE.Mesh(cyl(0.085, 0.14, 0.14, true), dark);
-      bell.position.set(0, -0.26, 0);
+      const bell = new THREE.Mesh(cyl(0.065, 0.11, 0.12, true), dark);
+      bell.position.set(0, -0.22, 0);
       pod.add(bell);
       // The control arm, forward from the thruster to the grip.
-      const grip = new THREE.Vector3(side * 0.3, 1.02, 0.34);
-      pack.add(rod(new THREE.Vector3(side * 0.43, 1.05, 0.08), grip, 0.022, chrome));
-      const handle = new THREE.Mesh(cyl(0.032, 0.032, 0.14), dark);
+      const grip = new THREE.Vector3(side * 0.24, 1.0, 0.27);
+      pack.add(rod(new THREE.Vector3(side * 0.3, 1.04, 0.02), grip, 0.018, chrome));
+      const handle = new THREE.Mesh(cyl(0.026, 0.026, 0.12), dark);
       handle.position.copy(grip);
       pack.add(handle);
       const flame = new THREE.Mesh(flameGeo, flameMat);
-      flame.position.set(0, -0.32, 0);
+      flame.position.set(0, -0.27, 0);
       flame.visible = false;
       flame.frustumCulled = false;
       pod.add(flame);
       const core = new THREE.Mesh(coreGeo, coreMat);
-      core.position.set(0, -0.32, 0);
+      core.position.set(0, -0.27, 0);
       core.visible = false;
       core.frustumCulled = false;
       pod.add(core);
@@ -526,8 +527,8 @@ export function createHeroJetpack(ctx, S, api) {
     if (!armsFree) return;
     if (burning) {
       // Down and forward to the grips at his hips.
-      L.armL.rotation.set(-0.62, 0, -0.32);
-      L.armR.rotation.set(-0.62, 0, 0.32);
+      L.armL.rotation.set(-0.6, 0, -0.14);
+      L.armR.rotation.set(-0.6, 0, 0.14);
     } else {
       L.armL.rotation.set(-0.3, 0, -1.25);
       L.armR.rotation.set(-0.3, 0, 1.25);

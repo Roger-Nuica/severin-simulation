@@ -3,6 +3,7 @@ import { bannerHost } from '../utils/banners.js';
 import { createHeroWeapons, MINIGUN } from './heroWeapons.js';
 import { HERO, EXCLUSIVE_BUTTONS } from './hero/config.js';
 import { createHeroModels } from './hero/models.js';
+import { createHeroTouch } from './hero/touch.js';
 import { createHeroMovement } from './hero/movement.js';
 import { createHeroInput } from './hero/input.js';
 import { createHeroPlasma } from './hero/plasma.js';
@@ -19,16 +20,18 @@ export { SHIP_DAMAGE } from './hero/config.js';
  * SECTION AM — Hero Mode
  * ===========================================================================
  * A playable sequence of its own: the player is Roger, on foot in the storm,
- * and has to get to a marked bunker across town with two Terminators on
- * his heels (HERO.pursuers; it was one), set off together on either side of
- * the line behind him. Started and ended from the panel (btn-hero); it does not start the
- * tornado (the Tornado button or a preset does that), so Roger can take on
- * the aliens first. It ends when Roger reaches the bunker (SAFE) or dies,
+ * free to roam the town and fight what is in it. There is no bunker to reach
+ * and nothing is sent after him at the start (both removed 2026-10-03, on
+ * request): the Terminators come only when the player sends for them from
+ * the panel (terminator.js spawnTerminator; on a phone, the 🤖 button of
+ * hero/touch.js). Started and ended from the panel (btn-hero); it does not
+ * start the tornado (the Tornado button or a preset does that), so Roger can
+ * take on the aliens first. It ends when the player leaves it or Roger dies,
  * which puts up a GAME OVER card with Restart and Exit; either way the
  * camera goes back the way it was found.
  *
  * Roger is one of the town's own figures (people.js createPerson) with his
- * own look, a name tag and a run cycle driven by the ground he covers, so the
+ * own look, his health and energy bars over his head, and a run cycle driven by the ground he covers, so the
  * legs never slide. He runs at the Chase Mode car's top speed
  * (HERO.runSpeed, the Chase Mode car's old top speed), steered like the car with W A S D
  * keys (no WASD for movement; Q W E R are the abilities): up/down run and back off, left/right turn, with a
@@ -50,7 +53,7 @@ export { SHIP_DAMAGE } from './hero/config.js';
  * The plasma rifle is drawn and put away with the right mouse button.
  * Drawn, the view goes first person, like a shooter: the camera is at
  * Roger's eyes, the rifle held in front of it in the lower right (its own
- * close-up model, with a readout of the plasma cell on its back) and a
+ * close-up model, with a readout of its charge on its back) and a
  * Counter-Strike crosshair in the middle of the screen. The mouse looks
  * (pointer lock when the browser gives it); W A S D walk -- up/down
  * forward and back, left/right strafe. The crosshair turns red over
@@ -104,8 +107,10 @@ export { SHIP_DAMAGE } from './hero/config.js';
  * call empSweep. It seizes rigid mid-stride in a storm of arcs, falls
  * stiffly, and goes off in a small EMP burst. TERMINATOR TERMINATED, a big
  * bonus, and after a few seconds it reboots and comes on again, once; kill
- * each of them twice and the chase is over for the run, leaving only the
- * bunker. terminatorDistance tells the Terminator music (sound/cues.js)
+ * each of them twice and the chase is over for the run. (Since 2026-10-03
+ * none are sent at the start -- the panel's Terminator squad hunts him
+ * instead, when the player sends for it; hero/pursuers.js is kept, unused
+ * by a run.) terminatorDistance tells the Terminator music (sound/cues.js)
  * how near the nearest machine is.
  *
  * The parked cars can be driven, and the nearest ones are marked on the
@@ -132,8 +137,8 @@ export { SHIP_DAMAGE } from './hero/config.js';
  * The code is split by job across engine/hero/ (moved as it was, nothing
  * changed; the benchmark's fingerprint is the same before and after):
  *   config.js    every tunable (HERO and the street layout)
- *   models.js    Roger, the rifles, the marker, the machines
- *   movement.js  Roger on foot, spawn and bunker
+ *   models.js    Roger, the rifles, the bars over his head, the machines
+ *   movement.js  Roger on foot, and where he starts
  *   input.js     the controls
  *   plasma.js    aiming, the plasma rifle, the mega beam
  *   car.js       getting in, driving, getting out
@@ -150,7 +155,7 @@ export { SHIP_DAMAGE } from './hero/config.js';
  * @returns {{
  *   initHero: () => void,
  *   updateHero: (rawDt: number) => void,
- *   markers: () => ({bunker: THREE.Vector3, pursuers: THREE.Vector3[], roger: THREE.Vector3, car: Object|null}|null),
+ *   markers: () => ({pursuers: THREE.Vector3[], roger: THREE.Vector3, car: Object|null}|null),
  *   terminatorDistance: () => number,
  *   drivingCar: () => ({mesh: THREE.Object3D, speed: number}|null),
  *   chipTornado: (v: Object, hit: {type: string}) => boolean,
@@ -213,8 +218,7 @@ export function createHeroModeSystem(ctx) {
       overShown: false,
       deathTitle: '',
       deathSub: '',
-      // The plasma cell, 0..100, and the shot in flight.
-      cell: 100,
+      // The shot in flight.
       plasmaTimer: 0,
       beamTimer: 0,
       recoil: 0,
@@ -289,6 +293,12 @@ export function createHeroModeSystem(ctx) {
     // W A S D: the only movement keys, in every mode (the arrows do nothing).
     // jump: Space held (the jetpack climbs while it is, hero/jetpack.js).
     keys: { up: false, down: false, left: false, right: false, jump: false },
+    /** The touch joystick, analog (hero/touch.js): x right, y down; zero from the keyboard. */
+    stick: { x: 0, y: 0 },
+    /** The touch controls are on for this run (hero/touch.js). */
+    touchActive: false,
+    /** @type {{targets: THREE.Vector3[], t: number, shot: number}|null} the cut to the Terminators coming in (hero/screen.js) */
+    showcase: null,
   
     /** @type {Object|null} Roger: a people.js figure, never in Sim.objects */
     roger: null,
@@ -296,8 +306,8 @@ export function createHeroModeSystem(ctx) {
     rifle: null,
     /** @type {THREE.Object3D|null} */
     muzzle: null,
-    /** @type {THREE.Sprite|null} */
-    nameTag: null,
+    /** @type {THREE.Sprite|null} the health and energy bars over his head */
+    overhead: null,
     /** @type {THREE.Sprite|null} */
     stars: null,
     /**
@@ -306,8 +316,6 @@ export function createHeroModeSystem(ctx) {
      * @type {Object[]}
      */
     pursuers: [],
-    /** @type {THREE.Group|null} the bunker's beacon, glyph and ring */
-    marker: null,
     /** @type {Object|null} the car he is driving, an Environment.cars SimObject */
     driven: null,
     /** @type {Object|null} the car whose door he is touching */
@@ -332,8 +340,6 @@ export function createHeroModeSystem(ctx) {
     runGeometries: [],
     /** @type {THREE.Texture[]} */
     runTextures: [],
-
-    bunker: new THREE.Vector3(),
 
     aimDir: new THREE.Vector3(),
 
@@ -374,6 +380,7 @@ export function createHeroModeSystem(ctx) {
     createHeroPursuers(ctx, S, api),
     createHeroScreen(ctx, S, api),
     createHeroJetpack(ctx, S, api),
+    createHeroTouch(ctx, S, api),
     {  }
   );
 
@@ -451,10 +458,7 @@ export function createHeroModeSystem(ctx) {
       <div class="hero-row hero-energy">ENERGY <span class="hero-ebar">${'<i></i>'.repeat(ENERGY.segments)}</span> <span class="hero-epct"></span></div>
       <div class="hero-row hero-abilities"></div>
       <div class="hero-row hero-invincible">🛡 INVINCIBLE · V to turn off</div>
-      <div class="hero-row">PLASMA <span class="hero-cell"><i></i></span> <span class="hero-cellpct"></span></div>
       <div class="hero-row hero-charge">CHARGE <span class="hero-cell hero-chargebar"><i></i></span> <span class="hero-chargepct"></span></div>
-      <div class="hero-row">BUNKER <span class="hero-arrow">▲</span> <span class="hero-dist"></span></div>
-      <div class="hero-row hero-threat">TERMINATOR <span class="hero-blip"></span> <span class="hero-tdist"></span></div>
       <div class="hero-row hero-emp">⚡ EMP CHARGED <span class="hero-emptime"></span></div>
       <div class="hero-row hero-door">🚗 ENTER — get in the car</div>
       <div class="hero-row hero-drive">🚗 DRIVING · E / Q / Esc — get out</div>
@@ -494,6 +498,9 @@ export function createHeroModeSystem(ctx) {
     S.banner.className = 'hero-banner';
     S.banner.innerHTML = '<span class="title"></span><span class="sub"></span>';
     bannerHost(container).appendChild(S.banner);
+
+    // On a phone or tablet: the joystick and buttons (hero/touch.js).
+    api.buildTouch();
   }
 
   /** @returns {void} */
@@ -522,25 +529,20 @@ export function createHeroModeSystem(ctx) {
     Sim.three.controls.enabled = false;
 
     const spawn = api.pickSpawn();
-    const door = api.pickBunker(spawn.x, spawn.z);
-    S.bunker.set(door.x, 0, door.z);
     S.roger = api.buildRoger(spawn.x, spawn.z);
     api.attachJetpack(S.roger);
     Sim.three.scene.add(S.roger.mesh);
-    S.state.heading = Math.atan2(S.bunker.x - spawn.x, S.bunker.z - spawn.z);
+    // Facing the middle of town. There is no bunker to run to any more, and
+    // nothing comes after him until the Terminators are sent for from the
+    // panel (terminator.js spawnTerminator) -- both removed 2026-10-03.
+    S.state.heading = Math.atan2(-spawn.x, -spawn.z);
     S.roger.mesh.rotation.y = S.state.heading;
-
-    api.spawnPursuers();
-
-    S.marker = api.buildMarker();
-    S.marker.position.copy(S.bunker);
-    Sim.three.scene.add(S.marker);
 
     Object.assign(S.state, {
       phase: 'running', timer: 0, speed: 0, cycle: 0, drawn: false,
       charging: false, charge: 0, megaReady: false, beamMega: false, ringTimer: 0,
       deathKind: '', deathVy: 0, overShown: false,
-      cell: 100, plasmaTimer: 0, beamTimer: 0, recoil: 0, spread: 0,
+      plasmaTimer: 0, beamTimer: 0, recoil: 0, spread: 0,
       neutralised: false, dazeImmunity: 0, spawnShield: HERO.spawnShieldSeconds,
       burstTimer: 0, aimBlend: 0, threat: Infinity,
       stepTimer: 0.5, hintTimer: HERO.hintSeconds, msgTimer: 0, aimKind: 'sky', frozen: 0, coopDown: false,
@@ -562,8 +564,11 @@ export function createHeroModeSystem(ctx) {
       S.button.setAttribute('aria-pressed', 'true');
     }
     if (S.hud) S.hud.classList.add('visible');
+    api.showTouch(true);
     api.placeFollowCamera(1);
-    api.showBanner('HERO MODE', 'Get Roger to the bunker. Something is coming for him.');
+    api.showBanner('HERO MODE', S.touchActive
+      ? 'Left thumb runs · right thumb looks · FIRE · 🤖 sends in the Terminators'
+      : 'The town is yours. Send in the Terminators from the panel when you are ready.');
   }
 
   /**
@@ -581,6 +586,8 @@ export function createHeroModeSystem(ctx) {
     S.Hero.active = false;
     if (S.over) S.over.classList.remove('visible');
     api.clearHurt();
+    api.showTouch(false);
+    S.showcase = null;
     api.detachKeys();
     // Time Slow (or any ability) let go with the run.
     ctx.systems.abilities.cancelAll();
@@ -601,7 +608,7 @@ export function createHeroModeSystem(ctx) {
     }
     api.removePursuers();
     api.resetJetpack();
-    for (const obj of [S.marker, S.nameTag, S.stars, S.beam, S.beamSplash, S.burst, S.doorGlow]) if (obj) Sim.three.scene.remove(obj);
+    for (const obj of [S.overhead, S.stars, S.beam, S.beamSplash, S.burst, S.doorGlow]) if (obj) Sim.three.scene.remove(obj);
     if (S.viewRifle) Sim.three.scene.remove(S.viewRifle.group);
     if (S.katanaRig) S.katanaRig.disposeView();
     for (const ring of S.rings) Sim.three.scene.remove(ring);
@@ -611,7 +618,7 @@ export function createHeroModeSystem(ctx) {
     S.runGeometries = [];
     S.runMaterials = [];
     S.runTextures = [];
-    S.marker = S.nameTag = S.stars = S.beam = S.beamSplash = S.burst = S.rifle = S.muzzle = S.doorGlow = null;
+    S.overhead = S.stars = S.beam = S.beamSplash = S.burst = S.rifle = S.muzzle = S.doorGlow = null;
     S.rings = [];
     S.viewRifle = null;
     S.doorCar = null;
@@ -658,6 +665,8 @@ export function createHeroModeSystem(ctx) {
     const dt = Sim.state.paused ? 0 : rawDt;
     // What the player did since the last frame (engine/player/input.js).
     api.consumeInput();
+    // The touch controls' aim assist and buttons (hero/touch.js).
+    api.updateTouch(rawDt);
     // The abilities' clocks run on the player's time, dying included, or the
     // world would stay slow under the GAME OVER card.
     ctx.systems.abilities.updateAbilities(dt);
@@ -671,19 +680,6 @@ export function createHeroModeSystem(ctx) {
       api.updatePursuers(dt);
       return;
     }
-    if (S.state.phase === 'won') {
-      S.state.timer += dt;
-      // Through the door.
-      const p = S.roger.mesh.position;
-      p.x += (S.bunker.x - p.x) * Math.min(1, dt * 3);
-      p.z += (S.bunker.z - p.z) * Math.min(1, dt * 3);
-      S.roger.mesh.visible = S.state.timer < 1;
-      S.nameTag.visible = S.roger.mesh.visible;
-      api.placeFollowCamera(Math.min(1, rawDt * 4));
-      if (S.state.timer >= HERO.endSeconds) endHero('safe');
-      return;
-    }
-
     if (S.state.spawnShield > 0) {
       S.state.spawnShield = Math.max(0, S.state.spawnShield - dt);
       // Blinking while it lasts, as in any arcade respawn (only while he is
@@ -711,17 +707,12 @@ export function createHeroModeSystem(ctx) {
     if (/** @type {string} */ (S.state.phase) === 'dying') return;
 
     if (S.state.phase === 'aiming') api.placeAimCamera(rawDt);
+    else if (S.showcase && api.placeShowcaseCamera(rawDt)) { /* the Terminators coming in */ }
     else if (S.state.phase === 'driving') api.placeDriveCamera(rawDt);
     else api.placeFollowCamera(Math.min(1, rawDt * 5));
     // After the camera, so the beam leaves the muzzle where it is drawn.
     api.updatePlasma(dt);
     S.weapons.update(dt, S.state.phase === 'aiming', Sim.three.camera, S.aimDir);
-
-    // The bunker's glyph bobbing and turning to the light.
-    if (S.marker) {
-      S.marker.userData.glyph.position.y = 17 + Math.sin(performance.now() * 0.002) * 0.8;
-      S.marker.userData.ring.material.opacity = 0.55 + 0.3 * Math.sin(performance.now() * 0.005);
-    }
 
     api.updateHud(threat, rawDt);
 
@@ -730,19 +721,6 @@ export function createHeroModeSystem(ctx) {
     if (dt > 0 && !S.state.coopDown) {
       api.touchByPursuers(dt * ctx.systems.time.scale('world'));
       if (/** @type {string} */ (S.state.phase) === 'dying') return;
-    }
-    // Safe.
-    const p = S.roger.mesh.position;
-    if (!S.state.coopDown && !S.state.airborne && S.state.alt < 1 && Math.hypot(p.x - S.bunker.x, p.z - S.bunker.z) < HERO.winRadius && S.state.phase !== 'dazed') {
-      if (S.state.phase === 'aiming') api.leaveAim();
-      api.exitCar();
-      S.state.phase = 'won';
-      S.state.timer = 0;
-      const score = S.state.neutralised ? HERO.doubleScore : HERO.winScore;
-      ctx.systems.damage.addDamageScore(score);
-      api.showBanner('SAFE', S.state.neutralised
-        ? `Roger reached the bunker! Double heroics · +${score}`
-        : `Roger reached the bunker! +${score}`);
     }
   }
 
@@ -837,7 +815,7 @@ export function createHeroModeSystem(ctx) {
 
   /**
    * For the minimap.
-   * @returns {{bunker: THREE.Vector3, pursuers: THREE.Vector3[], roger: THREE.Vector3, car: {x: number, z: number, heading: number}|null, cars: {x: number, z: number, heading: number}[]}|null}
+   * @returns {{pursuers: THREE.Vector3[], roger: THREE.Vector3, car: {x: number, z: number, heading: number}|null, cars: {x: number, z: number, heading: number}[]}|null}
    */
   function markers() {
     if (!S.Hero.active || !S.roger) return null;
@@ -858,7 +836,7 @@ export function createHeroModeSystem(ctx) {
       near.sort((a, b) => a.d - b.d);
       for (const { c } of near.slice(0, 8)) cars.push({ x: c.mesh.position.x, z: c.mesh.position.z, heading: c.mesh.rotation.y });
     }
-    return { bunker: S.bunker, pursuers: hunting, roger: S.roger.mesh.position, car, cars };
+    return { pursuers: hunting, roger: S.roger.mesh.position, car, cars };
   }
 
   /** @returns {void} */
@@ -873,12 +851,19 @@ export function createHeroModeSystem(ctx) {
     resetHero();
     api.disposeJetpack();
     if (S.weapons) S.weapons.dispose();
+    api.disposeTouch();
     for (const el of [S.hud, S.crosshair, S.banner, S.over, S.hurt]) if (el && el.parentNode) el.parentNode.removeChild(el);
     S.hud = S.crosshair = S.banner = S.over = S.hurt = S.hurtDir = null;
     S.button = null;
   }
 
   return {
+    // The panel's Terminators came in (terminator.js): cut to two of them.
+    showcase: (/** @type {THREE.Vector3[]} */ targets) => {
+      if (!S.Hero.active || !S.roger || !targets.length || S.state.phase === 'dying') return;
+      if (S.state.phase === 'aiming') api.leaveAim();
+      S.showcase = { targets, t: 0, shot: -1 };
+    },
     initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, rogerAim: () => (S.state.phase === 'aiming' ? S.aimDir : null), standable, freezeRoger,
     zipRoger, rogerZipping: () => S.state.zipActive, stopZip: () => { S.state.zipActive = false; }, solidAlong: api.solidAlong, rogerFrozen: () => S.state.frozen > 0, rogerAirborne: () => S.state.airborne,
     // The mothership's downwash (engine/mothershipWind.js): Roger shoved by

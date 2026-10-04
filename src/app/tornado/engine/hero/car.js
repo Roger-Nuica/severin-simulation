@@ -250,10 +250,10 @@ export function createHeroCar(ctx, S, api) {
       wheel.spin.rotation.x += S.state.carSpeed * dt / (HERO.wheelRadius * carScaleOf(car));
       if (wheel.steers) wheel.pivot.rotation.y = turn * 0.4;
     }
-    // Roger goes where the car goes: the pursuer, the bunker and the map all
-    // read his position.
+    // Roger goes where the car goes: the machines and the map read his
+    // position.
     S.roger.mesh.position.set(p.x, 0, p.z);
-    S.nameTag.position.set(p.x, HERO.tagHeight + 1, p.z);
+    S.overhead.position.set(p.x, HERO.overheadHeight + 1, p.z);
 
     for (const { Vortex } of ctx.tornadoes.active) {
       if (Vortex.neutralized || Vortex.birth < 0.3 || S.state.dazeImmunity > 0 || S.state.invincible) continue;

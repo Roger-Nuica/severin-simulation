@@ -3,13 +3,15 @@ import * as THREE from 'three';
 import { PERSON_SCALE } from '../environment/people.js';
 import { HERO, STREETS_ALONG_X, STREETS_ALONG_Z } from './config.js';
 import { JETPACK } from './jetpack.js';
+import { steerRun } from './touchMath.js';
+import { kneeBend } from '../net/rogerView.js';
 
 /**
  * ===========================================================================
  * SECTION HM.2 — Roger on foot
  * ===========================================================================
- * Where he may stand (not inside a building), where he comes in and where
- * the bunker is, his walk and his swagger, being dazed.
+ * Where he may stand (not inside a building), where he comes in, his walk
+ * and his swagger, being dazed.
  */
 
 /**
@@ -174,26 +176,6 @@ export function createHeroMovement(ctx, S, api) {
     return fallback;
   }
 
-  /**
-   * One shelter door (shelters.js) for this run: a good run away from
-   * Roger, or the farthest there is.
-   * @param {number} x
-   * @param {number} z
-   * @returns {{x: number, z: number}}
-   */
-  function pickBunker(x, z) {
-    const doors = ctx.Environment.buildings.filter(b => b.shelter && b.damageState !== 'collapsed')
-      .flatMap(b => b.shelterEntrances || []);
-    if (!doors.length) return { x: -x || 60, z: -z || 60 };
-    const [lo, hi] = HERO.bunkerDistance;
-    const good = doors.filter(d => {
-      const dist = Math.hypot(d.x - x, d.z - z);
-      return dist >= lo && dist <= hi;
-    });
-    if (good.length) return good[Math.floor(Math.random() * good.length)];
-    return doors.reduce((a, b) => (Math.hypot(a.x - x, a.z - z) > Math.hypot(b.x - x, b.z - z) ? a : b));
-  }
-
   // ---------------------------------------------------------------------
   // Roger
   // ---------------------------------------------------------------------
@@ -201,8 +183,8 @@ export function createHeroMovement(ctx, S, api) {
   /**
    * Poses the figure: a swagger rather than the town's plain run, on
    * request -- the shoulders rolling against the stride, the hips swaying
-   * side to side, a spring in the step, legs a little apart, elbows out
-   * over the big arms, the quiff bouncing -- whose rate is the ground
+   * side to side, a spring in the step, the knees bending as each leg swings
+   * through (net/rogerView.js kneeBend) -- whose rate is the ground
    * covered; the rifle held up while aiming; and the dazed stagger with arms
    * out. (It used to be a stiff lean-forward run.)
    * @param {number} moved world units covered this frame
@@ -219,6 +201,10 @@ export function createHeroMovement(ctx, S, api) {
     const legAmp = moving ? 0.4 + 0.7 * frac : 0;
     L.legL.rotation.set(s * legAmp, 0, moving ? -0.06 : -0.03);
     L.legR.rotation.set(-s * legAmp, 0, moving ? 0.06 : 0.03);
+    if (L.kneeL) {
+      L.kneeL.rotation.x = kneeBend(S.state.cycle, moving ? 0.35 + 0.65 * frac : 0, true);
+      L.kneeR.rotation.x = kneeBend(S.state.cycle, moving ? 0.35 + 0.65 * frac : 0, false);
+    }
     const root = S.roger.mesh;
     // The spring: up on each step, twice a stride; on top of his height off
     // the street (a roof, the air: hero/jetpack.js).
@@ -227,7 +213,9 @@ export function createHeroMovement(ctx, S, api) {
     // Hips swaying over the planted foot, shoulders rolling against the legs.
     root.rotation.z = moving ? s * 0.07 * (0.5 + frac) : 0;
     if (S.roger.torso) S.roger.torso.rotation.y = moving ? -s * 0.28 * (0.4 + frac) : 0;
-    if (S.roger.quiff) S.roger.quiff.rotation.x = -0.35 + Math.abs(c) * 0.12 * frac;
+    // The little tornado in the Storm Core on his back (hero/rogerLook.js),
+    // spinning faster as he runs.
+    if (S.roger.core) S.roger.core.rotation.y += dt * (5 + 9 * frac);
 
     // The Katana's rig (hero/katana/model.js) shows the sheath while it is the
     // weapon in hand and takes the arms once it is drawn; a daze or the rifle's
@@ -264,10 +252,9 @@ export function createHeroMovement(ctx, S, api) {
       L.armR.rotation.set(-1.45, 0, 0.05);
       L.armL.rotation.set(-1.25, 0, -0.45);
     } else {
-      // Arms swinging wide past the chest, elbows out; hanging loose
-      // (still wide of the body) when he stands.
+      // Arms swinging past the body, a little out from it.
       const armAmp = moving ? 0.35 + 0.65 * frac : 0;
-      const out = S.roger.armSplay + 0.12 + 0.1 * frac;
+      const out = S.roger.armSplay + 0.04 + 0.06 * frac;
       L.armL.rotation.set(-s * armAmp, s * 0.25 * frac, -out);
       L.armR.rotation.set(s * armAmp, s * 0.25 * frac, out);
       if (katanaHeld) S.katanaRig.applyArms(L.armL, L.armR);
@@ -333,23 +320,43 @@ export function createHeroMovement(ctx, S, api) {
       if (S.state.phase === 'running' && zipLeft > 1e-3) S.state.heading = Math.atan2(dx, dz);
       S.state.speed = 0;
     } else if (flying && S.state.phase === 'running') {
-      const turn = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
-      S.state.heading += turn * HERO.turnRate * dt;
-      const ahead = S.keys.up ? HERO.runSpeed : S.keys.down ? -HERO.backSpeed : 0;
+      let ahead;
+      if (S.stick.x || S.stick.y) {
+        // The touch joystick, as on the ground (hero/touch.js).
+        const cam = Sim.three.camera.position;
+        const steer = steerRun(S.state.heading, Math.atan2(p.x - cam.x, p.z - cam.z), S.stick.x, S.stick.y, dt);
+        S.state.heading = steer.heading;
+        ahead = HERO.runSpeed * steer.speed;
+      } else {
+        const turn = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
+        S.state.heading += turn * HERO.turnRate * dt;
+        ahead = S.keys.up ? HERO.runSpeed : S.keys.down ? -HERO.backSpeed : 0;
+      }
       api.airMove(p, dt, Math.sin(S.state.heading) * ahead, Math.cos(S.state.heading) * ahead, ahead !== 0);
     } else if (flying && S.state.phase === 'aiming') {
       S.state.heading = S.state.yaw;
       const fx = Math.sin(S.state.yaw);
       const fz = Math.cos(S.state.yaw);
-      const ahead = (S.keys.up ? 1 : 0) - (S.keys.down ? 1 : 0);
-      const across = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
+      const analog = S.stick.x || S.stick.y;
+      const ahead = analog ? -S.stick.y : (S.keys.up ? 1 : 0) - (S.keys.down ? 1 : 0);
+      const across = analog ? -S.stick.x : (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
       const mx = (fx * ahead + fz * across) * HERO.aimWalkSpeed;
       const mz = (fz * ahead - fx * across) * HERO.aimWalkSpeed;
       api.airMove(p, dt, mx, mz, ahead !== 0 || across !== 0);
     } else if (S.state.phase === 'running') {
-      const turn = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
-      S.state.heading += turn * HERO.turnRate * dt;
-      const want = S.keys.up ? HERO.runSpeed : S.keys.down ? -HERO.backSpeed : 0;
+      let want;
+      if (S.stick.x || S.stick.y) {
+        // The touch joystick (hero/touch.js): the way it points on screen,
+        // from the camera, and as fast as it is pushed.
+        const cam = Sim.three.camera.position;
+        const steer = steerRun(S.state.heading, Math.atan2(p.x - cam.x, p.z - cam.z), S.stick.x, S.stick.y, dt);
+        S.state.heading = steer.heading;
+        want = HERO.runSpeed * steer.speed;
+      } else {
+        const turn = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
+        S.state.heading += turn * HERO.turnRate * dt;
+        want = S.keys.up ? HERO.runSpeed : S.keys.down ? -HERO.backSpeed : 0;
+      }
       const step = HERO.accel * dt;
       S.state.speed = S.state.speed < want ? Math.min(want, S.state.speed + step) : Math.max(want, S.state.speed - step * 1.5);
       p.x += Math.sin(S.state.heading) * S.state.speed * dt;
@@ -381,22 +388,25 @@ export function createHeroMovement(ctx, S, api) {
       S.state.heading = S.state.yaw;
       const fx = Math.sin(S.state.yaw);
       const fz = Math.cos(S.state.yaw);
-      const ahead = (S.keys.up ? 1 : 0) - (S.keys.down ? 1 : 0);
-      const across = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
+      const analog = S.stick.x || S.stick.y;
+      // The touch joystick walks as far as it is pushed; keys walk full pace.
+      const ahead = analog ? -S.stick.y : (S.keys.up ? 1 : 0) - (S.keys.down ? 1 : 0);
+      const across = analog ? -S.stick.x : (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
       // Left of forward is (fz, -fx) with this module's heading convention.
       let mx = fx * ahead + fz * across;
       let mz = fz * ahead - fx * across;
       const len = Math.hypot(mx, mz);
-      S.state.speed = len > 0 ? HERO.aimWalkSpeed : 0;
+      const pace = HERO.aimWalkSpeed * (analog ? Math.min(1, len) : 1);
+      S.state.speed = len > 0 ? pace : 0;
       if (len > 0) {
         mx /= len;
         mz /= len;
-        p.x += mx * HERO.aimWalkSpeed * dt;
-        p.z += mz * HERO.aimWalkSpeed * dt;
+        p.x += mx * pace * dt;
+        p.z += mz * pace * dt;
       }
       // What a jump from here takes with it.
-      S.state.aimVx = len > 0 ? mx * HERO.aimWalkSpeed : 0;
-      S.state.aimVz = len > 0 ? mz * HERO.aimWalkSpeed : 0;
+      S.state.aimVx = len > 0 ? mx * pace : 0;
+      S.state.aimVz = len > 0 ? mz * pace : 0;
     }
     const xBefore = p.x;
     const zBefore = p.z;
@@ -421,7 +431,7 @@ export function createHeroMovement(ctx, S, api) {
       p.y += Math.sin(Math.PI * u) * HERO.zipHop;
     }
 
-    S.nameTag.position.set(p.x, p.y + HERO.tagHeight, p.z);
+    S.overhead.position.set(p.x, p.y + HERO.overheadHeight, p.z);
     S.stars.visible = S.state.phase === 'dazed';
     if (S.stars.visible) {
       S.stars.position.set(p.x, S.state.alt + HERO.starsHeight + Math.sin(S.state.timer * 2.2) * 0.06, p.z);
@@ -459,5 +469,5 @@ export function createHeroMovement(ctx, S, api) {
     return { x: p.x, z: p.z, onFoot: S.state.phase !== 'driving' };
   }
 
-  return { inBuilding, someSolid, solidAlong, blockedAt, pushOut, pickSpawn, pickBunker, poseRoger, daze, updateRoger, rogerTarget };
+  return { inBuilding, someSolid, solidAlong, blockedAt, pushOut, pickSpawn, poseRoger, daze, updateRoger, rogerTarget };
 }

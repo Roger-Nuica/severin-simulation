@@ -20,6 +20,7 @@ export const T800 = {
   retarget: 0.6,               // seconds between choosing a target
   bound: 127,                  // stays inside the playable town (people go to 128)
   spawnRadius: 118,
+  heroSpawnRadius: 62,         // in Hero Mode they come in round Roger, this far out
   squad: 5,                    // sent in together by the button
   probe: [1.2, 2.6],           // distances ahead tested for a clear way
   detourSeconds: 0.8,          // keeps to one side of an obstacle this long

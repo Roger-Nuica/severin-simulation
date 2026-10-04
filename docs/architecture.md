@@ -45,6 +45,7 @@ This matters because environment setup, damage, debris, and UI all depend on cor
 - `engine/player/energy.js` stores energy and spend/restore logic
 - `engine/heroMode.js` owns Roger’s state and movement
 - `engine/heroWeapons.js` holds the weapon wheel and close-up models
+- `engine/hero/touch.js` is Hero Mode on a touch screen: a floating joystick, look drags, FIRE / AIM / weapon / ability / car buttons and a gentle aim assist. It changes nothing in the game: it fills the same record as the keyboard and mouse (`player/input.js`: `held`, the analog `stick`, `addLook`, `addTurn`, `push`). The arithmetic (stick response, camera-relative steering, the assist's target pick) is pure in `hero/touchMath.js` and tested in `tests/touch-math.test.mjs`
 
 ### Combat and damage
 - `engine/health/` is Roger's health: `system.js` registers `ctx.systems.health` (auto lifecycle: `initHealth`, `resetHealth`, `disposeHealth`, plus `updateHealth(rawDt)` called by `tornadoEngine.js` after `updateHero`, on real time). It exposes the one player-damage API `damagePlayer`, `health`, `state`, `glow` and `revivePlayer`. Pure helpers sit beside it: `state.js` (regeneration), `melee.js` (touch, wind-up), `dot.js` and `fire.js` (damage over time), `hazards.js` (lava, flood), `friendlyFire.js`, `enemyDamage.js` and `damageTable.js` (weapon x enemy), with every number in `config.js`. Co-op health rides the net snapshot (`hp` rows) and a `playerDamage` event

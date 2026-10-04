@@ -807,7 +807,7 @@ export function createSimulation(container) {
   const smoothCriminalSystem = createSmoothCriminalSystem(ctx);
   register('smoothCriminal', smoothCriminalSystem);
   const { initSmoothCriminal, updateSmoothCriminal, resetSmoothCriminal, disposeSmoothCriminal } = smoothCriminalSystem;
-  // Hero Mode: Roger, the bunker and the machine after him (engine/heroMode.js).
+  // Hero Mode: Roger, free roam, his weapons and abilities (engine/heroMode.js).
   register('heroSound', createHeroSoundSystem(ctx));
   // The Katana's own voice (sound/katana.js): its own bus, no creature voices (R-046).
   register('katanaSound', createKatanaSoundSystem(ctx));

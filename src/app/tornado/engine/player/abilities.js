@@ -67,6 +67,7 @@ export const ABILITIES = {
  *   isActive: (id: string) => boolean,
  *   cancelAll: () => void,
  *   hudLine: () => string,
+ *   buttonState: (code: string) => ({active: boolean, cooldown: number, affordable: boolean}|null),
  *   initAbilities: () => void,
  *   resetAbilities: () => void
  * }}
@@ -234,5 +235,19 @@ export function createAbilitySystem(ctx) {
     cancelAll();
   }
 
-  return { register, press, updateAbilities, isActive, cancelAll, hudLine, initAbilities, resetAbilities };
+  /**
+   * How an ability's button should look (hero/touch.js): running, cooling
+   * down (seconds left), or short of energy. Null for a key no ability has.
+   * @param {string} code
+   * @returns {{active: boolean, cooldown: number, affordable: boolean}|null}
+   */
+  function buttonState(code) {
+    for (const { def, active, cooldown } of abilities.values()) {
+      if (!def.keys.includes(code)) continue;
+      return { active: active > 0, cooldown, affordable: ctx.systems.energy.hero.canSpend(def.cost) };
+    }
+    return null;
+  }
+
+  return { register, press, updateAbilities, isActive, cancelAll, hudLine, buttonState, initAbilities, resetAbilities };
 }
