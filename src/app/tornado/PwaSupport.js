@@ -37,12 +37,8 @@ export default function PwaSupport() {
   };
 
   return installPrompt ? (
-    <button
-      className="pwa-install"
-      onClick={install}
-      style={{ position: 'fixed', right: 12, bottom: 12, zIndex: 1000, padding: '8px 14px', borderRadius: 8, border: 0, background: 'linear-gradient(180deg, #8ffff0, #2fd6bd)', color: '#04211c', fontWeight: 700, cursor: 'pointer' }}
-    >
-      📱 Install App
+    <button className="pwa-install" type="button" onClick={install} aria-label="Install the app" title="Install the app">
+      <span aria-hidden="true">📱</span><span className="pwa-label">Install App</span>
     </button>
   ) : null;
 }

@@ -317,6 +317,9 @@ export default function TornadoSimulator() {
               {/* engine/terminator.js: only the Electric Tornado's EMP stops it. */}
               <button id="btn-terminator" className="pill event" type="button"
                 title="Send in a Terminator. It hunts people, and only an EMP discharge from the Electric Tornado can destroy it.">🤖 Terminator</button>
+              {/* engine/gunner.js: HAVOC, Hero Mode only. Time Slow (Q) stops his rounds. */}
+              <button id="btn-gunner" className="pill event" type="button"
+                title="Hero Mode: send in HAVOC, a heavy gunner with a minigun (one more per press, up to 3). Press Q to slow time: his rounds stop dead round Roger, and go back to him when time runs again.">🔫 HAVOC</button>
               {/* engine/trex.js: a cyber T-Rex walks into town breathing fire
                   (plan PR 3). One at a time. */}
               <button id="btn-trex" className="pill event" type="button"

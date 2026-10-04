@@ -35,7 +35,7 @@ export function createPhysicsSystem(ctx) {
   const PhysicsStats = { objects: 0, asleep: 0 };
   // Gravity's strength for whatever falls freely (the grounded/falling
   // branch of updateCaptureState): 1 always, but for the few seconds of moon
-  // gravity after Hank Granite's scene (engine/actionHero.js AH.lowGravity).
+  // gravity after Hank Granite's scene (engine/hank/moves.js HANK.lowGravity).
   const gravity = { scale: 1 };
 
   /**
