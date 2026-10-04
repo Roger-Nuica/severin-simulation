@@ -154,6 +154,8 @@ import { createBirdsSystem } from './engine/environment/birds.js';
 import { createNewsChopperSystem } from './engine/environment/newsChopper.js';
 import { createNewsTickerSystem } from './engine/ui/newsTicker.js';
 import { createExplainerSystem } from './engine/ui/explainer.js';
+import { createAirSupportSystem } from './engine/airSupport.js';
+import { createJetSoundSystem } from './engine/sound/jets.js';
 
 /**
  * This is the Three.js tornado simulator (vortex forces, debris pooling,
@@ -836,6 +838,10 @@ export function createSimulation(container) {
   register('newsChopper', createNewsChopperSystem(ctx), { auto: true });
   register('newsTicker', createNewsTickerSystem(ctx), { auto: true });
   register('explainer', createExplainerSystem(ctx), { auto: true });
+  // GHOST flight (2026-10-04): three stealth fighters 30 s into a run,
+  // hunting the aliens from above (R-056), and their sound.
+  register('jetSound', createJetSoundSystem(ctx), { auto: true });
+  register('airSupport', createAirSupportSystem(ctx), { auto: true });
 
   // Co-op (engine/net/): the room, the guest's avatar and the host's
   // snapshots. Looks the hero up lazily; its init/reset/dispose run through
@@ -1094,6 +1100,7 @@ export function createSimulation(container) {
     if (!Sim.state.paused) updateTerminator(dt);
     lap('aliens');
     if (!Sim.state.paused) updateAliens(dt);
+    if (!Sim.state.paused) ctx.systems.airSupport.updateAirSupport(dt);
     // Landing Support's samurai and their ship, on the world's time.
     if (!Sim.state.paused) spaceshipSystem.updateSupportWorld(dt);
     if (!Sim.state.paused) updateMothership(dt);

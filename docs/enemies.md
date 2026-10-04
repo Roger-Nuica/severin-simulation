@@ -46,6 +46,10 @@ Hunter ships are the registry kind `hunterShip` (`engine/aliens.js`; it has no `
 
 Rocket Strike still damages hunters only through its existing ship path. The Black Hole Gun pulls hunters like any registry enemy within 100 m and consumes them. Hits below 1 point (minigun, fire) give a light spark and a quiet cue; the full burst is for plasma or the downing hit.
 
+## GHOST flight (air support)
+
+`engine/airSupport.js` (R-056) is an ally, not an enemy: three stealth fighters that arrive 30 s into a run and hunt the alien ground crew. They read the crew through `aliens.targets()` (patrol and escort only) and kill through the owner's `plasmaKill`, the same direct call the rifle makes, so the burn, the death cry and the score are the aliens' own. They do not go through `enemies.hit` (no table cell, no other kind is touched), they never hit hunter ships, the UFO or the mothership, and their blasts are visual (`explosions.spawnImpactBurst` only, no `explosion` event). The kill rate is capped for the whole flight at one alien per 5 s (`airSupport/plan.js`, `mayStartStrike` / `mayKill`, tested in `tests/air-support.test.mjs`). They never pick an alien within 10 m of Roger while another is available.
+
 ## Shared enemy states
 
 The registry supports these states:
