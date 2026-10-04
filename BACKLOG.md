@@ -32,5 +32,6 @@ not a contract: when one is picked, it gets a plan and its numbers go into
   seconds.
 - [x] **Telekinesis** — lift a car with the mouse and throw it (shipped
   2026-10-02 on C, `engine/player/telekinesis.js`).
-- [ ] **Jetpack / double jump** — a short flight over buildings with flame and
-  sound.
+- [x] **Jetpack / double jump** — a short flight over buildings with flame and
+  sound (shipped 2026-10-04 on Space: jump, then the jetpack in the air;
+  roofs are ground; `engine/hero/jetpack.js`).

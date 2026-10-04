@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { PERSON_SCALE } from '../environment/people.js';
 import { HERO, STREETS_ALONG_X, STREETS_ALONG_Z } from './config.js';
+import { JETPACK } from './jetpack.js';
 
 /**
  * ===========================================================================
@@ -28,10 +29,12 @@ export function createHeroMovement(ctx, S, api) {
    * @param {number} x
    * @param {number} z
    * @param {number} pad
+   * @param {number} [above] only boxes standing higher than this count (the
+   *   follow camera over the roofs while he flies; hero/jetpack.js)
    * @returns {boolean} whether a standing building's footprint covers it
    */
-  function inBuilding(x, z, pad) {
-    return someSolid((cx, cz, hw, hd) => Math.abs(x - cx) < hw + pad && Math.abs(z - cz) < hd + pad);
+  function inBuilding(x, z, pad, above = 0) {
+    return someSolid((cx, cz, hw, hd, top) => top > above && Math.abs(x - cx) < hw + pad && Math.abs(z - cz) < hd + pad);
   }
 
   /**
@@ -39,8 +42,10 @@ export function createHeroMovement(ctx, S, api) {
    * town's standing buildings, the backdrop town's blocks still standing
    * (environment/backdrop.js) now that he can walk out to them, and the dam
    * wall (flood.js; open at the breach once it has burst). Each is visited
-   * as its centre and half extents, until `visit` says to stop.
-   * @param {(cx: number, cz: number, hw: number, hd: number) => boolean} visit
+   * as its centre, half extents and the height of its top (a roof Roger can
+   * land on with the jetpack, hero/jetpack.js; Infinity for the dam and the
+   * volcano, which he does not fly over), until `visit` says to stop.
+   * @param {(cx: number, cz: number, hw: number, hd: number, top: number) => boolean} visit
    * @returns {boolean} whether `visit` stopped it
    */
   function someSolid(visit) {
@@ -49,20 +54,20 @@ export function createHeroMovement(ctx, S, api) {
       const fp = building.mesh.userData.footprint;
       if (!fp) continue;
       const b = building.mesh.position;
-      if (visit(b.x, b.z, fp.width / 2, fp.depth / 2)) return true;
+      if (visit(b.x, b.z, fp.width / 2, fp.depth / 2, building.mesh.userData.wallHeight || Infinity)) return true;
     }
     const backdrop = ctx.systems.backdrop;
     for (const block of backdrop ? backdrop.solidBlocks() : []) {
-      if (block.state === 0 && visit(block.x, block.z, block.hw, block.hd)) return true;
+      if (block.state === 0 && visit(block.x, block.z, block.hw, block.hd, block.h)) return true;
     }
     const flood = ctx.systems.flood;
     for (const wall of flood ? flood.damSolids() : []) {
-      if (visit(wall.x, wall.z, wall.hw, wall.hd)) return true;
+      if (visit(wall.x, wall.z, wall.hw, wall.hd, Infinity)) return true;
     }
     // The volcano's cone (engine/volcano.js).
     const volcano = ctx.systems.volcano;
     for (const block of volcano ? volcano.solids() : []) {
-      if (visit(block.x, block.z, block.hw, block.hd)) return true;
+      if (visit(block.x, block.z, block.hw, block.hd, Infinity)) return true;
     }
     return false;
   }
@@ -124,10 +129,13 @@ export function createHeroMovement(ctx, S, api) {
    * Out of any footprint along the shorter way, as the Terminator is.
    * @param {THREE.Vector3} p mutated in place
    * @param {number} pad
+   * @param {number} [alt] feet this high (Roger in the air or on a roof,
+   *   hero/jetpack.js) pass over any box whose top is within a step of them
    * @returns {void}
    */
-  function pushOut(p, pad) {
-    someSolid((cx, cz, hw, hd) => {
+  function pushOut(p, pad, alt = 0) {
+    someSolid((cx, cz, hw, hd, top) => {
+      if (top <= alt + JETPACK.stepUp) return false;
       const dx = p.x - cx;
       const dz = p.z - cz;
       const ox = hw + pad - Math.abs(dx);
@@ -212,8 +220,9 @@ export function createHeroMovement(ctx, S, api) {
     L.legL.rotation.set(s * legAmp, 0, moving ? -0.06 : -0.03);
     L.legR.rotation.set(-s * legAmp, 0, moving ? 0.06 : 0.03);
     const root = S.roger.mesh;
-    // The spring: up on each step, twice a stride.
-    root.position.y = Math.abs(c) * 0.13 * frac * PERSON_SCALE;
+    // The spring: up on each step, twice a stride; on top of his height off
+    // the street (a roof, the air: hero/jetpack.js).
+    root.position.y = S.state.alt + (S.state.airborne ? 0 : Math.abs(c) * 0.13 * frac * PERSON_SCALE);
     root.rotation.x = 0.14 * frac;
     // Hips swaying over the planted foot, shoulders rolling against the legs.
     root.rotation.z = moving ? s * 0.07 * (0.5 + frac) : 0;
@@ -240,6 +249,16 @@ export function createHeroMovement(ctx, S, api) {
       return;
     }
     const aiming = S.state.drawn && S.state.phase !== 'won';
+    // In the air: the flight pose (hero/jetpack.js), the arms left to the
+    // rifle and the Katana when they have them.
+    if (S.state.airborne && !S.state.zipActive) {
+      api.poseAir(L, root, !aiming && !katanaHeld);
+      if (aiming) {
+        L.armR.rotation.set(-1.45, 0, 0.05);
+        L.armL.rotation.set(-1.25, 0, -0.45);
+      }
+      return;
+    }
     if (aiming) {
       // The rifle up and forward, the left hand under the barrel.
       L.armR.rotation.set(-1.45, 0, 0.05);
@@ -293,6 +312,10 @@ export function createHeroMovement(ctx, S, api) {
     let zipStep = 0;
     let zipLeft = 0;
 
+    // In the air (the jump and the jetpack, hero/jetpack.js): his own speed
+    // over the ground, steered by the keys as on foot; a daze keeps its own.
+    const flying = S.state.airborne && !zipping && S.state.phase !== 'dazed';
+
     if (zipping) {
       const dx = S.state.zipX - p.x;
       const dz = S.state.zipZ - p.z;
@@ -309,6 +332,20 @@ export function createHeroMovement(ctx, S, api) {
       // Facing the way the rope pulls (on foot; aiming, the mouse keeps the view).
       if (S.state.phase === 'running' && zipLeft > 1e-3) S.state.heading = Math.atan2(dx, dz);
       S.state.speed = 0;
+    } else if (flying && S.state.phase === 'running') {
+      const turn = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
+      S.state.heading += turn * HERO.turnRate * dt;
+      const ahead = S.keys.up ? HERO.runSpeed : S.keys.down ? -HERO.backSpeed : 0;
+      api.airMove(p, dt, Math.sin(S.state.heading) * ahead, Math.cos(S.state.heading) * ahead, ahead !== 0);
+    } else if (flying && S.state.phase === 'aiming') {
+      S.state.heading = S.state.yaw;
+      const fx = Math.sin(S.state.yaw);
+      const fz = Math.cos(S.state.yaw);
+      const ahead = (S.keys.up ? 1 : 0) - (S.keys.down ? 1 : 0);
+      const across = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
+      const mx = (fx * ahead + fz * across) * HERO.aimWalkSpeed;
+      const mz = (fz * ahead - fx * across) * HERO.aimWalkSpeed;
+      api.airMove(p, dt, mx, mz, ahead !== 0 || across !== 0);
     } else if (S.state.phase === 'running') {
       const turn = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
       S.state.heading += turn * HERO.turnRate * dt;
@@ -357,14 +394,26 @@ export function createHeroMovement(ctx, S, api) {
         p.x += mx * HERO.aimWalkSpeed * dt;
         p.z += mz * HERO.aimWalkSpeed * dt;
       }
+      // What a jump from here takes with it.
+      S.state.aimVx = len > 0 ? mx * HERO.aimWalkSpeed : 0;
+      S.state.aimVz = len > 0 ? mz * HERO.aimWalkSpeed : 0;
     }
-    pushOut(p, HERO.pad * 0.5);
+    const xBefore = p.x;
+    const zBefore = p.z;
+    pushOut(p, HERO.pad * 0.5, S.state.alt);
+    // Against a wall in the air: that way's speed is gone.
+    if (flying) {
+      if (Math.abs(p.x - xBefore) > 1e-4) S.state.airVx = 0;
+      if (Math.abs(p.z - zBefore) > 1e-4) S.state.airVz = 0;
+    }
     moved = Math.hypot(p.x - x0, p.z - z0);
     // Pulled into a wall short of the hook: the zip is over.
     if (zipping && S.state.zipActive && dt > 0 && moved < zipStep * 0.3) S.state.zipActive = false;
     // Ran into a wall: the run cycle stops with him.
-    if (S.state.phase === 'running' && moved < Math.abs(S.state.speed) * dt * 0.3) S.state.speed *= 0.5;
+    if (S.state.phase === 'running' && !flying && moved < Math.abs(S.state.speed) * dt * 0.3) S.state.speed *= 0.5;
     S.roger.mesh.rotation.y = S.state.heading;
+    // Up and down: the jump, the jetpack, a roof, a fall (hero/jetpack.js).
+    api.stepAir(dt);
     poseRoger(moved, dt);
     // A hop along the rope: up and down again over the zip.
     if (zipping && S.state.zipTotal > 0) {
@@ -375,7 +424,7 @@ export function createHeroMovement(ctx, S, api) {
     S.nameTag.position.set(p.x, p.y + HERO.tagHeight, p.z);
     S.stars.visible = S.state.phase === 'dazed';
     if (S.stars.visible) {
-      S.stars.position.set(p.x, HERO.starsHeight + Math.sin(S.state.timer * 2.2) * 0.06, p.z);
+      S.stars.position.set(p.x, S.state.alt + HERO.starsHeight + Math.sin(S.state.timer * 2.2) * 0.06, p.z);
       S.stars.material.rotation += dt * 2.6;
     }
 

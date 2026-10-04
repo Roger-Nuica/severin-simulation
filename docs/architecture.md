@@ -41,7 +41,7 @@ This matters because environment setup, damage, debris, and UI all depend on cor
 
 ### Player and hero
 - `engine/player/input.js` captures keyboard and mouse state
-- `engine/player/abilities.js` handles slow-motion, teleport, EMP-style powers; `engine/player/grapple.js` is the grappling hook (G)
+- `engine/player/abilities.js` handles slow-motion, teleport, EMP-style powers; `engine/player/grapple.js` is the grappling hook (G); `engine/hero/jetpack.js` is the jump and jetpack (Space), with roofs as ground; `engine/sound/grappleJet.js` voices both
 - `engine/player/energy.js` stores energy and spend/restore logic
 - `engine/heroMode.js` owns Roger’s state and movement
 - `engine/heroWeapons.js` holds the weapon wheel and close-up models

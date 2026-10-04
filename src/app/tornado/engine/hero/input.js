@@ -6,7 +6,8 @@ import { HERO } from './config.js';
  * ===========================================================================
  * SECTION HM.3 — The controls
  * ===========================================================================
- * W A S D to run, right-click to raise the weapon into first person (the Katana included),
+ * W A S D to run, Space to jump (and again in the air, the jetpack:
+ * hero/jetpack.js), right-click to raise the weapon into first person (the Katana included),
  * click or Enter to fire,
  * the mouse wheel to switch weapon, Q E R G C for the abilities, Enter at a
  * car's door to drive.
@@ -64,6 +65,7 @@ export function createHeroInput(ctx, S, api) {
    *  - Esc: the weapon down;
    *  - mouse wheel: the next or the previous weapon;
    *  - V: Invincible on / off (hero/screen.js toggleInvincible);
+   *  - Space: jump; again in the air, the jetpack (hero/jetpack.js);
  *  - Q E R G C: the abilities (engine/player/abilities.js) -- Time Slow (Bullet
    *    Time with the minigun), Teleport, EMP, the grappling hook
    *    (engine/player/grapple.js), telekinesis (engine/player/telekinesis.js) -- not while dying, safe or
@@ -114,7 +116,11 @@ export function createHeroInput(ctx, S, api) {
           if (isEnter(code)) {
             // At a car's door with the weapon down, Enter gets in; raised,
             // it fires.
-            if (S.doorCar && phase() === 'running') api.enterCar(S.doorCar);
+            if (S.doorCar && phase() === 'running' && !S.state.airborne) {
+              // From a roof beside the street, he comes down into the seat.
+              api.landNow(0);
+              api.enterCar(S.doorCar);
+            }
             else if (phase() === 'aiming') pullTrigger();
             else if (phase() === 'running') api.flashMessage('RIGHT-CLICK to raise the weapon · ENTER to fire');
           } else if (code === 'Escape' && phase() === 'aiming') {
@@ -122,6 +128,10 @@ export function createHeroInput(ctx, S, api) {
           } else if (code === 'Escape' && S.weapons.katanaBlade().active()) {
             // Esc ends Blade Mode (in first person it has already lowered the view above).
             S.weapons.katanaCancel();
+          } else if (code === 'Space') {
+            // Space: a jump on the ground, the jetpack in the air
+            // (hero/jetpack.js); not dazed or frozen.
+            if ((phase() === 'running' || phase() === 'aiming') && !(S.state.frozen > 0)) api.pressJump();
           } else if ((phase() === 'running' || phase() === 'aiming' || phase() === 'dazed') && !(S.state.frozen > 0)) {
             ctx.systems.abilities.press(code);
           }

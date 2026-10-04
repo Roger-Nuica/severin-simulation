@@ -184,7 +184,7 @@ export function createHeroScreen(ctx, S, api) {
     if (S.beam) S.beam.visible = false;
     if (S.stars) S.stars.visible = false;
     ctx.systems.gamefeel.addShake(1.2, 0.6);
-    ctx.systems.lightning.flashScreen(S.scratch.copy(S.roger.mesh.position).setY(HERO.muzzleHeight), 0.5, '#ff6b5a');
+    ctx.systems.lightning.flashScreen(S.scratch.copy(S.roger.mesh.position).setY(S.roger.mesh.position.y + HERO.muzzleHeight), 0.5, '#ff6b5a');
     showBanner(title, sub, 'loss');
   }
 
@@ -230,6 +230,8 @@ export function createHeroScreen(ctx, S, api) {
     const chasm = ctx.systems.chasm;
     if (!chasm) return;
     const p = S.roger.mesh.position;
+    // Over it in the air (hero/jetpack.js) is not in it.
+    if (S.state.airborne || S.state.alt > 0.05) return;
     if (chasm.gapAt(p.x, p.z) > HERO.chasmMargin) {
       ctx.systems.health.damagePlayer({
         source: 'chasm', instantKill: true, title: 'OVER THE EDGE', sub: 'Roger fell into the chasm', kind: 'fall',
@@ -271,6 +273,14 @@ export function createHeroScreen(ctx, S, api) {
     } else {
       const f = Math.min(1, S.state.timer / 0.7);
       root.rotation.x = -f * f * (Math.PI / 2 - 0.1);
+      // Struck down in the air (hero/jetpack.js): he drops to the roof or
+      // the street under him.
+      const ground = api.groundAt(root.position.x, root.position.z, root.position.y);
+      if (root.position.y > ground) {
+        S.state.deathVy += 18 * dt;
+        root.position.y = Math.max(ground, root.position.y - S.state.deathVy * dt);
+        S.nameTag.position.set(root.position.x, root.position.y + HERO.tagHeight, root.position.z);
+      }
       placeDeathCamera(rawDt);
     }
     if (!S.state.overShown && S.state.timer >= HERO.overAfter) {
@@ -318,17 +328,22 @@ export function createHeroScreen(ctx, S, api) {
     // At a life-size man's distance the camera sits below the roofs, so it
     // is pulled in towards him when a building stands between them, rather
     // than ending up inside it looking at a wall.
+    // Up on a roof or in the air (hero/jetpack.js), only what stands taller
+    // than the camera is in the way.
     let back = HERO.followBack;
     for (let i = 1; i <= HERO.cameraProbes; i++) {
       const d = HERO.followBack * i / HERO.cameraProbes;
-      if (api.inBuilding(p.x - fx * d, p.z - fz * d, HERO.cameraClearance)) {
+      if (api.inBuilding(p.x - fx * d, p.z - fz * d, HERO.cameraClearance, p.y + HERO.followHeight * 0.5)) {
         back = Math.max(HERO.cameraMinBack, d - HERO.followBack / HERO.cameraProbes);
         break;
       }
     }
     const pull = 1 + Math.min(1, Math.abs(btOrbit) * 2) * 0.35;
-    S.camGoal.set(p.x - fx * back * pull, HERO.followHeight * pull, p.z - fz * back * pull);
-    S.lookAt.set(p.x + fx * HERO.lookAhead, HERO.lookHeight, p.z + fz * HERO.lookAhead);
+    // His height off the street (a roof, the jetpack): the camera rises with
+    // him, pulled a little further back and up while he is in the air.
+    const lift = S.state.airborne ? 1.25 : 1;
+    S.camGoal.set(p.x - fx * back * pull * lift, p.y + HERO.followHeight * pull * lift, p.z - fz * back * pull * lift);
+    S.lookAt.set(p.x + fx * HERO.lookAhead, p.y + HERO.lookHeight, p.z + fz * HERO.lookAhead);
     const cam = Sim.three.camera;
     cam.position.lerp(S.camGoal, k);
     if (cam.position.y < HERO.lookHeight) cam.position.y = HERO.lookHeight;
@@ -350,7 +365,7 @@ export function createHeroScreen(ctx, S, api) {
     const k = S.state.aimBlend >= 1 ? 1 : Math.min(1, rawDt * 14);
     // A step's bob while walking, and the kick of the last shot.
     const bob = S.state.speed > 0 ? Math.sin(performance.now() * 0.011) * 0.05 : 0;
-    S.camGoal.set(p.x, HERO.eyeHeight + bob, p.z);
+    S.camGoal.set(p.x, S.state.alt + HERO.eyeHeight + (S.state.airborne ? 0 : bob), p.z);
     cam.position.lerp(S.camGoal, k);
     S.eyeEuler.set(S.state.pitch + S.state.recoil * 0.035, S.state.yaw + Math.PI, 0);
     S.eyeQuat.setFromEuler(S.eyeEuler);
@@ -387,10 +402,10 @@ export function createHeroScreen(ctx, S, api) {
   function placeDeathCamera(dt) {
     const p = S.roger.mesh.position;
     const a = S.state.heading + Math.PI * 0.75 + S.state.timer * 0.35;
-    S.camGoal.set(p.x + Math.sin(a) * HERO.followBack, HERO.followHeight, p.z + Math.cos(a) * HERO.followBack);
+    S.camGoal.set(p.x + Math.sin(a) * HERO.followBack, p.y + HERO.followHeight, p.z + Math.cos(a) * HERO.followBack);
     const cam = Sim.three.camera;
     cam.position.lerp(S.camGoal, Math.min(1, dt * 3));
-    Sim.three.controls.target.set(p.x, HERO.lookHeight, p.z);
+    Sim.three.controls.target.set(p.x, p.y + HERO.lookHeight, p.z);
     cam.lookAt(Sim.three.controls.target);
   }
 

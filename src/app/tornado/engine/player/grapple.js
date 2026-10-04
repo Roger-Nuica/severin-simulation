@@ -30,8 +30,18 @@ import { PERSON } from '../scale.js';
  * run; a daze, a car or death let go of the rope.
  *
  * Runs on real time (a Time Slow does not slow the hook), held while the
- * game is paused. The cable and the hook are two meshes made once and
- * reused; nothing is allocated per frame.
+ * game is paused. The cable and the hook are made once and reused; nothing
+ * is allocated per frame.
+ *
+ * Seen from across the street (on request, 2026-10-04): the cable is a chain
+ * (a link texture repeated along it) inside a faint orange glow, the hook a
+ * steel kunai with barbs and a ring, a glowing spark on it and a warm light
+ * while it is out -- all unlit materials, so it reads at night too.
+ *
+ * Heard: thrown at an enemy (an alien or a heavy one) Roger shouts
+ * **GET OVER HERE!** (sound/grappleJet.js), and the line flashes up; the
+ * chain rattles out and clanks where it bites. Not in the air (the jetpack,
+ * hero/jetpack.js): there is nothing to brace against.
  */
 
 export const GRAPPLE = {
@@ -52,8 +62,17 @@ export const GRAPPLE = {
   enemyStop: 2,         // metres short of a heavy enemy's hitbox
   maxSeconds: 3,        // the whole throw, at most
   wallHeight: 4,        // where the hook bites a wall, metres up
-  colourCable: 0x202428,
-  colourHook: 0xb8c2cc
+  // The look (all unlit): the chain's radius and its links a metre, the
+  // glow round it, the kunai's size, and the spark on it.
+  chainRadius: 0.045,
+  linksPerMetre: 3,
+  glowRadius: 0.12,
+  hookLength: 0.6,
+  hookRadius: 0.15,
+  sparkSize: 1.1,
+  colourChain: 0xd9dde2,
+  colourHook: 0xeef3f8,
+  colourGlow: 0xff8a2a
 };
 
 /** Registered kinds the hook leaves alone: in the air, buildings, allies. */
@@ -114,10 +133,19 @@ export function createGrappleSystem(ctx) {
     clock: 0
   };
 
-  /** @type {THREE.Mesh|null} */
+  /** @type {THREE.Group|null} the chain and its glow, scaled along the line */
   let cable = null;
-  /** @type {THREE.Mesh|null} */
+  /** @type {THREE.Group|null} the kunai, its barbs, its ring and spark */
   let hook = null;
+  /** @type {THREE.CanvasTexture|null} the chain's links */
+  let links = null;
+  /** @type {THREE.Sprite|null} */
+  let spark = null;
+  /** @type {THREE.BufferGeometry[]} */
+  const geometries = [];
+  /** @type {THREE.Material[]} */
+  const materials = [];
+  let glowClock = 0;
   const hand = new THREE.Vector3();
   const along = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
@@ -172,6 +200,7 @@ export function createGrappleSystem(ctx) {
     const from = h && h.rogerFacing();
     if (!from) return 'not now';
     if (h.rogerPhase() === 'dazed') return 'not while dazed';
+    if (h.rogerAirborne && h.rogerAirborne()) return 'not in the air';
     const dx = Math.sin(from.heading);
     const dz = Math.cos(from.heading);
     // The nearest wall caps the line: nothing behind it can be hooked.
@@ -256,7 +285,9 @@ export function createGrappleSystem(ctx) {
     const from = hero() && hero().rogerFacing();
     if (!from) return false;
     // Right of forward is (-cos h, sin h) with Hero Mode's heading convention.
-    hand.set(from.x - Math.cos(from.heading) * 0.3, PERSON.height * 0.72, from.z + Math.sin(from.heading) * 0.3);
+    // On a roof (hero/jetpack.js), the hand is up there with him.
+    const lift = hero().rogerHeight ? hero().rogerHeight() : 0;
+    hand.set(from.x - Math.cos(from.heading) * 0.3, lift + PERSON.height * 0.72, from.z + Math.sin(from.heading) * 0.3);
     return true;
   }
 
@@ -290,7 +321,13 @@ export function createGrappleSystem(ctx) {
     trackAnchor();
     s.tip.copy(hand);
     s.clock = 0;
-    if (ctx.systems.katanaSound) ctx.systems.katanaSound.playSwing();
+    const sfx = ctx.systems.grappleJetSound;
+    if (sfx) sfx.playChain(hand.distanceTo(s.anchor) / GRAPPLE.flySpeed);
+    // At an enemy, the war cry.
+    if (s.alien || s.enemy) {
+      if (sfx) sfx.playGetOverHere();
+      say('🔗 GET OVER HERE!');
+    }
   }
 
   /**
@@ -322,9 +359,130 @@ export function createGrappleSystem(ctx) {
     cable.position.copy(hand);
     cable.quaternion.setFromUnitVectors(up, along);
     cable.scale.set(1, length, 1);
+    // The links stay a fixed size however long the chain is.
+    if (links) links.repeat.set(1, length * GRAPPLE.linksPerMetre);
     hook.position.copy(throwState.tip);
     hook.quaternion.copy(cable.quaternion);
     cable.visible = hook.visible = true;
+    // The spark pulses; a warm light while it is out (the shared pool decides).
+    if (spark) {
+      const pulse = 0.8 + 0.35 * Math.sin(glowClock * 22);
+      spark.scale.set(GRAPPLE.sparkSize * pulse, GRAPPLE.sparkSize * pulse, 1);
+    }
+    const tip = throwState.tip;
+    ctx.systems.lightPool.requestLight({ x: tip.x, y: tip.y, z: tip.z, colour: GRAPPLE.colourGlow, intensity: 2.5, distance: 10 });
+  }
+
+  /**
+   * The chain's links, drawn once: a light oval link, then one seen edge-on,
+   * down a dark strip; repeated along the cable.
+   * @returns {THREE.CanvasTexture}
+   */
+  function makeLinks() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 16;
+    canvas.height = 64;
+    const g = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
+    g.fillStyle = '#2a2d31';
+    g.fillRect(0, 0, 16, 64);
+    g.strokeStyle = '#f2f4f7';
+    g.lineWidth = 4;
+    g.beginPath();
+    g.ellipse(8, 16, 5, 13, 0, 0, Math.PI * 2);
+    g.stroke();
+    g.fillStyle = '#c4c9cf';
+    g.fillRect(5, 34, 6, 28);
+    g.fillStyle = '#ffffff';
+    g.fillRect(6, 36, 2, 24);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+  }
+
+  /**
+   * A soft round glow for the spark.
+   * @returns {THREE.CanvasTexture}
+   */
+  function makeSpark() {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 64;
+    const g = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
+    const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,255,230,1)');
+    grad.addColorStop(0.25, 'rgba(255,190,90,0.85)');
+    grad.addColorStop(1, 'rgba(255,120,30,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(canvas);
+  }
+
+  /**
+   * @template {THREE.BufferGeometry} G
+   * @param {G} geo
+   * @returns {G}
+   */
+  function keepGeo(geo) {
+    geometries.push(geo);
+    return geo;
+  }
+
+  /**
+   * @template {THREE.Material} M
+   * @param {M} mat
+   * @returns {M}
+   */
+  function keepMat(mat) {
+    materials.push(mat);
+    return mat;
+  }
+
+  /**
+   * The chain and the kunai, made once.
+   * @returns {void}
+   */
+  function buildRope() {
+    links = makeLinks();
+    const chainGeo = keepGeo(new THREE.CylinderGeometry(GRAPPLE.chainRadius, GRAPPLE.chainRadius, 1, 8, 1, true));
+    chainGeo.translate(0, 0.5, 0);
+    const glowGeo = keepGeo(new THREE.CylinderGeometry(GRAPPLE.glowRadius, GRAPPLE.glowRadius, 1, 10, 1, true));
+    glowGeo.translate(0, 0.5, 0);
+    const chain = new THREE.Mesh(chainGeo, keepMat(new THREE.MeshBasicMaterial({ color: GRAPPLE.colourChain, map: links })));
+    const glow = new THREE.Mesh(glowGeo, keepMat(new THREE.MeshBasicMaterial({
+      color: GRAPPLE.colourGlow, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false
+    })));
+    cable = new THREE.Group();
+    cable.add(chain, glow);
+
+    const steel = keepMat(new THREE.MeshBasicMaterial({ color: GRAPPLE.colourHook }));
+    const edge = keepMat(new THREE.MeshBasicMaterial({ color: 0x8c96a3 }));
+    const L = GRAPPLE.hookLength;
+    const R = GRAPPLE.hookRadius;
+    // The kunai's blade, point first along +Y (the line), on the chain's end.
+    const blade = new THREE.Mesh(keepGeo(new THREE.ConeGeometry(R, L, 4)), steel);
+    blade.position.y = L / 2;
+    blade.rotation.y = Math.PI / 4;
+    // Two barbs swept back from the blade's shoulders.
+    const barbGeo = keepGeo(new THREE.ConeGeometry(R * 0.35, L * 0.45, 4));
+    const barbs = [-1, 1].map((side) => {
+      const barb = new THREE.Mesh(barbGeo, edge);
+      barb.position.set(side * R * 0.9, L * 0.12, 0);
+      barb.rotation.z = side * 2.6;
+      return barb;
+    });
+    // The ring the chain runs through.
+    const ring = new THREE.Mesh(keepGeo(new THREE.TorusGeometry(R * 0.55, R * 0.16, 6, 14)), edge);
+    ring.position.y = -R * 0.4;
+    ring.rotation.y = Math.PI / 2;
+    const sparkTexture = makeSpark();
+    spark = new THREE.Sprite(keepMat(new THREE.SpriteMaterial({
+      map: sparkTexture, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
+    })));
+    spark.position.y = L * 0.4;
+    spark.userData.texture = sparkTexture;
+    hook = new THREE.Group();
+    hook.add(blade, ...barbs, ring, spark);
   }
 
   /**
@@ -392,10 +550,12 @@ export function createGrappleSystem(ctx) {
     }
     if (s.mode === 'pull' && s.phase !== 'back' && !alienAlive(s.alien)) s.phase = 'back';
     if (s.phase !== 'back') trackAnchor();
+    glowClock += rawDt;
 
     if (s.phase === 'out') {
       if (moveTip(s.anchor, GRAPPLE.flySpeed * dt)) {
-        if (ctx.systems.katanaSound) ctx.systems.katanaSound.playParry();
+        if (ctx.systems.grappleJetSound) ctx.systems.grappleJetSound.playClank();
+        ctx.systems.gamefeel.addShake(0.15, 0.15);
         if (s.mode === 'pull') {
           s.phase = 'pull';
         } else if (h.zipRoger(s.stopX, s.stopZ, GRAPPLE.zipSpeed)) {
@@ -426,15 +586,13 @@ export function createGrappleSystem(ctx) {
 
   /** @returns {void} */
   function initGrapple() {
-    const cableGeo = new THREE.CylinderGeometry(0.025, 0.025, 1, 6, 1, true);
-    cableGeo.translate(0, 0.5, 0);
-    cable = new THREE.Mesh(cableGeo, new THREE.MeshBasicMaterial({ color: GRAPPLE.colourCable }));
-    const hookGeo = new THREE.ConeGeometry(0.11, 0.32, 8);
-    hook = new THREE.Mesh(hookGeo, new THREE.MeshBasicMaterial({ color: GRAPPLE.colourHook }));
+    buildRope();
+    if (!cable || !hook) return;
     cable.name = 'grapple_cable';
     hook.name = 'grapple_hook';
     cable.visible = hook.visible = false;
-    cable.frustumCulled = hook.frustumCulled = false;
+    cable.traverse((o) => { o.frustumCulled = false; });
+    hook.traverse((o) => { o.frustumCulled = false; });
     Sim.three.scene.add(cable, hook);
     ctx.systems.abilities.register({
       id: 'grapple', name: 'GRAPPLE', keys: GRAPPLE.keys, cost: GRAPPLE.cost, seconds: 0, cooldown: GRAPPLE.cooldown,
@@ -460,13 +618,14 @@ export function createGrappleSystem(ctx) {
   /** @returns {void} */
   function disposeGrapple() {
     letGo();
-    for (const mesh of [cable, hook]) {
-      if (!mesh) continue;
-      Sim.three.scene.remove(mesh);
-      mesh.geometry.dispose();
-      /** @type {THREE.Material} */ (mesh.material).dispose();
-    }
-    cable = hook = null;
+    for (const group of [cable, hook]) if (group) Sim.three.scene.remove(group);
+    for (const g of geometries) g.dispose();
+    for (const m of materials) m.dispose();
+    geometries.length = 0;
+    materials.length = 0;
+    if (links) links.dispose();
+    if (spark) spark.userData.texture.dispose();
+    cable = hook = spark = links = null;
   }
 
   return { initGrapple, updateGrapple, busy: () => throwState.phase !== 'idle', resetGrapple, disposeGrapple };
