@@ -149,6 +149,11 @@ import { createUISystem } from './engine/ui.js';
 import { initBannerStack } from './utils/banners.js';
 import { createMinimapTrackerSystem } from './engine/ui/minimapTracker.js';
 import { createMinimapSystem } from './engine/ui/minimap.js';
+import { createStreetTrafficSystem } from './engine/environment/streetTraffic.js';
+import { createBirdsSystem } from './engine/environment/birds.js';
+import { createNewsChopperSystem } from './engine/environment/newsChopper.js';
+import { createNewsTickerSystem } from './engine/ui/newsTicker.js';
+import { createExplainerSystem } from './engine/ui/explainer.js';
 
 /**
  * This is the Three.js tornado simulator (vortex forces, debris pooling,
@@ -823,6 +828,15 @@ export function createSimulation(container) {
   // Roger's rechargeable health and the one player-damage API (engine/health/).
   register('health', createHealthSystem(ctx), { auto: true });
 
+  // The town's life (2026-10-04): cars driving the streets, gulls overhead,
+  // the STORM 7 helicopter and its news line, and the first-visit
+  // explainer. Auto: their init and reset run after the town is built.
+  register('streetTraffic', createStreetTrafficSystem(ctx), { auto: true });
+  register('birds', createBirdsSystem(ctx), { auto: true });
+  register('newsChopper', createNewsChopperSystem(ctx), { auto: true });
+  register('newsTicker', createNewsTickerSystem(ctx), { auto: true });
+  register('explainer', createExplainerSystem(ctx), { auto: true });
+
   // Co-op (engine/net/): the room, the guest's avatar and the host's
   // snapshots. Looks the hero up lazily; its init/reset/dispose run through
   // the registry.
@@ -970,6 +984,8 @@ export function createSimulation(container) {
       lap('vehicles');
       // Before physics: a train derailed this frame is integrated from now.
       updateTrain(dt);
+      // The street traffic too: a car the funnel takes is integrated from now.
+      ctx.systems.streetTraffic.updateStreetTraffic(dt);
       // Alongside the train and for the same reason: a span that drops this
       // frame, and any car that drops with it, is integrated from here on.
       updateViaduct(dt);
@@ -1071,6 +1087,8 @@ export function createSimulation(container) {
     if (!Sim.state.paused) updateDownburst(dt);
     if (!Sim.state.paused) ctx.systems.gravityRift.updateGravityRift(dt);
     if (!Sim.state.paused) ctx.systems.solarStorm.updateSolarStorm(dt);
+    if (!Sim.state.paused) ctx.systems.birds.updateBirds(dt);
+    if (!Sim.state.paused) ctx.systems.newsChopper.updateNewsChopper(dt);
     if (!Sim.state.paused) updateStrikeTargeting(dt);
     if (!Sim.state.paused) updateChasms(dt);
     if (!Sim.state.paused) updateTerminator(dt);
@@ -1115,6 +1133,7 @@ export function createSimulation(container) {
     updateDayNight(dt);
     updateAtmosphere();
     updateBrightness(rawDt);
+    ctx.systems.newsTicker.updateNewsTicker(rawDt);
     updateClouds(dt);
     updateWeather(dt);
     // Real time deliberately: slowing the audio graph's own parameter ramps

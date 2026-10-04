@@ -58,12 +58,19 @@ This matters because environment setup, damage, debris, and UI all depend on cor
 - `engine/environment/` contains the town, buildings, vehicles, roads, shelters, parks, and trains
 - `engine/aliens.js`, `terminator.js`, `trex.js`, `yeti.js`, `patientZero.js` register hostile actors
 - disaster systems include `earthquake.js`, `flood.js`, `meteors.js`, `chasm.js`, `sinkhole.js`, `firenado.js`, `volcano.js`, and similar modules
+- the town's life (2026-10-04), auto-registered, each with init/reset/dispose and an update called from `frame()`:
+  - `environment/streetTraffic.js`: up to eight cars come and go. Each drives in from a street's end to the first building on the road, parks, then U-turns and leaves. The open stretches are worked out from the building footprints (`openStretches`, pure, tested in `tests/street-traffic.test.mjs`). They are ordinary `createCar` cars on `Sim.objects` and `Environment.cars`, so they are instanced and the funnel can take them. They stop for people and leave once a tornado is down. Updated before physics, like the train.
+  - `environment/birds.js`: three flocks of gulls, drawn as three instanced meshes. They flee a funnel within 120 m.
+  - `environment/newsChopper.js`: the STORM 7 helicopter. It circles the town, then follows the tornado with a searchlight cone (a glowing mesh, not a light).
+  These are visual only, except the traffic cars.
 
 ### UI and feedback
 - `engine/ui.js` owns HUD and control-panel logic
 - `engine/gamefeel.js` drives combos, shake, and slow-motion feel
 - `engine/sound/` holds the procedural audio graph
 - `engine/explosions/` and `groundFx.js` handle aftermath visuals
+- `engine/ui/newsTicker.js` is the STORM 7 news line at the bottom: plain-words headlines read from `Sim.stats`, the tornado registry and `announce` events, twice a second, on real time. Its queue is pure, in `ui/headlines.js`, tested in `tests/headlines.test.mjs`. It is hidden in Hero Mode; `?news=0` turns it off.
+- `engine/ui/explainer.js` holds the four first-visit cards and the **?** button (H). It is remembered in `localStorage`; `?explainer=1|0`.
 
 ## Rules to follow
 

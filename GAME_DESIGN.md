@@ -52,6 +52,8 @@ The simulation uses life-size world units. People flee hazards, seek shelters, f
 
 New arrivals keep the town populated whether or not a tornado is active. Later arrivals carry weapons and fight aliens. Fire engines handle building fires but not gas mains; ambulances collect casualties; evacuation buses take people off the map. Emergency vehicles avoid the funnel and are not replaced after they are lost.
 
+Before the storm the town is alive. Cars come and go: one drives in from the end of a street, up to the first building standing on the road, and parks there as if it had arrived at someone's door. A while later it makes a U-turn and drives back out, and new cars keep arriving, up to eight at a time. Drivers stop for anyone in the road. Parked cars that stood in a lane are moved to the kerb. Three flocks of gulls wheel over the town. The STORM 7 news helicopter, white with a blue stripe, circles it. Once a tornado is on the ground, everything reacts to it. The gulls break away from a funnel within 120 m, climbing and flapping hard, and come back once it has gone. Nobody new drives in. The cars on the move speed up and leave, the parked ones stay where they are, and the traffic returns only after a Reset. The helicopter follows the funnel at a safe distance, with its searchlight on the funnel's foot. The traffic cars are ordinary cars: the funnel can take them like any other.
+
 Traffic and structures are part of the disaster. The train stops for obstructions and can derail. The elevated bridge has ramps and ground roads; its pillars can snap and spans can sag to the ground. Cows graze in a fenced pasture and return to grazing wherever they land after being lifted.
 
 ## Scoring and feel
@@ -93,6 +95,14 @@ A nuclear plant is a major set piece with a health value of its own: the MEGA BE
 ## Sound and presentation
 
 Creature sounds are spatial and procedural. Music continues through ordinary play, while event tracks and Smooth Criminal have their own mix behaviour. The sound panel controls rain, music, creature sounds and the selected background track. The UI keeps storm controls, disasters, camera, sound and readouts in compact sections over the scene.
+
+Two things explain the scene to someone seeing it for the first time:
+- **The STORM 7 news line.** It runs along the bottom of the screen like a TV lower third: a red LIVE badge, then one plain-words headline at a time, with BREAKING for big news.
+  - Before the storm it describes the calm evening and what to press.
+  - During the storm it reports the warning, the touchdown with its EF rating and wind, the gulls and drivers fleeing, and people reaching the shelters, buses and ambulances. It also counts buildings down, cars thrown, fires, flying cows and the people caught.
+  - Every `announce` appears on it as BREAKING.
+  - It is hidden in Hero Mode, where Roger's own HUD tells his story.
+- **The first-visit explainer.** Four short cards: what the town is, how it reacts, what the buttons do, and how to follow the news. The **?** button in the top right corner, or the H key, shows them again.
 
 ## Changelog Notes
 
