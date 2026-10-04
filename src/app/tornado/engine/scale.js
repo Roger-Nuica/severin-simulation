@@ -73,7 +73,7 @@ export const VEHICLES = {
 /** Characters, by their own stated sizes. */
 export const CHARACTERS = {
   roger: { height: 1.85 },                 // a person, a little taller
-  hank: { height: 2.2 },                   // larger than life, but a man
+  hank: { height: 3.2 },                   // the Human Landslide: a man of granite (2.2 until 2026-10-04)
   terminator: { height: 2.1 },             // a head over the crowd
   alien: { height: 1.4 },                  // the classic small grey
   smoothDancer: { height: 1.9 },

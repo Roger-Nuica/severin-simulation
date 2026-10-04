@@ -117,6 +117,7 @@ export const HEALTH = deepFreeze({
     debris: hit(0),               // daze only
     ice: hit(0),                  // freeze only
     replicatorShard: hit(8),      // a Replicator clone's thrown shard (patientZero/encircle.js)
+    gunnerRound: hit(3),          // one of HAVOC's minigun rounds (engine/gunner.js, R-057)
     mothershipBeam: kill('Vaporised by the mothership'),
     yeti: kill('Pulverised by the Yeti'),
     blackHole: kill('Swallowed by the black hole'),

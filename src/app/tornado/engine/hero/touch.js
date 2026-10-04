@@ -27,6 +27,8 @@ import { TOUCH, stickFromDrag, heldFromStick, pickAimTarget, wrapAngle } from '.
  *                telekinesis (C, again to throw): each lit while running,
  *                dimmed while it cools down or energy is short.
  *   🚗           at a car's glowing door, get in; driving, get out.
+ *   🔫           send in HAVOC, the heavy gunner (engine/gunner.js), one
+ *                more per tap, up to three.
  *   🤖           send in the Terminators (the panel's btn-terminator: five,
  *                each from a different side round Roger); dimmed while a
  *                squad is still standing.
@@ -77,7 +79,7 @@ export function createHeroTouch(ctx, S, api) {
   const { Sim, container } = ctx;
   /** @type {HTMLDivElement|null} */
   let root = null;
-  /** @type {{base: HTMLDivElement, knob: HTMLDivElement, fire: HTMLButtonElement, aim: HTMLButtonElement, weapon: HTMLButtonElement, car: HTMLButtonElement, bots: HTMLButtonElement, abilities: {code: string, el: HTMLButtonElement}[]}|null} */
+  /** @type {{base: HTMLDivElement, knob: HTMLDivElement, fire: HTMLButtonElement, aim: HTMLButtonElement, weapon: HTMLButtonElement, car: HTMLButtonElement, bots: HTMLButtonElement, havoc: HTMLButtonElement, abilities: {code: string, el: HTMLButtonElement}[]}|null} */
   let ui = null;
   let enabled = false;
   let active = false;
@@ -125,6 +127,7 @@ export function createHeroTouch(ctx, S, api) {
     const car = button('ht-car', '🚗<span>DRIVE</span>', 'Get in or out of the car');
     const exit = button('ht-exit', '✕', 'Leave Hero Mode');
     const bots = button('ht-bots', '🤖', 'Send in the Terminators');
+    const havoc = button('ht-havoc', '🔫', 'Send in HAVOC, the heavy gunner');
     const abilityBox = document.createElement('div');
     abilityBox.className = 'ht-abilities';
     const abilities = ABILITIES.map((a) => {
@@ -136,9 +139,9 @@ export function createHeroTouch(ctx, S, api) {
     // Space down while the thumb is on it, up when it lifts.
     const jump = button('ht-ability', '<b>🚀</b><span>Jump</span><i></i>', 'Jump · again in the air: jetpack, hold to climb');
     abilityBox.appendChild(jump);
-    root.append(base, abilityBox, weapon, aim, car, fire, bots, exit);
+    root.append(base, abilityBox, weapon, aim, car, fire, havoc, bots, exit);
     container.appendChild(root);
-    ui = { base, knob, fire, aim, weapon, car, bots, abilities };
+    ui = { base, knob, fire, aim, weapon, car, bots, havoc, abilities };
 
     const opts = { signal: ctx.signal };
     /** A button that acts on press (and optionally on release), never the browser's tap. */
@@ -172,6 +175,7 @@ export function createHeroTouch(ctx, S, api) {
       const panelButton = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-terminator'));
       if (panelButton && !panelButton.disabled) panelButton.click();
     });
+    hold(havoc, () => ctx.systems.gunner?.send());
     for (const a of abilities) hold(a.el, () => tapKey(a.code));
     hold(jump, () => input().push({ type: 'keydown', code: 'Space', repeat: false }), () => input().push({ type: 'keyup', code: 'Space' }));
 

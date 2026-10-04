@@ -21,7 +21,7 @@ npm run start
 npm run lint
 ```
 
-The project has a small automated suite: `npm test` runs `node --test` over `tests/*.test.mjs` (health, melee, damage table, enemy routing, friendly fire, protocol, co-op rules and relay, terminator spawn points, news headlines, street traffic, air support). It covers pure logic, not the browser simulation, so validation is still lint, production build and manual checks.
+The project has a small automated suite: `npm test` runs `node --test` over `tests/*.test.mjs` (health, melee, damage table, enemy routing, friendly fire, protocol, co-op rules and relay, terminator spawn points, news headlines, street traffic, air support, HAVOC the gunner, Hank Granite's throws). It covers pure logic, not the browser simulation, so validation is still lint, production build and manual checks.
 
 ## AGENT WORKFLOW
 

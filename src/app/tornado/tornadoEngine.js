@@ -156,6 +156,8 @@ import { createNewsTickerSystem } from './engine/ui/newsTicker.js';
 import { createExplainerSystem } from './engine/ui/explainer.js';
 import { createAirSupportSystem } from './engine/airSupport.js';
 import { createJetSoundSystem } from './engine/sound/jets.js';
+import { createGunnerSystem } from './engine/gunner.js';
+import { createGunnerSoundSystem } from './engine/sound/gunner.js';
 
 /**
  * This is the Three.js tornado simulator (vortex forces, debris pooling,
@@ -842,6 +844,10 @@ export function createSimulation(container) {
   // hunting the aliens from above (R-056), and their sound.
   register('jetSound', createJetSoundSystem(ctx), { auto: true });
   register('airSupport', createAirSupportSystem(ctx), { auto: true });
+  // HAVOC, the heavy gunner (2026-10-04): a Hero Mode enemy whose minigun
+  // rounds Time Slow can stop in the air and send back (R-057).
+  register('gunnerSound', createGunnerSoundSystem(ctx), { auto: true });
+  register('gunner', createGunnerSystem(ctx), { auto: true });
 
   // Co-op (engine/net/): the room, the guest's avatar and the host's
   // snapshots. Looks the hero up lazily; its init/reset/dispose run through
@@ -1101,6 +1107,7 @@ export function createSimulation(container) {
     lap('aliens');
     if (!Sim.state.paused) updateAliens(dt);
     if (!Sim.state.paused) ctx.systems.airSupport.updateAirSupport(dt);
+    ctx.systems.gunner.updateGunners(Sim.state.paused ? 0 : dt, Sim.state.paused ? 0 : rawDt);
     // Landing Support's samurai and their ship, on the world's time.
     if (!Sim.state.paused) spaceshipSystem.updateSupportWorld(dt);
     if (!Sim.state.paused) updateMothership(dt);

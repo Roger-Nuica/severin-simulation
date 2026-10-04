@@ -2200,6 +2200,12 @@ body.hero-touch-on #fps { display: none !important; }
   border-color: rgba(255, 90, 60, 0.75);
 }
 .ht-bots.off { opacity: 0.35; }
+/* HAVOC (engine/gunner.js), left of the Terminators. */
+.ht-havoc {
+  top: calc(10px + var(--safe-t)); right: calc(114px + var(--safe-r));
+  width: 44px; height: 44px; min-width: 44px; min-height: 44px; font-size: 20px;
+  border-color: rgba(255, 150, 60, 0.75);
+}
 /* The abilities: a column over the weapon button (portrait), a row along the top (landscape). */
 /* Two columns of three: six abilities in one column reached the top of a
    phone screen and sat on the exit and Terminator buttons (2026-10-04). */
@@ -2235,7 +2241,7 @@ body.hero-touch-on #fps { display: none !important; }
 /* The Hero HUD as a strip along the top. */
 body.hero-touch-on .hero-hud {
   top: calc(8px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px));
-  right: calc(114px + env(safe-area-inset-right, 0px)); bottom: auto;
+  right: calc(166px + env(safe-area-inset-right, 0px)); bottom: auto;
   min-width: 0; max-width: none; padding: 5px 9px;
   flex-direction: row; flex-wrap: wrap; gap: 3px 12px;
   font-size: 9px; letter-spacing: 0.6px; border-radius: 10px;
@@ -2364,4 +2370,47 @@ body.hero-touch-on .explainer-help { display: none; }
 @media (max-height: 520px) and (min-width: 701px) {
   /* A phone on its side: the panel has the left, the news line the bottom middle. */
   .news-ticker { left: 336px; right: 16px; }
+}
+
+/* ===========================================================================
+   Hank Granite, the Human Landslide (engine/actionHero.js), 2026-10-04:
+   the title's subtitle, the move called as it lands, and each throw's
+   live distance, like a home run on TV.
+   =========================================================================== */
+.hank-title { text-align: center; white-space: nowrap; }
+.hank-title small {
+  display: block; margin-top: 10px; font-size: 14px; letter-spacing: 7px; color: #ff9a3c;
+  text-shadow: 0 0 14px rgba(255, 120, 30, 0.7);
+}
+.hank-move {
+  position: fixed; left: 50%; top: 22vh; transform: translate(-50%, 0) scale(0.6); z-index: 15;
+  pointer-events: none; opacity: 0; white-space: nowrap;
+  font: italic 900 46px/1 system-ui, -apple-system, sans-serif; letter-spacing: 3px; color: #fff3e0;
+  -webkit-text-stroke: 2px #6b2a05; text-shadow: 0 0 22px rgba(255, 110, 20, 0.85), 0 4px 0 #6b2a05;
+}
+.hank-move.visible { animation: hank-move 1.3s cubic-bezier(.2, 1.6, .4, 1) forwards; }
+@keyframes hank-move {
+  0% { opacity: 0; transform: translate(-50%, 0) scale(2.2) rotate(-6deg); }
+  14% { opacity: 1; transform: translate(-50%, 0) scale(1) rotate(-3deg); }
+  75% { opacity: 1; transform: translate(-50%, 0) scale(1.05) rotate(-3deg); }
+  100% { opacity: 0; transform: translate(-50%, -12px) scale(1.1) rotate(-3deg); }
+}
+.hank-dists { position: fixed; inset: 0; pointer-events: none; z-index: 13; overflow: hidden; }
+.hank-dist {
+  position: absolute; left: 0; top: 0; padding: 4px 10px 5px; border-radius: 8px; text-align: center;
+  font: italic 900 22px/1 system-ui, -apple-system, sans-serif; color: #fff;
+  background: rgba(14, 18, 28, 0.78); border: 2px solid rgba(255, 154, 60, 0.85);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); transition: opacity 0.15s linear; will-change: transform;
+}
+.hank-dist b { font-variant-numeric: tabular-nums; font-weight: 900; }
+.hank-dist i { font-size: 13px; margin-left: 3px; color: #ffb36b; }
+.hank-dist em { display: block; font-size: 11px; letter-spacing: 2px; color: #ffd23f; font-style: normal; }
+.hank-dist em:empty { display: none; }
+.hank-dist.landed { border-color: #fff; background: rgba(120, 40, 6, 0.85); }
+.hank-dist.record { border-color: #ffd23f; box-shadow: 0 0 22px rgba(255, 210, 63, 0.75); }
+@media (max-width: 700px), (max-height: 520px) {
+  .hank-move { font-size: 30px; top: 16vh; }
+  .hank-title { font-size: 24px; letter-spacing: 6px; }
+  .hank-title small { font-size: 11px; letter-spacing: 4px; }
+  .hank-dist { font-size: 17px; }
 }

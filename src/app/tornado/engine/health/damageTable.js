@@ -41,7 +41,8 @@ export const PLAYER_WEAPONS_ONLY = Object.freeze(['samurai']);
  * pursuer 30 (30 minigun rounds, 1 each); R-037 T-Rex 40; R-038 Yeti 30;
  * R-039 Patient Zero 12, clones 1; R-015 hunter 4, UFO 6; samurai 3 (R-020:
  * `SAMURAI.bulletHits`); R-044 plant 5 (ship hits); R-036 mothership 15;
- * tornado 20 (new: the MEGA BEAM neutralises it, R-034).
+ * tornado 20 (new: the MEGA BEAM neutralises it, R-034); HAVOC the gunner 24
+ * (R-057: 24 minigun rounds, or his own rounds sent back).
  */
 export const ENEMY_HEALTH = Object.freeze({
   alien: 1,
@@ -56,7 +57,8 @@ export const ENEMY_HEALTH = Object.freeze({
   samurai: 3,
   nuclearPlant: 5,
   mothership: 15,
-  tornado: 20
+  tornado: 20,
+  gunner: 24
 });
 
 /**
@@ -109,7 +111,10 @@ export const WEAPON_VS_ENEMY = Object.freeze({
   // R-036/R-020: plasma 1, MEGA BEAM 5, Rocket Strike 8 of 15 hull; katana excluded (0).
   mothership: row(ENEMY_HEALTH.mothership, { plasma: 1, mega: 5, rocket: 8, blade: 0 }),
   // R-034: MEGA BEAM neutralises it (full health); a normal shot was "no effect"; katana excluded (0).
-  tornado: row(ENEMY_HEALTH.tornado, { mega: 20, blade: 0 })
+  tornado: row(ENEMY_HEALTH.tornado, { mega: 20, blade: 0 }),
+  // R-057: HAVOC, armoured: 24 minigun rounds (his own, sent back, count the same), plasma 6,
+  // bolt/lightning 12, MEGA BEAM kills, fire 0.6 a tick, rocket 12, three katana blows, a thrown car 12; EMP stuns (chip).
+  gunner: row(ENEMY_HEALTH.gunner, { plasma: 6, mega: 24, bullet: 1, bolt: 12, lightning: 12, fire: 0.6, rocket: 12, blade: 8, throw: 12 })
 });
 
 /** The only cells allowed to be zero: the katana against these kinds. */
