@@ -2180,8 +2180,9 @@ body.hero-touch-on #fps { display: none !important; }
   font-size: 9px; line-height: 1.15; letter-spacing: 0.4px; max-width: 76px; text-align: left;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
+/* Left of the weapon button, over AIM: at right 118 it sat on the weapon. */
 .ht-car {
-  right: calc(118px + var(--safe-r)); bottom: calc(112px + var(--safe-b));
+  right: calc(142px + var(--safe-r)); bottom: calc(108px + var(--safe-b));
   width: 64px; height: 64px; display: none; font-size: 20px;
   border-color: rgba(255, 211, 90, 0.95);
   animation: ht-car-pulse 0.9s ease-in-out infinite alternate;
@@ -2200,10 +2201,13 @@ body.hero-touch-on #fps { display: none !important; }
 }
 .ht-bots.off { opacity: 0.35; }
 /* The abilities: a column over the weapon button (portrait), a row along the top (landscape). */
+/* Two columns of three: six abilities in one column reached the top of a
+   phone screen and sat on the exit and Terminator buttons (2026-10-04). */
 .ht-abilities {
   position: absolute; right: calc(20px + var(--safe-r)); bottom: calc(184px + var(--safe-b));
-  display: flex; flex-direction: column-reverse; gap: 8px; align-items: flex-end;
+  display: grid; grid-template-columns: repeat(2, 52px); gap: 8px; direction: rtl;
 }
+.ht-abilities > * { direction: ltr; }
 .ht-ability { position: relative; width: 52px; height: 52px; }
 .ht-ability b { font-size: 18px; font-weight: 400; }
 .ht-ability span { font-size: 8px; letter-spacing: 0.5px; }
@@ -2217,11 +2221,15 @@ body.hero-touch-on #fps { display: none !important; }
 .ht-ability.short { opacity: 0.45; }
 .hero-touch.driving .ht-abilities, .hero-touch.driving .ht-aim, .hero-touch.driving .ht-weapon, .hero-touch.driving .ht-fire { display: none; }
 
+/* Landscape phone: the abilities as two rows of three over the weapon
+   button, clear of the HUD strip along the top (a row up there sat on the
+   HUD and the HERO MODE banner, 2026-10-04). */
 @media (orientation: landscape) and (max-height: 520px) {
-  .ht-abilities { flex-direction: row; top: calc(10px + var(--safe-t)); bottom: auto; right: calc(116px + var(--safe-r)); }
-  .ht-ability { width: 48px; height: 48px; }
+  .ht-abilities { grid-template-columns: repeat(3, 44px); gap: 6px; bottom: calc(182px + var(--safe-b)); }
+  .ht-ability { width: 44px; height: 44px; }
+  .ht-ability b { font-size: 16px; }
+  .ht-ability span { font-size: 7px; }
   .ht-stick { left: calc(100px + var(--safe-l)); bottom: calc(80px + var(--safe-b)); }
-  body.hero-touch-on .hero-hud { right: calc(400px + env(safe-area-inset-right, 0px)); }
 }
 
 /* The Hero HUD as a strip along the top. */
@@ -2249,13 +2257,16 @@ body.hero-touch-on .minimap {
 body.hero-touch-on .hero-banner { top: 31%; max-width: 88vw; }
 body.hero-touch-on .hero-banner .title { font-size: 24px; letter-spacing: 3px; }
 body.hero-touch-on .hero-banner .sub { font-size: 10px; white-space: normal; line-height: 1.35; }
+@media (orientation: landscape) and (max-height: 520px) {
+  body.hero-touch-on .hero-banner { top: 24%; max-width: 56vw; }
+}
 
 /* ===========================================================================
    STORM 7 news line (engine/ui/newsTicker.js) and the first-visit explainer
    (engine/ui/explainer.js), 2026-10-04.
    =========================================================================== */
 .news-ticker {
-  position: fixed; left: 336px; right: 96px; bottom: 14px; z-index: 11; pointer-events: none;
+  position: fixed; left: 336px; right: 228px; bottom: 14px; z-index: 11; pointer-events: none;
   display: flex; align-items: stretch; max-width: 860px; margin: 0 auto; min-height: 34px;
   border-radius: 8px; overflow: hidden; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
   font: 600 14px/1.3 system-ui, -apple-system, sans-serif; color: #f4f7ff;
@@ -2319,4 +2330,38 @@ body.hero-touch-on .explainer-help { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .news-badge i, .news-ticker.pop .news-line, .explainer { animation: none; }
+}
+
+/* ===========================================================================
+   Phones (2026-10-04, on request: "the UI on a phone is awful"):
+   - no co-op box on a phone at all;
+   - the install button is a small round icon at the top, beside the ? button;
+   - while the panel is open (it takes the top of the screen) the news line,
+     the ? and the install button step out of its way;
+   - the mission tracker and the event banners sit under the news line.
+   =========================================================================== */
+.pwa-install {
+  position: fixed; right: 12px; bottom: 12px; z-index: 40; display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border-radius: 8px; border: 0; cursor: pointer;
+  background: linear-gradient(180deg, #8ffff0, #2fd6bd); color: #04211c; font: 700 14px system-ui, sans-serif;
+}
+@media (max-width: 700px), (max-height: 520px) {
+  .coop-panel { display: none !important; }
+  .pwa-install {
+    top: calc(14px + env(safe-area-inset-top, 0px)); right: calc(66px + env(safe-area-inset-right, 0px)); bottom: auto;
+    width: 44px; height: 44px; padding: 0; border-radius: 50%; justify-content: center; font-size: 19px;
+  }
+  .pwa-install .pwa-label { display: none; }
+}
+@media (max-width: 700px) {
+  .explainer { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  body:has(#ui-panel:not(.collapsed)) .news-ticker,
+  body:has(#ui-panel:not(.collapsed)) .explainer-help,
+  body:has(#ui-panel:not(.collapsed)) .pwa-install { display: none; }
+  .mission-hud { top: calc(128px + env(safe-area-inset-top, 0px)); }
+  #banner-stack { top: 24%; }
+}
+@media (max-height: 520px) and (min-width: 701px) {
+  /* A phone on its side: the panel has the left, the news line the bottom middle. */
+  .news-ticker { left: 336px; right: 16px; }
 }
