@@ -880,7 +880,18 @@ export function createHeroModeSystem(ctx) {
 
   return {
     initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, rogerAim: () => (S.state.phase === 'aiming' ? S.aimDir : null), standable, freezeRoger,
-    zipRoger, rogerZipping: () => S.state.zipActive, stopZip: () => { S.state.zipActive = false; }, solidAlong: api.solidAlong, rogerFrozen: () => S.state.frozen > 0, rogerAirborne: () => S.state.airborne, rogerHeight: () => (S.roger ? S.roger.mesh.position.y : 0), rogerShielded: () => S.state.spawnShield > 0 || S.state.invincible, rogerPhase: () => S.state.phase, killRoger: api.killRoger, hitArea: api.hitArea, chipTornado: api.chipTornado,
+    zipRoger, rogerZipping: () => S.state.zipActive, stopZip: () => { S.state.zipActive = false; }, solidAlong: api.solidAlong, rogerFrozen: () => S.state.frozen > 0, rogerAirborne: () => S.state.airborne,
+    // The mothership's downwash (engine/mothershipWind.js): Roger shoved by
+    // the wind, on his feet or in the air, kept out of the buildings.
+    pushRoger: (/** @type {number} */ dx, /** @type {number} */ dz) => {
+      if (!S.Hero.active || !S.roger || S.state.coopDown) return;
+      const ph = S.state.phase;
+      if (ph !== 'running' && ph !== 'aiming' && ph !== 'dazed') return;
+      const p = S.roger.mesh.position;
+      p.x += dx;
+      p.z += dz;
+      api.pushOut(p, HERO.pad * 0.5, S.state.alt);
+    }, rogerHeight: () => (S.roger ? S.roger.mesh.position.y : 0), rogerShielded: () => S.state.spawnShield > 0 || S.state.invincible, rogerPhase: () => S.state.phase, killRoger: api.killRoger, hitArea: api.hitArea, chipTornado: api.chipTornado,
     resetHero, disposeHero,
     // Co-op (engine/net/system.js): Roger's pose for the shared snapshot, and
     // the down-not-dead state while a teammate can still revive him.

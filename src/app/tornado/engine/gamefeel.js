@@ -211,6 +211,8 @@ const COMBO_LABELS = [
 export function createGameFeelSystem(ctx) {
   const { Sim } = ctx;
 
+  /** @type {Set<string>} who is holding the camera still (holdStill) */
+  const stillHolds = new Set();
   const GameFeel = {
     comboCount: 0,
     comboMultiplier: 1,
@@ -267,6 +269,10 @@ export function createGameFeelSystem(ctx) {
    * @returns {void}
    */
   function addShake(magnitude, duration) {
+    // Held still (the earthquake, the mothership's arrival and beam): no
+    // shake at all while they last, on request (2026-10-04: in Hero Mode the
+    // screen never stopped moving and nothing could be aimed).
+    if (stillHolds.size) return;
     const shake = GameFeel.shake;
     const running = shake.timer > 0 ? shake.magnitude * (shake.timer / shake.duration) : 0;
     if (magnitude <= running) return;
@@ -466,11 +472,29 @@ export function createGameFeelSystem(ctx) {
   }
 
   /**
+   * Holds the camera still for as long as `key` is on (any one hold is
+   * enough): every shake asked for meanwhile is dropped, and one running
+   * stops at once.
+   * @param {string} key who holds it
+   * @param {boolean} on
+   * @returns {void}
+   */
+  function holdStill(key, on) {
+    if (on) {
+      if (!stillHolds.has(key)) GameFeel.shake.timer = 0;
+      stillHolds.add(key);
+    } else {
+      stillHolds.delete(key);
+    }
+  }
+
+  /**
    * Clears every effect, called from resetSim() so a fresh run does not start
    * mid-combo, mid-shake or in slow motion.
    * @returns {void}
    */
   function resetGameFeel() {
+    stillHolds.clear();
     GameFeel.comboCount = 0;
     GameFeel.comboMultiplier = 1;
     GameFeel.comboTimer = 0;
@@ -485,5 +509,5 @@ export function createGameFeelSystem(ctx) {
     updateComboHud();
   }
 
-  return { GameFeel, event, comboMultiplier, updateGameFeel, applyGameFeelShake, addShake, resetGameFeel };
+  return { GameFeel, event, comboMultiplier, updateGameFeel, applyGameFeelShake, addShake, holdStill, resetGameFeel };
 }

@@ -20,7 +20,11 @@ import { bannerHost } from '../utils/banners.js';
  * Three pieces:
  *  - a strength envelope (quick ramp in, a sustained rough tremor, a slower
  *    fade out) driving everything below;
- *  - camera shake, applied directly to the camera each frame the same way
+ *  - (no camera shake any more: removed on request, 2026-10-04 -- in Hero
+ *    Mode the screen never stopped moving and nothing could be aimed; the
+ *    quake also holds every other shake off while it lasts, gamefeel.js
+ *    holdStill)
+ *  - (was) camera shake, applied directly to the camera each frame the same way
  *    lightning.js's Lightning.shake is (after Sim.three.controls.update()
  *    has already run this frame, so OrbitControls simply overwrites it again
  *    next frame rather than the offset ever accumulating) — but earthquake
@@ -51,7 +55,6 @@ const EARTHQUAKE = {
   duration: 10,       // seconds of shaking once triggered
   rampIn: 0.5,        // seconds to reach full strength
   rampOut: 2.4,        // seconds to fade back to still
-  shakeMagnitude: 1.7, // world units of camera jitter at full strength
   // The ground splits open (engine/chasm.js) this far into the shaking, once
   // the tremor has had a moment to build.
   chasmDelay: 1.2,
@@ -266,28 +269,6 @@ export function createEarthquakeSystem(ctx) {
   }
 
   /**
-   * Nudges the camera for one frame of tremor. Called after
-   * Sim.three.controls.update() has already run this frame (see animate()),
-   * exactly like Lightning.shake's application -- OrbitControls recomputes
-   * position from its own internal state next frame regardless, so this
-   * offset never accumulates.
-   * @returns {void}
-   */
-  function applyCameraShake() {
-    const mag = EARTHQUAKE.shakeMagnitude * state.strength;
-    if (mag <= 0.0005) return;
-    const t = state.time;
-    // Two incommensurate low-frequency sines give a rolling tremor rather
-    // than pure noise, with per-frame jitter layered on top for the harsh
-    // high-frequency "crack" a real quake has alongside the rolling motion.
-    const roll = Math.sin(t * 31.7) * 0.6 + Math.sin(t * 53.1 + 1.9) * 0.4;
-    const rollZ = Math.sin(t * 37.3 + 0.7) * 0.6 + Math.sin(t * 47.9 + 2.6) * 0.4;
-    Sim.three.camera.position.x += (roll * 0.6 + (Math.random() - 0.5)) * mag;
-    Sim.three.camera.position.y += (Math.random() - 0.5) * mag * 0.4;
-    Sim.three.camera.position.z += (rollZ * 0.6 + (Math.random() - 0.5)) * mag;
-  }
-
-  /**
    * Per frame (not while paused, matching updateFirenado's call site): the
    * event's envelope and everything it drives.
    * @param {number} dt
@@ -317,8 +298,9 @@ export function createEarthquakeSystem(ctx) {
         * (1 - THREE.MathUtils.smoothstep(a, EARTHQUAKE.duration - EARTHQUAKE.rampOut, EARTHQUAKE.duration))
       : 0;
 
+    // No shake while it lasts, its own or the collapses' (gamefeel.js holdStill).
+    ctx.systems.gamefeel.holdStill('earthquake', state.strength > 0);
     if (state.strength > 0) {
-      applyCameraShake();
       const [minR, maxR] = EARTHQUAKE.townRadius;
       dustAccumulator += DUST.rate * state.strength * dt;
       while (dustAccumulator >= 1) {

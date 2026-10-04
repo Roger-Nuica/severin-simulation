@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { buildSaucer } from './spaceship.js';
 import { setOffExplosivesAt } from './explosives.js';
 import { MOTHERSHIP_CRASH_BLAST } from './explosions/megaBlast.js';
+import { createMothershipWind } from './mothershipWind.js';
 
 /**
  * ===========================================================================
@@ -38,6 +39,13 @@ import { MOTHERSHIP_CRASH_BLAST } from './explosions/megaBlast.js';
  * the chemical works, on request. Landing on a nuclear plant sets it off. Its beam kills Roger if it runs over him. It
  * comes at most once per run; a Reset sends it away. While it is here its
  * music plays (sound/cues.js, space-ship-music.wav).
+ *
+ * No camera shake while it arrives, charges and cuts (on request,
+ * 2026-10-04: in Hero Mode the screen never stopped moving and nothing could
+ * be aimed): it holds every shake off (gamefeel.js holdStill) and is felt on
+ * the ground instead, as a helicopter's rotor wash is -- a storm of dust,
+ * trees bent flat, loose things and people blown over, Roger pushed, a
+ * roaring wind (engine/mothershipWind.js). Its crash still shakes.
  */
 
 const MOTHER = {
@@ -137,6 +145,8 @@ export function createMothershipSystem(ctx) {
   const start = new THREE.Vector3();
   const end = new THREE.Vector3();
   const contact = new THREE.Vector3();
+  // The downwash (engine/mothershipWind.js).
+  const wind = createMothershipWind(ctx);
   const belly = new THREE.Vector3();
   const scratch = new THREE.Vector3();
   /** @type {Set<Object>} buildings already struck on this pass */
@@ -149,6 +159,7 @@ export function createMothershipSystem(ctx) {
     light = ctx.systems.lightPool.createLight(0x9dffb8, 0, MOTHER.lightDistance, 1.4);
     light.name = 'mothership_light';
     Sim.three.scene.add(light);
+    wind.initWind();
     // For the black hole (engine/effects/consumables.js): gone, no crash.
     ctx.systems.consumables.register({
       kind: 'mothership',
@@ -460,6 +471,7 @@ export function createMothershipSystem(ctx) {
     const wantDim = ship && state.phase !== 'leaving' && state.phase !== 'falling' ? MOTHER.dim : 0;
     const dimStep = (MOTHER.dim / MOTHER.dimSeconds) * dt;
     state.dim = state.dim < wantDim ? Math.min(wantDim, state.dim + dimStep) : Math.max(wantDim, state.dim - dimStep);
+    updateWash(dt);
     if (!ship || dt <= 0) return;
 
     const g = ship.group;
@@ -516,7 +528,6 @@ export function createMothershipSystem(ctx) {
       beam.scale.x = beam.scale.z = 0.15 + 0.85 * u * u;
       beam.material.opacity = MOTHER.beamOpacity * (0.375 + 0.625 * u) * (0.75 + 0.25 * Math.random());
       light.intensity = MOTHER.lightPeak * u;
-      ctx.systems.gamefeel.addShake(0.3 * u, 0.3);
       if (u >= 1) {
         state.phase = 'cutting';
         state.timer = 0;
@@ -540,7 +551,6 @@ export function createMothershipSystem(ctx) {
       beam.material.opacity = MOTHER.beamOpacity * (0.8 + 0.2 * Math.random());
       light.intensity = MOTHER.lightPeak * (0.85 + 0.15 * Math.random());
       scorch.scale.x = Math.max(0.001, u * scorch.userData.length);
-      ctx.systems.gamefeel.addShake(0.55, 0.2);
       cutAt(contact);
       state.dustTimer -= dt;
       if (state.dustTimer <= 0 && ctx.systems.earthquake) {
@@ -564,6 +574,37 @@ export function createMothershipSystem(ctx) {
       g.position.y = MOTHER.height + (MOTHER.arriveFrom * 1.5 - MOTHER.height) * u * u;
       if (u >= 1) removeShip();
     }
+  }
+
+  /**
+   * The downwash and the still camera, a frame: how hard it blows by what
+   * the ship is doing (growing as it comes down, full while the beam cuts,
+   * a hover's wash while it holds, dying as it leaves; none as it falls),
+   * centred on the beam's foot while it is down, else under the ship.
+   * @param {number} dt
+   * @returns {void}
+   */
+  function updateWash(dt) {
+    let strength = 0;
+    let cx = contact.x;
+    let cz = contact.z;
+    if (ship && state.phase !== 'falling' && state.phase !== 'idle') {
+      const g = ship.group;
+      const u = Math.min(1, state.timer / Math.max(1e-3, state.phase === 'arriving' ? MOTHER.arriveSeconds
+        : state.phase === 'charging' ? MOTHER.chargeSeconds : MOTHER.leaveSeconds));
+      if (state.held) strength = 0.55;
+      else if (state.phase === 'arriving') strength = 0.6 * u * u;
+      else if (state.phase === 'charging') strength = 0.6 + 0.4 * u;
+      else if (state.phase === 'cutting') strength = 1;
+      else if (state.phase === 'leaving') strength = 0.6 * (1 - u);
+      if (state.held || state.phase === 'arriving' || state.phase === 'leaving') {
+        cx = g.position.x;
+        cz = g.position.z;
+      }
+    }
+    // The camera held still while it is overhead (not as it falls: the crash shakes).
+    ctx.systems.gamefeel.holdStill('mothership', strength > 0);
+    wind.updateWind(dt, strength, cx, cz);
   }
 
   /**
@@ -612,6 +653,8 @@ export function createMothershipSystem(ctx) {
     scorch = null;
     state.dim = 0;
     struck.clear();
+    wind.resetWind();
+    ctx.systems.gamefeel.holdStill('mothership', false);
   }
 
   /** @returns {void} */
@@ -619,6 +662,7 @@ export function createMothershipSystem(ctx) {
     resetMothership();
     if (light) Sim.three.scene.remove(light);
     light = null;
+    wind.disposeWind();
   }
 
   return {
