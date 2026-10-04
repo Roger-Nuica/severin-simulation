@@ -18,7 +18,9 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
  * One material for all of it (glowMaterial): dark metal, plus a per-vertex
  * glow colour (`aGlow`) added as emissive, so the green veins and red eyes
  * are the same draw call as the metal. Its `uGlow` uniform (material
- * .userData.glow) pulses or flares them all at once.
+ * .userData.glow) pulses or flares them all at once; `uTint`
+ * (material.userData.tint, a colour multiplying the glow) heats the green
+ * towards a searing lime as the swarm nears the encirclement.
  *
  * Six parts, each one merged geometry posed from its pivot: body, head,
  * left / right arm, left / right leg. The original builds them as meshes in
@@ -53,15 +55,18 @@ export const PARTS = /** @type {PartName[]} */ (['body', 'head', 'armL', 'armR',
 export function glowMaterial(glow = 1) {
   const material = new THREE.MeshStandardMaterial({ color: REPLICATOR.metal, metalness: 0.85, roughness: 0.32 });
   const uniform = { value: glow };
+  const tint = { value: new THREE.Color(1, 1, 1) };
   material.userData.glow = uniform;
+  material.userData.tint = tint;
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uGlow = uniform;
+    shader.uniforms.uTint = tint;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec3 aGlow;\nvarying vec3 vGlow;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uGlow;\nvarying vec3 vGlow;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vGlow * uGlow;');
+      .replace('#include <common>', '#include <common>\nuniform float uGlow;\nuniform vec3 uTint;\nvarying vec3 vGlow;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vGlow * uTint * uGlow;');
   };
   material.customProgramCacheKey = () => 'replicatorGlow';
   return material;

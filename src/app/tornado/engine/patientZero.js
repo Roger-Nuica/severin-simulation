@@ -4,7 +4,7 @@ import { bannerHost } from '../utils/banners.js';
 import { CHARACTERS } from './scale.js';
 import { REPLICATOR, PARTS, glowMaterial, withGlow, buildReplicatorGeometry, makePose, poseReplicator, partTurn } from './patientZero/model.js';
 import { createSwarm } from './patientZero/swarm.js';
-import { createEncircle } from './patientZero/encircle.js';
+import { createEncircle, ENCIRCLE } from './patientZero/encircle.js';
 
 /**
  * ===========================================================================
@@ -64,7 +64,13 @@ export const PZ = {
   burstBlocks: 36,
   warpOut: 0.4,         // seconds coming apart before a warp
   warpForm: 0.9,        // seconds building itself again where it went
-  attackRange: 7        // metres: claws up and out
+  attackRange: 7,       // metres: claws up and out
+  // The swarm heating up as it nears the encirclement (ENCIRCLE.trigger
+  // standing clones): the glow brighter, faster and shifted from toxic green
+  // to a searing lime; warnings at these counts.
+  heatTint: new THREE.Color(2.6, 1.35, 1.2),
+  heatFlare: 0.9,
+  heatWarnings: [10, 13]
 };
 
 /**
@@ -133,6 +139,11 @@ export function createPatientZeroSystem(ctx) {
   let linkTo = null;
   let flare = 1;
   let flareGoal = 1;
+  // How close the swarm is to the encirclement, 0..1, eased; the last count
+  // a warning was given at.
+  let heat = 0;
+  let warned = 0;
+  const tint = new THREE.Color();
   let clock = 0;
   /** @type {HTMLButtonElement|null} */
   let button = null;
@@ -497,6 +508,8 @@ export function createPatientZeroSystem(ctx) {
       w.form = Math.min(1, w.form + w.formRate * dt);
       if (w.form >= 1 && swarm) {
         swarm.ripple(w.pos.x, w.pos.z, 3 * w.size);
+        // A scorch of green left where it was built.
+        swarm.stain(w.pos.x, w.pos.z, w.size);
         ctx.systems.creatureSounds.play('snarl', w.pos, { pitch: ctx.systems.creatureSounds.pitchOf(w) });
       }
       return true;
@@ -770,9 +783,34 @@ export function createPatientZeroSystem(ctx) {
     // The light in them all: breathing, flaring at a bud and in the ring.
     if (!linkTo && encircle && encircle.phase() === 'idle') flareGoal = 1;
     flare += (flareGoal - flare) * Math.min(1, dt * 4);
-    const breathe = 0.85 + 0.15 * Math.sin(clock * 2.6);
-    if (cloneMat) cloneMat.userData.glow.value = flare * breathe;
-    if (originalMat) originalMat.userData.glow.value = 1.3 * Math.max(1, flare) * breathe;
+    // The heat: standing clones against the encirclement's count (full while
+    // it runs), the glow brighter, faster and hotter in colour as it climbs.
+    let standing = 0;
+    for (const c of clones) if (c.form >= 1 && !c.warp) standing++;
+    const ringing = !!encircle && encircle.phase() !== 'idle';
+    const heatGoal = ringing ? 1 : Math.min(1, standing / ENCIRCLE.trigger);
+    heat += (heatGoal - heat) * Math.min(1, dt * 1.5);
+    // One warning for the highest count crossed, however many at once.
+    let crossed = 0;
+    for (const n of PZ.heatWarnings) if (standing >= n && warned < n) crossed = n;
+    if (crossed && !ringing) {
+      warned = crossed;
+      ctx.events.emit('notice', { text: `☣ THE SWARM GROWS · ${standing} / ${ENCIRCLE.trigger}` });
+      if (sounds() && original) sounds().playShatter(original.pos.x, original.pos.z);
+    }
+    if (standing < PZ.heatWarnings[0]) warned = 0;
+    const h = heat * heat;
+    tint.setRGB(1, 1, 1).lerp(PZ.heatTint, h);
+    const breathe = 1 - (0.15 + 0.15 * heat) + (0.15 + 0.15 * heat) * Math.sin(clock * (2.6 + 6 * heat));
+    const level = flare + PZ.heatFlare * h;
+    if (cloneMat) {
+      cloneMat.userData.glow.value = level * breathe;
+      cloneMat.userData.tint.value.copy(tint);
+    }
+    if (originalMat) {
+      originalMat.userData.glow.value = 1.3 * Math.max(1, level) * breathe;
+      originalMat.userData.tint.value.copy(tint);
+    }
     writeInstances();
     writeOriginal(dt);
     writeLink();
@@ -787,6 +825,8 @@ export function createPatientZeroSystem(ctx) {
     if (swarm) swarm.clear();
     if (encircle) encircle.reset();
     flare = flareGoal = 1;
+    heat = 0;
+    warned = 0;
     if (button) button.disabled = false;
     bannerTimer = 0;
     if (banner) banner.classList.remove('visible');

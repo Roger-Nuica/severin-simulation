@@ -17,11 +17,16 @@ import { glowMaterial, REPLICATOR } from './model.js';
  *  - **burst**: a clone shot down falls apart -- its blocks thrown out,
  *    bouncing on the street, gone;
  *  - **ripple**: a ring of green light running out over the ground, under a
- *    clone finishing itself or a swarm arriving.
+ *    clone finishing itself or a swarm arriving;
+ *  - **stain**: where a clone was built, a scorch of toxic green on the
+ *    street -- a glowing blot speckled with stray blocks, flaring as it is
+ *    left, burning steady for SWARM.stainHold seconds, then fading over
+ *    SWARM.stainFade. The town fills with them as the swarm grows.
  *
  * One InstancedMesh of SWARM.max blocks (one draw call) with every block's
- * motion in fixed typed arrays, and a small pool of ripple rings; nothing is
- * allocated per frame. A block that would not fit is simply not sent.
+ * motion in fixed typed arrays, a small pool of ripple rings, and one
+ * InstancedMesh of SWARM.stains ground stains (additive, faded through its
+ * instance colours; the oldest is reused); nothing is allocated per frame. A block that would not fit is simply not sent.
  */
 
 export const SWARM = {
@@ -29,8 +34,65 @@ export const SWARM = {
   size: 0.075,
   gravity: 14,
   ripples: 10,
-  rippleSeconds: 0.7
+  rippleSeconds: 0.7,
+  stains: 60,
+  stainSize: 2.4,       // metres across, for a clone
+  stainHold: 10,        // seconds at full glow
+  stainFade: 15,        // seconds fading out
+  stainFlash: 0.4       // seconds of the bright flash when it is left
 };
+
+/**
+ * The stain's look, drawn once: a blot of green fading to its edge, ragged,
+ * with small lit squares in it (stray blocks) and dark cracks.
+ * @returns {THREE.CanvasTexture}
+ */
+function stainTexture() {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const g = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
+  // Seeded, so every run draws the same stain.
+  let state = 7;
+  const rand = () => {
+    state = (state * 9301 + 49297) % 233280;
+    return state / 233280;
+  };
+  // A ragged blot: overlapping soft circles.
+  for (let i = 0; i < 9; i++) {
+    const a = rand() * Math.PI * 2;
+    const r = rand() * 22;
+    const x = 64 + Math.cos(a) * r;
+    const y = 64 + Math.sin(a) * r;
+    const grad = g.createRadialGradient(x, y, 0, x, y, 30 + rand() * 18);
+    grad.addColorStop(0, 'rgba(90,255,120,0.55)');
+    grad.addColorStop(0.6, 'rgba(40,200,70,0.25)');
+    grad.addColorStop(1, 'rgba(0,80,20,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+  }
+  // Splash streaks out from the middle.
+  g.strokeStyle = 'rgba(70,240,100,0.35)';
+  for (let i = 0; i < 10; i++) {
+    const a = rand() * Math.PI * 2;
+    g.lineWidth = 1 + rand() * 2.5;
+    g.beginPath();
+    g.moveTo(64 + Math.cos(a) * 14, 64 + Math.sin(a) * 14);
+    g.lineTo(64 + Math.cos(a) * (36 + rand() * 24), 64 + Math.sin(a) * (36 + rand() * 24));
+    g.stroke();
+  }
+  // Stray blocks, lit.
+  for (let i = 0; i < 26; i++) {
+    const a = rand() * Math.PI * 2;
+    const r = Math.sqrt(rand()) * 40;
+    const s = 2 + rand() * 4;
+    g.fillStyle = rand() < 0.3 ? 'rgba(220,255,200,0.9)' : 'rgba(110,255,140,0.75)';
+    g.fillRect(64 + Math.cos(a) * r - s / 2, 64 + Math.sin(a) * r - s / 2, s, s);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
 
 /**
  * @param {THREE.Scene} scene
@@ -38,6 +100,7 @@ export const SWARM = {
  *   assemble: (fx: number, fy: number, fz: number, spread: number, tx: number, tz: number, n: number, seconds: number, scale?: number) => void,
  *   burst: (x: number, y: number, z: number, n: number, speed: number) => void,
  *   ripple: (x: number, z: number, radius: number, colour?: THREE.Color) => void,
+ *   stain: (x: number, z: number, size?: number) => void,
  *   update: (dt: number) => void,
  *   clear: () => void,
  *   dispose: () => void
@@ -100,6 +163,31 @@ export function createSwarm(scene) {
     scene.add(ring);
     ripples.push({ mesh: ring, material: m, t: 1, radius: 1 });
   }
+
+  // The stains on the ground.
+  const stainTex = stainTexture();
+  const stainGeo = new THREE.PlaneGeometry(1, 1);
+  stainGeo.rotateX(-Math.PI / 2);
+  const stainMat = new THREE.MeshBasicMaterial({
+    map: stainTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2
+  });
+  const stains = new THREE.InstancedMesh(stainGeo, stainMat, SWARM.stains);
+  stains.name = 'replicator_stains';
+  stains.frustumCulled = false;
+  stains.renderOrder = -1;
+  stains.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  const black = new THREE.Color(0, 0, 0);
+  for (let i = 0; i < SWARM.stains; i++) {
+    stains.setMatrixAt(i, zero);
+    stains.setColorAt(i, black);
+  }
+  stains.count = 0;
+  scene.add(stains);
+  const stainAge = new Float32Array(SWARM.stains).fill(-1);
+  let stainNext = 0;
+  let stainsLive = 0;
+  const stainColour = new THREE.Color();
 
   /** @returns {number} a free slot, or -1 when the swarm is full */
   function claim() {
@@ -198,10 +286,59 @@ export function createSwarm(scene) {
   }
 
   /**
+   * A stain left where a clone was built (the oldest reused when all are down).
+   * @param {number} x @param {number} z
+   * @param {number} [size] the figure's scale
+   * @returns {void}
+   */
+  function stain(x, z, size = 1) {
+    const i = stainNext;
+    stainNext = (stainNext + 1) % SWARM.stains;
+    if (stainAge[i] < 0) stainsLive++;
+    stainAge[i] = 0;
+    const across = SWARM.stainSize * size * (0.85 + Math.random() * 0.35);
+    q.setFromAxisAngle(sc.set(0, 1, 0), Math.random() * Math.PI * 2);
+    m4.compose(pos.set(x, 0.05, z), q, sc.set(across, 1, across));
+    stains.setMatrixAt(i, m4);
+    stains.count = Math.max(stains.count, i + 1);
+    stains.instanceMatrix.needsUpdate = true;
+  }
+
+  /**
+   * The stains' glow, a frame: the flash, the steady burn, the fade.
+   * @param {number} dt
+   * @returns {void}
+   */
+  function updateStains(dt) {
+    if (stainsLive === 0) return;
+    const total = SWARM.stainHold + SWARM.stainFade;
+    for (let i = 0; i < SWARM.stains; i++) {
+      if (stainAge[i] < 0) continue;
+      stainAge[i] += dt;
+      const age = stainAge[i];
+      if (age >= total) {
+        stainAge[i] = -1;
+        stainsLive--;
+        stains.setColorAt(i, black);
+        stains.setMatrixAt(i, zero);
+        stains.instanceMatrix.needsUpdate = true;
+        continue;
+      }
+      let level = age < SWARM.stainFlash ? 1 + 1.5 * (1 - age / SWARM.stainFlash)
+        : age < SWARM.stainHold ? 1 : 1 - (age - SWARM.stainHold) / SWARM.stainFade;
+      // A slow uneven smoulder.
+      level *= 0.85 + 0.15 * Math.sin(age * 2.3 + i * 1.7);
+      stains.setColorAt(i, stainColour.setRGB(level, level, level));
+    }
+    if (stains.instanceColor) stains.instanceColor.needsUpdate = true;
+  }
+
+  /**
    * @param {number} dt
    * @returns {void}
    */
   function update(dt) {
+    updateStains(dt);
     for (const r of ripples) {
       if (r.t >= 1) continue;
       r.t = Math.min(1, r.t + dt / SWARM.rippleSeconds);
@@ -270,8 +407,18 @@ export function createSwarm(scene) {
     mesh.instanceMatrix.needsUpdate = true;
   }
 
-  /** @returns {void} every block and ripple gone */
+  /** @returns {void} every block, ripple and stain gone */
   function clear() {
+    stainAge.fill(-1);
+    stainsLive = 0;
+    stainNext = 0;
+    for (let i = 0; i < SWARM.stains; i++) {
+      stains.setMatrixAt(i, zero);
+      stains.setColorAt(i, black);
+    }
+    stains.count = 0;
+    stains.instanceMatrix.needsUpdate = true;
+    if (stains.instanceColor) stains.instanceColor.needsUpdate = true;
     mode.fill(0);
     alive = 0;
     high = 0;
@@ -294,7 +441,12 @@ export function createSwarm(scene) {
       r.material.dispose();
     }
     ringGeo.dispose();
+    scene.remove(stains);
+    stains.dispose();
+    stainGeo.dispose();
+    stainMat.dispose();
+    stainTex.dispose();
   }
 
-  return { assemble, burst, ripple, update, clear, dispose };
+  return { assemble, burst, ripple, stain, update, clear, dispose };
 }
