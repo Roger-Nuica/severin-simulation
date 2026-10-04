@@ -27,6 +27,9 @@ import { createNetSystem } from './engine/net/system.js';
 import { createHeroSoundSystem } from './engine/sound/hero.js';
 import { createBlackHoleSoundSystem } from './engine/sound/blackHole.js';
 import { createKatanaSoundSystem } from './engine/sound/katana.js';
+import { createGrappleJetSoundSystem } from './engine/sound/grappleJet.js';
+import { createReplicatorSoundSystem } from './engine/sound/replicator.js';
+import { createDownwashSoundSystem } from './engine/sound/downwash.js';
 import { createEmpChargeSystem } from './engine/empCharge.js';
 import { createEmpHumSoundSystem } from './engine/sound/empHum.js';
 import { createCreatureSoundSystem } from './engine/sound/creatures.js';
@@ -808,6 +811,12 @@ export function createSimulation(container) {
   register('heroSound', createHeroSoundSystem(ctx));
   // The Katana's own voice (sound/katana.js): its own bus, no creature voices (R-046).
   register('katanaSound', createKatanaSoundSystem(ctx));
+  // The grappling hook's GET OVER HERE! and chain, the jump and the jetpack (sound/grappleJet.js).
+  register('grappleJetSound', createGrappleJetSoundSystem(ctx));
+  // Patient Zero the Replicator: its building, shattering, swarm call and shards (sound/replicator.js).
+  register('replicatorSound', createReplicatorSoundSystem(ctx));
+  // The mothership's downwash: roaring wind with a rotor's beat (sound/downwash.js).
+  register('downwashSound', createDownwashSoundSystem(ctx));
   const heroSystem = createHeroModeSystem(ctx);
   register('heroMode', heroSystem);
   const { initHero, updateHero, resetHero, disposeHero } = heroSystem;
@@ -1582,6 +1591,9 @@ export function createSimulation(container) {
     disposeHero();
     ctx.systems.heroSound.disposeHeroSound();
     ctx.systems.katanaSound.disposeKatanaSound();
+    ctx.systems.grappleJetSound.disposeGrappleJetSound();
+    ctx.systems.replicatorSound.disposeReplicatorSound();
+    ctx.systems.downwashSound.disposeDownwashSound();
     for (const { groundFx: { GroundSpray, PathTrack } } of tornadoRegistry.instances) {
       if (GroundSpray.points) {
         Sim.three.scene.remove(GroundSpray.points);

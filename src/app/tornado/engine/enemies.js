@@ -80,6 +80,9 @@ import { fullHealth, healthAfter, tableDamage } from './health/enemyDamage.js';
  * @property {(e: any) => import('three').Object3D|null} [object] what to
  *   move or dissolve, when it is not e.root / e.rig.root
  * @property {(e: any) => number} [size] metres across
+ * @property {(e: any, hit: Hit) => void} [wounded] a hit landed (accepted or
+ *   chipped) and it is still up: for the owner's hit feedback only (sparks,
+ *   a flinch); it changes nothing about the hit (Patient Zero, 2026-10-04)
  */
 
 /**
@@ -163,10 +166,13 @@ export function createEnemyRegistry(ctx) {
     const damage = kind.defeat ? tableDamage(kind.kind, h) : 0;
     if (!accepted && damage <= 0) return false;
     let stopped = accepted ? kind.damage(e, h) : false;
-    if (stopped || damage <= 0 || !kind.defeat) return stopped;
-    const left = healthAfter(healths.has(e) ? /** @type {number} */ (healths.get(e)) : fullHealth(kind.kind), damage);
-    healths.set(e, left);
-    return left <= 0 ? kind.defeat(e, h) : false;
+    if (!stopped && damage > 0 && kind.defeat) {
+      const left = healthAfter(healths.has(e) ? /** @type {number} */ (healths.get(e)) : fullHealth(kind.kind), damage);
+      healths.set(e, left);
+      if (left <= 0) stopped = kind.defeat(e, h);
+    }
+    if (!stopped && kind.wounded) kind.wounded(e, h);
+    return stopped;
   }
 
   /**

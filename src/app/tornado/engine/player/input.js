@@ -16,6 +16,8 @@
  *
  * Bindings (GAME_DESIGN.md "Hero Mode"):
  *   W A S D             run (the arrow keys do nothing, on request)
+ *   Space               jump; Space again in the air fires the jetpack
+ *                       (hero/jetpack.js)
  *   right mouse button  raise / lower the weapon
  *   left button, Enter  fire (Enter held charges the rifle; Enter at a car's
  *                       door gets in)
@@ -39,7 +41,7 @@
 
 // Keys whose browser default (scrolling, a menu) is stopped while the player
 // has the controls.
-const OWNED_KEYS = new Set(['KeyW', 'KeyS', 'KeyA', 'KeyD', 'Enter', 'NumpadEnter', 'KeyQ', 'KeyE', 'KeyR', 'KeyG', 'KeyC']);
+const OWNED_KEYS = new Set(['KeyW', 'KeyS', 'KeyA', 'KeyD', 'Enter', 'NumpadEnter', 'KeyQ', 'KeyE', 'KeyR', 'KeyG', 'KeyC', 'Space']);
 const MOVE_KEYS = { KeyW: 'up', KeyS: 'down', KeyA: 'left', KeyD: 'right' };
 
 /**

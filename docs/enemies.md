@@ -22,7 +22,7 @@ This keeps enemy logic modular while keeping one shared combat contract.
 - `engine/terminator.js` — EMP-resistant hostile units
 - `engine/trex.js` — cyber T-Rex logic
 - `engine/yeti.js` — hostile snow/beast variant
-- `engine/patientZero.js` — special hostile threat
+- `engine/patientZero.js` — special hostile threat, the Replicator: `patientZero/model.js` (the body, one glow material, six instanced parts for the clones), `patientZero/swarm.js` (the nanite blocks that build and break clones), `patientZero/encircle.js` (15 clones surround Roger at 100 m and close in, throwing shards); the original's second evolution after 75 s and the hit feedback (via the registry's optional `wounded` hook) are in `patientZero.js`; sound in `sound/replicator.js`
 - `engine/heroMode.js` / `heroWeapons.js` — Roger’s direct combat interactions
 
 Not every hostile actor is a separate class; some are registry-backed kinds using the same contract.

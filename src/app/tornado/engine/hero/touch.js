@@ -132,6 +132,10 @@ export function createHeroTouch(ctx, S, api) {
       abilityBox.appendChild(el);
       return { code: a.code, el };
     });
+    // Jump, and again in the air the jetpack, held to climb (hero/jetpack.js):
+    // Space down while the thumb is on it, up when it lifts.
+    const jump = button('ht-ability', '<b>🚀</b><span>Jump</span><i></i>', 'Jump · again in the air: jetpack, hold to climb');
+    abilityBox.appendChild(jump);
     root.append(base, abilityBox, weapon, aim, car, fire, bots, exit);
     container.appendChild(root);
     ui = { base, knob, fire, aim, weapon, car, bots, abilities };
@@ -169,6 +173,7 @@ export function createHeroTouch(ctx, S, api) {
       if (panelButton && !panelButton.disabled) panelButton.click();
     });
     for (const a of abilities) hold(a.el, () => tapKey(a.code));
+    hold(jump, () => input().push({ type: 'keydown', code: 'Space', repeat: false }), () => input().push({ type: 'keyup', code: 'Space' }));
 
     // The thumbs on the game itself: the canvas (Hero Mode turns the orbit
     // controls off, so nothing else wants these touches). preventDefault on

@@ -10,6 +10,7 @@ import { createHeroPlasma } from './hero/plasma.js';
 import { createHeroCar } from './hero/car.js';
 import { createHeroPursuers } from './hero/pursuers.js';
 import { createHeroScreen } from './hero/screen.js';
+import { createHeroJetpack } from './hero/jetpack.js';
 import { ENERGY } from './player/energy.js';
 import { fullHealth } from './health/enemyDamage.js';
 export { SHIP_DAMAGE } from './hero/config.js';
@@ -143,6 +144,7 @@ export { SHIP_DAMAGE } from './hero/config.js';
  *   car.js       getting in, driving, getting out
  *   pursuers.js  the machines after him
  *   screen.js    death, cameras, HUD and messages
+ *   jetpack.js   the jump and the jetpack (Space), roofs underfoot
  * and this file: set-up, start and end, the frame, reset and dispose. Their
  * shared state is the one object S made below; each module calls the
  * others' functions through `api`.
@@ -242,6 +244,19 @@ export function createHeroModeSystem(ctx) {
       zipZ: 0,
       zipSpeed: 0,
       zipTotal: 0,
+      // Off the ground (hero/jetpack.js): his feet's height (a roof he stands
+      // on included), how fast it changes, whether he is in the air, the
+      // jetpack's burn left and whether this flight has had it, his speed
+      // over the ground in the air, and what a jump from first person takes.
+      alt: 0,
+      vy: 0,
+      airborne: false,
+      jetBurn: 0,
+      jetUsed: false,
+      airVx: 0,
+      airVz: 0,
+      aimVx: 0,
+      aimVz: 0,
       dazeHeading: 0,
       dazeSpin: 0,
       flingX: 0,
@@ -276,7 +291,8 @@ export function createHeroModeSystem(ctx) {
       tornadoes: 1
     },
     // W A S D: the only movement keys, in every mode (the arrows do nothing).
-    keys: { up: false, down: false, left: false, right: false },
+    // jump: Space held (the jetpack climbs while it is, hero/jetpack.js).
+    keys: { up: false, down: false, left: false, right: false, jump: false },
     /** The touch joystick, analog (hero/touch.js): x right, y down; zero from the keyboard. */
     stick: { x: 0, y: 0 },
     /** The touch controls are on for this run (hero/touch.js). */
@@ -363,6 +379,7 @@ export function createHeroModeSystem(ctx) {
     createHeroCar(ctx, S, api),
     createHeroPursuers(ctx, S, api),
     createHeroScreen(ctx, S, api),
+    createHeroJetpack(ctx, S, api),
     createHeroTouch(ctx, S, api),
     {  }
   );
@@ -385,7 +402,7 @@ export function createHeroModeSystem(ctx) {
       rig: () => S.katanaRig || null,
       position: () => S.roger.mesh.position,
       blockedAt: (x, z, pad) => api.blockedAt(x, z, pad),
-      pushOut: (p, pad) => api.pushOut(p, pad)
+      pushOut: (p, pad) => api.pushOut(p, pad, S.state.alt)
     }
   });
 
@@ -400,6 +417,8 @@ export function createHeroModeSystem(ctx) {
     ctx.events.on('notice', ({ text }) => api.notify(text));
     ctx.events.on('empPulse', ({ x, z, radius }) => api.empSweep(x, z, radius));
     ctx.events.on('playerHurt', (hurt) => api.hurtFlash(hurt));
+    // The jetpack's slot among the abilities, and its smoke (hero/jetpack.js).
+    api.initJetpack();
     // Roger's own pursuers, in the shared register of enemies
     // (engine/enemies.js).
     ctx.systems.enemies.registerKind({
@@ -444,7 +463,7 @@ export function createHeroModeSystem(ctx) {
       <div class="hero-row hero-door">🚗 ENTER — get in the car</div>
       <div class="hero-row hero-drive">🚗 DRIVING · E / Q / Esc — get out</div>
       <div class="hero-msg"></div>
-      <div class="hero-keys">W A S D run · Right-click raise / lower weapon · Wheel switch weapon<br>Click or Enter fire · rifle: hold 2 s for a MEGA BEAM · Q time slow (bullet time with the minigun) · E teleport · R EMP · G grappling hook · C telekinesis (C again or click to throw) · V invincible<br>T Landing Support (then R samurai · T rocket · Esc cancel) · Enter at a car's glowing door to drive</div>`;
+      <div class="hero-keys">W A S D run · Space jump (again in the air: JETPACK) · Right-click raise / lower weapon · Wheel switch weapon<br>Click or Enter fire · rifle: hold 2 s for a MEGA BEAM · Q time slow (bullet time with the minigun) · E teleport · R EMP · G grappling hook · C telekinesis (C again or click to throw) · V invincible<br>T Landing Support (then R samurai · T rocket · Esc cancel) · Enter at a car's glowing door to drive</div>`;
     container.appendChild(S.hud);
 
     S.over = document.createElement('div');
@@ -511,6 +530,7 @@ export function createHeroModeSystem(ctx) {
 
     const spawn = api.pickSpawn();
     S.roger = api.buildRoger(spawn.x, spawn.z);
+    api.attachJetpack(S.roger);
     Sim.three.scene.add(S.roger.mesh);
     // Facing the middle of town. There is no bunker to run to any more, and
     // nothing comes after him until the Terminators are sent for from the
@@ -528,6 +548,8 @@ export function createHeroModeSystem(ctx) {
       stepTimer: 0.5, hintTimer: HERO.hintSeconds, msgTimer: 0, aimKind: 'sky', frozen: 0, coopDown: false,
       zipActive: false
     });
+    api.landNow(0);
+    api.registerJetpack();
     S.weapons.startRun();
     // A fresh energy bar for the run (engine/player/energy.js).
     ctx.systems.energy.resetEnergy();
@@ -585,6 +607,7 @@ export function createHeroModeSystem(ctx) {
       S.roger = null;
     }
     api.removePursuers();
+    api.resetJetpack();
     for (const obj of [S.overhead, S.stars, S.beam, S.beamSplash, S.burst, S.doorGlow]) if (obj) Sim.three.scene.remove(obj);
     if (S.viewRifle) Sim.three.scene.remove(S.viewRifle.group);
     if (S.katanaRig) S.katanaRig.disposeView();
@@ -648,6 +671,9 @@ export function createHeroModeSystem(ctx) {
     // world would stay slow under the GAME OVER card.
     ctx.systems.abilities.updateAbilities(dt);
 
+    // The jetpack's flames, smoke and roar (cut off by anything but his feet).
+    api.updateJetFx(dt);
+
     if (S.state.phase === 'dying') {
       api.updateDeath(dt, rawDt);
       // The chase itself carries on around the body.
@@ -666,6 +692,11 @@ export function createHeroModeSystem(ctx) {
     if (S.state.frozen > 0) S.state.frozen = Math.max(0, S.state.frozen - dt);
     if (S.state.phase === 'driving') api.updateCar(dt);
     else if (!(S.state.frozen > 0) && !S.state.coopDown) api.updateRoger(dt);
+    else if (S.state.airborne) {
+      // Frozen or knocked down in the air: he still comes down.
+      api.stepAir(dt);
+      S.roger.mesh.position.y = S.state.alt;
+    }
     api.updateDoorCue();
     // Time Slow slows the machines with the rest of the world (its time
     // group, engine/time.js); Roger runs at his own pace.
@@ -726,6 +757,9 @@ export function createHeroModeSystem(ctx) {
     p.x = x;
     p.z = z;
     api.pushOut(p, HERO.pad);
+    // Put down on the street, out of any flight.
+    api.landNow(0);
+    p.y = 0;
     api.placeFollowCamera(1);
     return true;
   }
@@ -740,7 +774,7 @@ export function createHeroModeSystem(ctx) {
    */
   function zipRoger(x, z, speed) {
     const target = api.rogerTarget();
-    if (!target || !target.onFoot || S.state.frozen > 0 || S.state.coopDown || S.state.phase === 'dazed') return false;
+    if (!target || !target.onFoot || S.state.frozen > 0 || S.state.coopDown || S.state.phase === 'dazed' || S.state.airborne) return false;
     Object.assign(S.state, { zipActive: true, zipX: x, zipZ: z, zipSpeed: speed, zipTotal: Math.hypot(x - target.x, z - target.z) });
     return true;
   }
@@ -815,6 +849,7 @@ export function createHeroModeSystem(ctx) {
   /** @returns {void} */
   function disposeHero() {
     resetHero();
+    api.disposeJetpack();
     if (S.weapons) S.weapons.dispose();
     api.disposeTouch();
     for (const el of [S.hud, S.crosshair, S.banner, S.over, S.hurt]) if (el && el.parentNode) el.parentNode.removeChild(el);
@@ -830,7 +865,18 @@ export function createHeroModeSystem(ctx) {
       S.showcase = { targets, t: 0, shot: -1 };
     },
     initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, rogerAim: () => (S.state.phase === 'aiming' ? S.aimDir : null), standable, freezeRoger,
-    zipRoger, rogerZipping: () => S.state.zipActive, stopZip: () => { S.state.zipActive = false; }, solidAlong: api.solidAlong, rogerFrozen: () => S.state.frozen > 0, rogerShielded: () => S.state.spawnShield > 0 || S.state.invincible, rogerPhase: () => S.state.phase, killRoger: api.killRoger, hitArea: api.hitArea, chipTornado: api.chipTornado,
+    zipRoger, rogerZipping: () => S.state.zipActive, stopZip: () => { S.state.zipActive = false; }, solidAlong: api.solidAlong, rogerFrozen: () => S.state.frozen > 0, rogerAirborne: () => S.state.airborne,
+    // The mothership's downwash (engine/mothershipWind.js): Roger shoved by
+    // the wind, on his feet or in the air, kept out of the buildings.
+    pushRoger: (/** @type {number} */ dx, /** @type {number} */ dz) => {
+      if (!S.Hero.active || !S.roger || S.state.coopDown) return;
+      const ph = S.state.phase;
+      if (ph !== 'running' && ph !== 'aiming' && ph !== 'dazed') return;
+      const p = S.roger.mesh.position;
+      p.x += dx;
+      p.z += dz;
+      api.pushOut(p, HERO.pad * 0.5, S.state.alt);
+    }, rogerHeight: () => (S.roger ? S.roger.mesh.position.y : 0), rogerShielded: () => S.state.spawnShield > 0 || S.state.invincible, rogerPhase: () => S.state.phase, killRoger: api.killRoger, hitArea: api.hitArea, chipTornado: api.chipTornado,
     resetHero, disposeHero,
     // Co-op (engine/net/system.js): Roger's pose for the shared snapshot, and
     // the down-not-dead state while a teammate can still revive him.

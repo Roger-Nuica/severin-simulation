@@ -490,7 +490,7 @@ export function createHeroPlasma(ctx, S, api) {
     S.state.ringTimer -= dt;
     const total = HERO.megaRingSeconds + (HERO.megaRings - 1) * 0.1;
     const since = total - S.state.ringTimer;
-    const from = S.viewRifle ? S.viewRifle.muzzle.getWorldPosition(S.scratch) : S.scratch.copy(S.roger.mesh.position).setY(HERO.muzzleHeight);
+    const from = S.viewRifle ? S.viewRifle.muzzle.getWorldPosition(S.scratch) : S.scratch.copy(S.roger.mesh.position).setY(S.state.alt + HERO.muzzleHeight);
     const dir = S.scratchB.subVectors(S.beamTo, from);
     const length = dir.length() || 1;
     dir.divideScalar(length);
@@ -770,7 +770,7 @@ export function createHeroPlasma(ctx, S, api) {
     S.state.beamTimer -= dt;
     const from = S.state.phase === 'aiming' && S.viewRifle
       ? S.viewRifle.muzzle.getWorldPosition(S.scratch)
-      : (S.muzzle ? S.muzzle.getWorldPosition(S.scratch) : S.scratch.copy(S.roger.mesh.position).setY(HERO.muzzleHeight));
+      : (S.muzzle ? S.muzzle.getWorldPosition(S.scratch) : S.scratch.copy(S.roger.mesh.position).setY(S.state.alt + HERO.muzzleHeight));
     placeBeam(from, S.beamTo);
     const k = Math.max(0, S.state.beamTimer / S.state.beamLength);
     const flicker = 0.85 + 0.15 * Math.random();
