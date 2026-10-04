@@ -72,8 +72,24 @@ export const stepRunCycle = (st, x, z, dt, stride, runSpeed) => {
 };
 
 /**
- * Poses the limbs of a Roger for a cycle (legs and arms swing in opposition).
- * @param {{legL: {rotation: {x: number}}, legR: {rotation: {x: number}}, armL: {rotation: {x: number}}, armR: {rotation: {x: number}}}} limbs
+ * How far a knee bends at a point of the stride: most while that leg swings
+ * forward under the body (the foot lifted clear), a little while it pushes
+ * off, straight at rest. The left leg swings forward while cos(phase) < 0
+ * (its hip angle is sin(phase) times the swing).
+ * @param {number} phase Leg-cycle radians.
+ * @param {number} amount 0 to 1, how fast he runs.
+ * @param {boolean} left The left leg.
+ * @returns {number} The knee's bend, radians (the shin back).
+ */
+export const kneeBend = (phase, amount, left) => {
+  const c = Math.cos(phase);
+  return amount * (0.15 + 1.05 * Math.max(0, left ? -c : c));
+};
+
+/**
+ * Poses the limbs of a Roger for a cycle (legs and arms swing in opposition,
+ * the knees bending when the figure has them).
+ * @param {{legL: {rotation: {x: number}}, legR: {rotation: {x: number}}, armL: {rotation: {x: number}}, armR: {rotation: {x: number}}, kneeL?: {rotation: {x: number}}, kneeR?: {rotation: {x: number}}}} limbs
  * @param {number} phase Leg-cycle radians.
  * @param {number} amount 0 to 1.
  * @returns {void}
@@ -84,6 +100,8 @@ export const swingLimbs = (limbs, phase, amount) => {
   limbs.legR.rotation.x = -s * 0.9;
   limbs.armL.rotation.x = -s * 0.6;
   limbs.armR.rotation.x = s * 0.6;
+  if (limbs.kneeL) limbs.kneeL.rotation.x = kneeBend(phase, amount, true);
+  if (limbs.kneeR) limbs.kneeR.rotation.x = kneeBend(phase, amount, false);
 };
 
 /**

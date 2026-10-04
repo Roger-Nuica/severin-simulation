@@ -1674,10 +1674,6 @@ body.ship-cutscene .minimap {
   position: absolute; left: 0; top: 0; bottom: 0; width: 100%;
   background: #7fd6ff; box-shadow: 0 0 8px rgba(80, 180, 255, 0.8);
 }
-.hero-hud .hero-cellpct { color: #7fd6ff; min-width: 3.2em; }
-.hero-hud.low .hero-cell i { background: #ff8a6a; box-shadow: 0 0 8px rgba(255, 110, 70, 0.8); }
-.hero-hud.low .hero-cellpct { color: #ff8a6a; }
-.hero-hud .hero-arrow { display: inline-block; color: #ffb627; font-size: 14px; }
 /* The HEALTH bar (engine/health): green, red when low. While it regenerates
    it glows, the pulse growing with --glow (0 to 1, set by updateHud); the
    glow ends at once on damage because --glow drops to 0. Hidden with the
@@ -1745,20 +1741,10 @@ body.ship-cutscene .minimap {
 .hero-hud .hero-epct { color: #ffd35a; min-width: 3.2em; }
 .hero-hud .hero-energy.charging .hero-ebar i { box-shadow: 0 0 8px rgba(255, 200, 80, 0.9); }
 .hero-hud .hero-energy.charging .hero-epct { color: #fff3c4; }
-.hero-hud .hero-threat { color: #ffb3a6; }
-.hero-hud .hero-blip {
-  width: 9px; height: 9px; border-radius: 50%;
-  background: #ff3b30; box-shadow: 0 0 8px #ff3b30;
-  animation: hero-blip 1s ease-in-out infinite;
-}
 .hero-hud.danger { border-color: rgba(255, 60, 40, 0.8); box-shadow: 0 0 18px rgba(255, 40, 20, 0.35); }
 .hero-hud .hero-msg { min-height: 1.3em; color: #ffffff; }
 .hero-hud .hero-keys { display: none; font-weight: 600; font-size: 10px; letter-spacing: 0.6px; color: var(--text-dim); text-transform: none; }
 .hero-hud.hint .hero-keys { display: block; }
-@keyframes hero-blip {
-  0%, 100% { opacity: 0.25; transform: scale(0.8); }
-  50% { opacity: 1; transform: scale(1.25); }
-}
 /* Hero Mode aim: a Counter-Strike crosshair -- four ticks round a gap that
    opens with each shot and while walking (--gap, set per frame), and a dot --
    green, red over something the plasma beam would hit hard. */
@@ -1791,6 +1777,13 @@ body.ship-cutscene .minimap {
 }
 /* In first person the HUD steps out of the way of the view. */
 .hero-hud.aiming { opacity: 0.75; }
+/* Health and energy ride over Roger's head on foot (hero/models.js
+   buildOverhead); the HUD carries them only where that is out of sight:
+   first person and behind the wheel. */
+.hero-hud:not(.aiming):not(.driving) .hero-health,
+.hero-hud:not(.aiming):not(.driving) .hero-energy { display: none; }
+/* On a phone, a HUD with nothing to say is not drawn at all. */
+body.hero-touch-on .hero-hud.quiet { display: none; }
 .hero-banner {
   position: fixed; left: 50%; top: 16%;
   transform: translate(-50%, -6px);
@@ -1831,8 +1824,6 @@ body.ship-cutscene .minimap {
 .hero-hud.door .hero-door { display: flex; animation: hero-door-pulse 0.9s ease-in-out infinite alternate; }
 .hero-hud.driving .hero-drive { display: flex; }
 @keyframes hero-door-pulse { from { opacity: 0.6; } to { opacity: 1; } }
-.hero-hud.clear .hero-blip { display: none; }
-.hero-hud.clear .hero-threat { color: #9fe4ff; }
 /* Banner looks: electric blue for the machine going down (a win), red for Roger. */
 .hero-banner.electric .title {
   color: #d8f6ff;
@@ -2202,6 +2193,12 @@ body.hero-touch-on #fps { display: none !important; }
   top: calc(10px + var(--safe-t)); right: calc(10px + var(--safe-r));
   width: 44px; height: 44px; min-width: 44px; min-height: 44px; font-size: 18px;
 }
+.ht-bots {
+  top: calc(10px + var(--safe-t)); right: calc(62px + var(--safe-r));
+  width: 44px; height: 44px; min-width: 44px; min-height: 44px; font-size: 20px;
+  border-color: rgba(255, 90, 60, 0.75);
+}
+.ht-bots.off { opacity: 0.35; }
 /* The abilities: a column over the weapon button (portrait), a row along the top (landscape). */
 .ht-abilities {
   position: absolute; right: calc(20px + var(--safe-r)); bottom: calc(184px + var(--safe-b));
@@ -2221,15 +2218,16 @@ body.hero-touch-on #fps { display: none !important; }
 .hero-touch.driving .ht-abilities, .hero-touch.driving .ht-aim, .hero-touch.driving .ht-weapon, .hero-touch.driving .ht-fire { display: none; }
 
 @media (orientation: landscape) and (max-height: 520px) {
-  .ht-abilities { flex-direction: row; top: calc(10px + var(--safe-t)); bottom: auto; right: calc(64px + var(--safe-r)); }
+  .ht-abilities { flex-direction: row; top: calc(10px + var(--safe-t)); bottom: auto; right: calc(116px + var(--safe-r)); }
   .ht-ability { width: 48px; height: 48px; }
   .ht-stick { left: calc(100px + var(--safe-l)); bottom: calc(80px + var(--safe-b)); }
+  body.hero-touch-on .hero-hud { right: calc(400px + env(safe-area-inset-right, 0px)); }
 }
 
 /* The Hero HUD as a strip along the top. */
 body.hero-touch-on .hero-hud {
   top: calc(8px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px));
-  right: calc(62px + env(safe-area-inset-right, 0px)); bottom: auto;
+  right: calc(114px + env(safe-area-inset-right, 0px)); bottom: auto;
   min-width: 0; max-width: none; padding: 5px 9px;
   flex-direction: row; flex-wrap: wrap; gap: 3px 12px;
   font-size: 9px; letter-spacing: 0.6px; border-radius: 10px;
@@ -2237,7 +2235,6 @@ body.hero-touch-on .hero-hud {
 body.hero-touch-on .hero-hud .hero-row { gap: 4px; }
 body.hero-touch-on .hero-hud .hero-cell { width: 44px; height: 5px; }
 body.hero-touch-on .hero-hud .hero-ebar i { width: 5px; height: 6px; }
-body.hero-touch-on .hero-hud .hero-arrow { font-size: 11px; }
 body.hero-touch-on .hero-hud .hero-name,
 body.hero-touch-on .hero-hud .hero-weapon,
 body.hero-touch-on .hero-hud .hero-abilities,

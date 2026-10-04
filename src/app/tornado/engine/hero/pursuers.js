@@ -26,16 +26,16 @@ export function createHeroPursuers(ctx, S, api) {
   // ---------------------------------------------------------------------
 
   /**
-   * A machine ~pursuerDistance behind Roger, on the far side of him from the
-   * bunker, turned `bearing` off that line: at the start, and again when one
-   * has been killed and reboots.
-   * @param {number} bearing radians off the line away from the bunker
+   * A machine ~pursuerDistance behind Roger (the way he is not facing),
+   * turned `bearing` off that line: when sent, and again when one has been
+   * killed and reboots.
+   * @param {number} bearing radians off the line behind him
    * @param {number} kills times this machine has already been brought down
    * @returns {Object} the machine
    */
   function spawnPursuer(bearing, kills) {
     const r = S.roger.mesh.position;
-    const away = Math.atan2(r.x - S.bunker.x, r.z - S.bunker.z) + bearing;
+    const away = S.state.heading + Math.PI + bearing;
     let px = r.x;
     let pz = r.z;
     for (let k = 0; k < 12; k++) {

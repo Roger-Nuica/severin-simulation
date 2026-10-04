@@ -13,7 +13,7 @@ import { IMPACT_SCORE } from '../damage/config.js';
 import { HEALTH } from '../health/config.js';
 import { glowLevel } from '../health/state.js';
 import { mayHurtPlayer, splashAmount, rayBodyDistance, inSector } from '../health/friendlyFire.js';
-import { dressAsRoger, rogerLimbs, createRogerTag, newOwned, disposeRoger } from '../hero/rogerLook.js';
+import { dressAsRoger, rogerLimbs, newOwned, disposeRoger } from '../hero/rogerLook.js';
 import { rogerStyle, newRunCycle, stepRunCycle, swingLimbs, newCameraPose, followCamera, wheelHtml } from './rogerView.js';
 import { createHeroRequests, heroRequestOutcome, mayRequestLock, HERO_FLAG_SECONDS } from './heroRequest.js';
 
@@ -397,8 +397,8 @@ export function createNetSystem(ctx) {
   }
 
   /**
-   * A guest's figure on the host: Roger's costume in the guest's colours with a
-   * name tag (hero/rogerLook.js), standing at (x, z). Not a town person: it is
+   * A guest's figure on the host: Roger's costume in the guest's colours
+   * (hero/rogerLook.js), standing at (x, z). Not a town person: it is
    * not in the environment's lists, only in the scene.
    * @param {string} id Guest id.
    * @param {number} x
@@ -411,7 +411,6 @@ export function createNetSystem(ctx) {
     const owned = newOwned();
     const style = rogerStyle(id);
     dressAsRoger(obj.mesh, owned.keep, { tee: style.tee });
-    obj.mesh.add(createRogerTag(style.label, style.accent, owned.keep));
     Sim.three.scene.add(obj.mesh);
     S.avatars.set(id, { obj, cd: 0, tpCd: 0, lastAbil: 0, lastUse: false, flame: { tick: 0, shooter: id }, run: newRunCycle(), owned, limbs: rogerLimbs(obj.mesh) });
   }
@@ -1110,8 +1109,8 @@ export function createNetSystem(ctx) {
 
   /**
    * A player as Roger on the peer: the town's person figure dressed in his
-   * costume (hero/rogerLook.js), in the player's colours with a name tag. It
-   * owns its geometry, materials and tag texture, released by `disposeProxy`.
+   * costume (hero/rogerLook.js), in the player's colours. It owns its
+   * geometry and materials, released by `disposeProxy`.
    * @param {number} id Player id from the snapshot row.
    * @returns {THREE.Object3D} The figure's root, scaled like a person.
    */
@@ -1122,7 +1121,6 @@ export function createNetSystem(ctx) {
     const owned = newOwned();
     const style = rogerStyle(id);
     dressAsRoger(root, owned.keep, { tee: style.tee });
-    root.add(createRogerTag(style.label, style.accent, owned.keep));
     root.userData.owned = owned;
     root.userData.run = newRunCycle();
     root.userData.limbs = rogerLimbs(root);

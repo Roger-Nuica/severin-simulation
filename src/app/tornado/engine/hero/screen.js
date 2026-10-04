@@ -261,7 +261,7 @@ export function createHeroScreen(ctx, S, api) {
         root.rotation.x -= dt * 3;
         root.rotation.z += dt * 2;
       }
-      S.nameTag.position.set(root.position.x, root.position.y + HERO.tagHeight, root.position.z);
+      S.overhead.position.set(root.position.x, root.position.y + HERO.overheadHeight, root.position.z);
       const cam = Sim.three.camera;
       S.camGoal.set(root.position.x + HERO.followBack * 0.6, HERO.followHeight * 1.2, root.position.z + HERO.followBack * 0.6);
       cam.position.lerp(S.camGoal, Math.min(1, rawDt * 3));
@@ -337,6 +337,49 @@ export function createHeroScreen(ctx, S, api) {
   }
 
   /**
+   * The Terminators coming in (terminator.js, the panel's button): a cut to
+   * each of the first two in turn, HERO.showcaseShot seconds a shot, from
+   * low on the side facing Roger with a slow push in, then back to him. The
+   * player keeps the controls throughout.
+   * @param {number} rawDt
+   * @returns {boolean} whether it placed the camera (false once it is over)
+   */
+  function placeShowcaseCamera(rawDt) {
+    const sc = S.showcase;
+    if (!sc) return false;
+    sc.t += rawDt;
+    const shot = Math.floor(sc.t / HERO.showcaseShot);
+    if (shot >= sc.targets.length) {
+      S.showcase = null;
+      return false;
+    }
+    const target = sc.targets[shot];
+    const r = S.roger.mesh.position;
+    const cam = Sim.three.camera;
+    // From the machine toward Roger, a little to one side, so he is in the
+    // back of the shot when the two line up.
+    let dx = r.x - target.x;
+    let dz = r.z - target.z;
+    const d = Math.hypot(dx, dz) || 1;
+    dx /= d;
+    dz /= d;
+    const side = shot % 2 ? 1 : -1;
+    const u = (sc.t % HERO.showcaseShot) / HERO.showcaseShot;
+    const dist = 8.5 - u * 2.5;
+    S.camGoal.set(target.x + dx * dist - dz * side * 2.4, 2.2 - u * 0.5, target.z + dz * dist + dx * side * 2.4);
+    if (shot !== sc.shot) {
+      // A cut, not a pan, between the two.
+      sc.shot = shot;
+      cam.position.copy(S.camGoal);
+    } else {
+      cam.position.lerp(S.camGoal, Math.min(1, rawDt * 4));
+    }
+    Sim.three.controls.target.set(target.x, 1.6, target.z);
+    cam.lookAt(Sim.three.controls.target);
+    return true;
+  }
+
+  /**
    * First person: at Roger's eyes, looking where the mouse points, with the
    * rifle held in front in the lower right. Eased in over a few frames from
    * the follow camera, then locked to the look exactly.
@@ -405,8 +448,6 @@ export function createHeroScreen(ctx, S, api) {
    */
   function updateHud(threat, rawDt) {
     if (!S.hud) return;
-    /** @type {HTMLElement} */ (S.hud.querySelector('.hero-cell i')).style.width = `${S.state.cell.toFixed(0)}%`;
-    S.hud.querySelector('.hero-cellpct').textContent = `${Math.floor(S.state.cell)}%`;
     const wname = S.hud.querySelector('.hero-wname');
     wname.textContent = S.weapons.hudLine();
     wname.style.color = S.weapons.hudColour();
@@ -462,34 +503,20 @@ export function createHeroScreen(ctx, S, api) {
       S.hud.querySelector('.hero-epct').textContent = `${Math.round(level * 100)}%`;
     }
     S.hud.querySelector('.hero-energy').classList.toggle('charging', ctx.systems.energy.flashing());
+    // The same two over his head (hero/models.js drawOverhead): on foot that
+    // is where they are read; the HUD shows them only in first person and in
+    // a car, where the bars over his head are out of sight (tornado.css).
+    if (S.overhead && health) {
+      api.drawOverhead(S.overhead, health.state('0').value / HEALTH.max, health.glow('0'), level, ENERGY.segments);
+    }
     S.hud.querySelector('.hero-abilities').textContent = ctx.systems.abilities.hudLine();
-    S.hud.classList.toggle('low', S.state.cell < HERO.cellCost);
     const chargePct = (S.state.charge / HERO.chargeSeconds) * 100;
     /** @type {HTMLElement} */ (S.hud.querySelector('.hero-chargebar i')).style.width = `${chargePct.toFixed(0)}%`;
     S.hud.querySelector('.hero-chargepct').textContent = S.state.megaReady ? 'MEGA' : `${S.state.charge.toFixed(1)} s`;
     if (S.crosshair) S.crosshair.style.setProperty('--charge', `${(chargePct / 100).toFixed(3)}`);
-    const p = S.roger.mesh.position;
-    const bx = S.bunker.x - p.x;
-    const bz = S.bunker.z - p.z;
-    S.hud.querySelector('.hero-dist').textContent = `${Math.round(Math.hypot(bx, bz))} m`;
-    // The arrow points the way to the bunker as seen on screen: up is the
-    // way the camera looks.
     const cam = Sim.three.camera;
-    cam.getWorldDirection(S.scratch);
-    const cl = Math.hypot(S.scratch.x, S.scratch.z) || 1;
-    const fx = S.scratch.x / cl;
-    const fz = S.scratch.z / cl;
-    const across = -fz * bx + fx * bz;
-    const ahead = fx * bx + fz * bz;
-    /** @type {HTMLElement} */ (S.hud.querySelector('.hero-arrow')).style.transform = `rotate(${Math.atan2(across, ahead)}rad)`;
-    // Nothing hunting him: the tracker says why and stops pulsing.
-    const hunting = Number.isFinite(threat);
-    const idle = S.pursuers.every(unit => unit.p.state === 'gone') ? 'DOWN FOR GOOD'
-      : S.pursuers.some(unit => unit.p.state === 'down') ? 'REBOOTING…' : 'SHORTING OUT';
-    S.hud.querySelector('.hero-tdist').textContent = hunting ? `${Math.round(threat)} m` : idle;
-    S.hud.classList.toggle('clear', !hunting);
-    const blip = /** @type {HTMLElement} */ (S.hud.querySelector('.hero-blip'));
-    blip.style.animationDuration = `${THREE.MathUtils.clamp(threat / 60, 0.18, 1.4).toFixed(2)}s`;
+    // A machine closing in tints the HUD's frame (its TERMINATOR row and the
+    // bunker's distance went 2026-10-03).
     S.hud.classList.toggle('danger', threat < 25);
     const charge = ctx.systems.empCharge ? ctx.systems.empCharge.chargedTimeLeft() : 0;
     S.hud.classList.toggle('charged', charge > 0);
@@ -503,6 +530,11 @@ export function createHeroScreen(ctx, S, api) {
       S.state.hintTimer -= rawDt;
       S.hud.classList.toggle('hint', S.state.hintTimer > 0);
     }
+    // Nothing in it worth a box (on a phone the HUD is then hidden): on
+    // foot, no message, no EMP charge, not invincible, no car door, no partner.
+    const msg = /** @type {HTMLElement} */ (S.hud.querySelector('.hero-msg'));
+    S.hud.classList.toggle('quiet', S.state.phase !== 'aiming' && S.state.phase !== 'driving' && !msg.textContent
+      && charge <= 0 && !S.state.invincible && !S.hud.classList.contains('door') && partnerHp < 0);
 
     if (S.crosshair && S.state.phase === 'aiming') {
       // What the beam would hit, checked each frame: red over anything it
@@ -522,5 +554,5 @@ export function createHeroScreen(ctx, S, api) {
     }
   }
 
-  return { showBanner, notify, flashMessage, toggleInvincible, killRoger, hitArea, announce, checkChasm, updateDeath, hurtFlash, clearHurt, placeFollowCamera, placeAimCamera, placeDeathCamera, updateHud };
+  return { showBanner, notify, flashMessage, toggleInvincible, killRoger, hitArea, announce, checkChasm, updateDeath, hurtFlash, clearHurt, placeFollowCamera, placeAimCamera, placeShowcaseCamera, placeDeathCamera, updateHud };
 }

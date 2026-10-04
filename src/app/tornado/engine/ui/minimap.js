@@ -459,10 +459,8 @@ export function createMinimapSystem(ctx) {
       drawCarIcon(g, view, m, { x: p.x, z: p.z, heading: parked.mesh.rotation.y }, 1.2, COLOUR_ACCENT);
     }
 
-    // Hero Mode (engine/heroMode.js): the bunker as a gold square -- nothing
-    // else on the map is square or gold -- with an arrow on the rim pointing
-    // to it when it is off the edge; Roger as a gold dot; each of his
-    // pursuers as a red cross.
+    // Hero Mode (engine/heroMode.js): Roger as a gold dot (a gold car when
+    // driving), the cars he could take, and each pursuer as a red cross.
     const hero = ctx.systems.heroMode ? ctx.systems.heroMode.markers() : null;
     if (hero) {
       for (const pursuer of hero.pursuers) {
@@ -496,24 +494,6 @@ export function createMinimapSystem(ctx) {
       } else {
         g.beginPath();
         g.arc(r.x, r.y, 3.4, 0, Math.PI * 2);
-        g.fill();
-      }
-      const b = pinToRim(view, toMap(view, hero.bunker.x, hero.bunker.z));
-      g.fillStyle = '#ffb627';
-      g.strokeStyle = '#fff4d0';
-      g.lineWidth = 1.6;
-      g.fillRect(b.x - 5, b.y - 5, 10, 10);
-      g.strokeRect(b.x - 5, b.y - 5, 10, 10);
-      if (b.pinned) {
-        // Off the map: an arrowhead just inside the square, pointing out.
-        const ang = Math.atan2(b.y - R, b.x - R);
-        const tipX = b.x - Math.cos(ang) * 9;
-        const tipY = b.y - Math.sin(ang) * 9;
-        g.beginPath();
-        g.moveTo(tipX + Math.cos(ang) * 5, tipY + Math.sin(ang) * 5);
-        g.lineTo(tipX + Math.cos(ang + 2.4) * 5, tipY + Math.sin(ang + 2.4) * 5);
-        g.lineTo(tipX + Math.cos(ang - 2.4) * 5, tipY + Math.sin(ang - 2.4) * 5);
-        g.closePath();
         g.fill();
       }
     }

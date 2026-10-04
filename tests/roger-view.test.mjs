@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  rogerStyle, newRunCycle, stepRunCycle, swingLimbs, newCameraPose, followCamera, wheelHtml, WHEEL_NAMES
+  rogerStyle, newRunCycle, stepRunCycle, swingLimbs, kneeBend, newCameraPose, followCamera, wheelHtml, WHEEL_NAMES
 } from '../src/app/tornado/engine/net/rogerView.js';
 import { createPlayerRegistry } from '../src/app/tornado/engine/net/players.js';
 import { isHittable } from '../src/app/tornado/engine/health/state.js';
@@ -43,6 +43,20 @@ test('limbs swing in opposition and rest at zero amount', () => {
   assert.ok(limbs.armL.rotation.x < 0 && limbs.armR.rotation.x > 0);
   swingLimbs(limbs, Math.PI / 2, 0);
   assert.ok([limbs.legL, limbs.legR, limbs.armL, limbs.armR].every((l) => l.rotation.x === 0 || Object.is(l.rotation.x, -0)));
+});
+
+test('knees bend while the leg swings forward, and are straight at rest', () => {
+  // The left leg swings forward while cos(phase) < 0, the right while > 0.
+  assert.ok(kneeBend(Math.PI, 1, true) > kneeBend(0, 1, true));
+  assert.ok(kneeBend(0, 1, false) > kneeBend(Math.PI, 1, false));
+  for (const phase of [0, 1, 2, 3, 4, 5, 6]) {
+    assert.ok(kneeBend(phase, 1, true) >= 0 && kneeBend(phase, 1, false) >= 0, 'a knee never bends forward');
+    assert.equal(kneeBend(phase, 0, true), 0);
+  }
+  const limb = () => ({ rotation: { x: 0 } });
+  const limbs = { legL: limb(), legR: limb(), armL: limb(), armR: limb(), kneeL: limb(), kneeR: limb() };
+  swingLimbs(limbs, Math.PI, 1);
+  assert.ok(limbs.kneeL.rotation.x > limbs.kneeR.rotation.x);
 });
 
 test('the follow camera sits behind Roger, and at his eyes when aiming', () => {

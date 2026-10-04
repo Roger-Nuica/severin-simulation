@@ -2,15 +2,16 @@
 import * as THREE from 'three';
 import { createSpinningStarsTexture } from '../../utils/textures.js';
 import { HERO } from './config.js';
+import { HEALTH } from '../health/config.js';
 import { createKatanaRig } from './katana/model.js';
-import { dressAsRoger } from './rogerLook.js';
+import { dressAsRoger, rogerLimbs } from './rogerLook.js';
 
 /**
  * ===========================================================================
  * SECTION HM.1 — Hero Mode's models
  * ===========================================================================
- * Roger, his rifle (in the world and in first person), his name tag, the
- * bunker marker and the machines sent after him; materials and geometries
+ * Roger, his rifle (in the world and in first person), the bars over his
+ * head and the machines sent after him; materials and geometries
  * made for a run are kept (keepMat, keepGeo) and disposed when it ends.
  */
 
@@ -101,120 +102,80 @@ export function createHeroModels(ctx, S, api) {
   }
 
   /**
-   * A text sprite for Roger's name tag.
+   * The two small bars over Roger's head (no name: removed on request,
+   * 2026-10-03): HEALTH on top, green turning red when low and glowing
+   * while it regenerates, and the ENERGY segments under it in gold. One
+   * sprite on one little canvas, redrawn by drawOverhead only when what it
+   * shows changes.
    * @returns {THREE.Sprite}
    */
-  function buildNameTag() {
+  function buildOverhead() {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 64;
-    const g = canvas.getContext('2d');
-    g.fillStyle = 'rgba(10, 14, 24, 0.75)';
-    g.beginPath();
-    g.roundRect(8, 8, 240, 48, 24);
-    g.fill();
-    g.strokeStyle = '#ffc94d';
-    g.lineWidth = 3;
-    g.stroke();
-    g.fillStyle = '#ffe7a8';
-    g.font = '800 30px system-ui, sans-serif';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText('ROGER', 128, 33);
+    canvas.width = 128;
+    canvas.height = 36;
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     S.runTextures.push(texture);
     const sprite = new THREE.Sprite(keepMat(new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true })));
-    sprite.scale.set(HERO.tagHeight * 0.5, HERO.tagHeight * 0.125, 1);
+    sprite.scale.set(HERO.overheadWidth, HERO.overheadWidth * (36 / 128), 1);
     sprite.renderOrder = 20;
+    sprite.userData.shown = '';
     return sprite;
   }
 
   /**
-   * The bunker's own glyph: a gold plate with a squat bunker and door, and
-   * BUNKER under it -- nothing like the green shelter signs.
-   * @returns {THREE.Texture}
+   * @param {THREE.Sprite} sprite
+   * @param {number} health 0..1
+   * @param {number} glow 0..1, regenerating
+   * @param {number} energy 0..1
+   * @param {number} segments how many the energy bar has
+   * @returns {void}
    */
-  function bunkerGlyphTexture() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128;
-    const g = canvas.getContext('2d');
-    g.fillStyle = '#ffb627';
+  function drawOverhead(sprite, health, glow, energy, segments) {
+    const key = `${Math.round(health * 100)}|${Math.round(glow * 4)}|${Math.round(energy * 100)}`;
+    if (sprite.userData.shown === key) return;
+    sprite.userData.shown = key;
+    const texture = /** @type {THREE.CanvasTexture} */ (/** @type {THREE.SpriteMaterial} */ (sprite.material).map);
+    const canvas = /** @type {HTMLCanvasElement} */ (texture.image);
+    const g = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
+    g.clearRect(0, 0, 128, 36);
+    // A dark rounded plate behind both bars, so they read against the sky.
+    g.fillStyle = 'rgba(8, 12, 20, 0.72)';
     g.beginPath();
-    g.roundRect(6, 6, 116, 116, 22);
+    g.roundRect(1, 1, 126, 34, 8);
     g.fill();
-    g.strokeStyle = '#fff4d0';
-    g.lineWidth = 6;
-    g.stroke();
-    g.fillStyle = '#1a1206';
-    g.beginPath();
-    g.moveTo(24, 78);
-    g.lineTo(40, 40);
-    g.lineTo(88, 40);
-    g.lineTo(104, 78);
-    g.closePath();
-    g.fill();
-    g.fillStyle = '#ffb627';
-    g.fillRect(56, 54, 16, 24);
-    g.fillStyle = '#1a1206';
-    g.font = '900 20px system-ui, sans-serif';
-    g.textAlign = 'center';
-    g.fillText('BUNKER', 64, 104);
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    S.runTextures.push(texture);
-    return texture;
+    const low = health <= HEALTH.lowThreshold;
+    g.fillStyle = 'rgba(120, 255, 150, 0.16)';
+    g.fillRect(7, 6, 114, 11);
+    g.fillStyle = low ? '#ff4a3a' : glow > 0 ? '#b8ffd0' : '#4dff8a';
+    g.fillRect(7, 6, 114 * Math.max(0, Math.min(1, health)), 11);
+    if (glow > 0) {
+      g.strokeStyle = `rgba(184, 255, 208, ${0.4 + glow * 0.6})`;
+      g.lineWidth = 2;
+      g.strokeRect(6, 5, 116, 13);
+    }
+    const gap = 2;
+    const w = (114 - gap * (segments - 1)) / segments;
+    for (let i = 0; i < segments; i++) {
+      const fill = Math.max(0, Math.min(1, energy * segments - i));
+      const x = 7 + i * (w + gap);
+      g.fillStyle = 'rgba(255, 211, 90, 0.18)';
+      g.fillRect(x, 22, w, 7);
+      if (fill > 0) {
+        g.fillStyle = '#ffd35a';
+        g.fillRect(x, 22, w * fill, 7);
+      }
+    }
+    texture.needsUpdate = true;
   }
 
   /**
-   * The bunker marker: a tall gold beacon of light, the glyph floating over
-   * it, and a ring on the ground showing where to stand.
-   * @returns {THREE.Group}
-   */
-  function buildMarker() {
-    const group = new THREE.Group();
-    group.name = 'hero_bunker_marker';
-    const beaconMat = keepMat(new THREE.MeshBasicMaterial({
-      color: new THREE.Color(2.4, 1.3, 0.25), transparent: true, opacity: 0.5,
-      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
-    }));
-    const outer = new THREE.Mesh(keepGeo(new THREE.CylinderGeometry(1.6, 2.4, 90, 16, 1, true)), beaconMat);
-    outer.position.y = 45;
-    group.add(outer);
-    const coreMat = keepMat(new THREE.MeshBasicMaterial({
-      color: new THREE.Color(4, 3, 1.2), transparent: true, opacity: 0.7,
-      blending: THREE.AdditiveBlending, depthWrite: false
-    }));
-    const core = new THREE.Mesh(keepGeo(new THREE.CylinderGeometry(0.35, 0.5, 90, 8, 1, true)), coreMat);
-    core.position.y = 45;
-    group.add(core);
-    const glyph = new THREE.Sprite(keepMat(new THREE.SpriteMaterial({ map: bunkerGlyphTexture(), transparent: true })));
-    glyph.scale.set(7, 7, 1);
-    glyph.position.y = 17;
-    glyph.name = 'hero_bunker_glyph';
-    group.add(glyph);
-    const ring = new THREE.Mesh(keepGeo(new THREE.RingGeometry(HERO.winRadius - 0.6, HERO.winRadius, 40)), keepMat(new THREE.MeshBasicMaterial({
-      color: new THREE.Color(2.2, 1.3, 0.3), transparent: true, opacity: 0.8,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2
-    })));
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.06;
-    group.add(ring);
-    group.userData.glyph = glyph;
-    group.userData.ring = ring;
-    return group;
-  }
-
-  /**
-   * Roger, made cool on request: a muscled build (broad chest, big
-   * shoulders and arms), a black leather jacket over a white T-shirt with its
-   * collar up, dark jeans, black boots, an Elvis Presley pompadour with
-   * sideburns, and dark glasses -- with the rifle in his right hand, a name
-   * tag and a ring of stars for when he is dazed. (He was a town figure in a
-   * red jacket and blue jeans.) Everything is added to createPerson's
-   * figure, so the limbs the walk and the aim pose move are the same ones.
+   * Roger as the Storm Ranger (hero/rogerLook.js dressAsRoger: a shaped
+   * suit with knees, a closed helmet with a glass visor, the Storm Core on
+   * his back; since 2026-10-03, replacing the leather jacket and pompadour) -- with the rifle in his
+   * right hand, the bars over his head, and a ring of stars for when he is
+   * dazed. Everything is added to createPerson's figure, so the limbs the
+   * walk and the aim pose move are the same ones.
    * @param {number} x
    * @param {number} z
    * @returns {Object}
@@ -224,20 +185,18 @@ export function createHeroModels(ctx, S, api) {
     obj.mesh.name = 'hero_roger';
     const name = obj.mesh.name;
     const dressed = dressAsRoger(obj.mesh, { geo: keepGeo, mat: keepMat });
-    const { quiff, torso } = dressed;
-    obj.quiff = quiff;
-    obj.torso = torso;
+    obj.torso = dressed.torso;
+    obj.core = dressed.core;
     // createPerson names its parts after the root it was built with.
-    const limb = (/** @type {string} */ part) => obj.mesh.children.find(c => c.name.endsWith(part));
-    obj.limbs = { legL: limb('_legL'), legR: limb('_legR'), armL: limb('_armL'), armR: limb('_armR') };
+    obj.limbs = rogerLimbs(obj.mesh);
     obj.armSplay = Math.abs(obj.limbs.armL.rotation.z);
     S.rifle = buildRifle();
     obj.limbs.armR.add(S.rifle);
     // The Katana's sheath, blade and swoosh (hero/katana/model.js), posed by poseRoger.
     S.katanaRig = createKatanaRig(ctx, S, { keepGeo, keepMat });
     S.katanaRig.attach(obj);
-    S.nameTag = buildNameTag();
-    Sim.three.scene.add(S.nameTag);
+    S.overhead = buildOverhead();
+    Sim.three.scene.add(S.overhead);
     const starsTexture = createSpinningStarsTexture();
     S.runTextures.push(starsTexture);
     S.stars = new THREE.Sprite(keepMat(new THREE.SpriteMaterial({ map: starsTexture, transparent: true, depthWrite: false })));
@@ -284,7 +243,7 @@ export function createHeroModels(ctx, S, api) {
   /**
    * The rifle as seen down its length from Roger's eyes, for aim mode: the
    * same plasma rifle, built bigger and in more detail, along the camera's
-   * -z, with his gloved hand on the grip and a readout of the plasma cell
+   * -z, with his gloved hand on the grip and a readout of the charge
    * on its back (like the ammo counter on a shooter's rifle). Placed in
    * front of the camera every frame rather than parented to it: the camera
    * is not in the scene graph.
@@ -295,9 +254,9 @@ export function createHeroModels(ctx, S, api) {
     group.name = 'hero_view_rifle';
     const dark = keepMat(new THREE.MeshStandardMaterial({ color: 0x2c323d, metalness: 0.75, roughness: 0.32, emissive: 0x0c1016 }));
     const trim = keepMat(new THREE.MeshStandardMaterial({ color: 0x8d98aa, metalness: 0.85, roughness: 0.22, emissive: 0x151a22 }));
-    const glove = keepMat(new THREE.MeshStandardMaterial({ color: 0x1b1d22, roughness: 0.8 }));
-    // His leather jacket's sleeve (buildRoger).
-    const sleeve = keepMat(new THREE.MeshStandardMaterial({ color: 0x15130f, roughness: 0.32, metalness: 0.25 }));
+    // His armoured fist and the Storm Ranger's navy sleeve (hero/rogerLook.js).
+    const glove = keepMat(new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.25, metalness: 0.6 }));
+    const sleeve = keepMat(new THREE.MeshStandardMaterial({ color: 0x1a2440, roughness: 0.55, metalness: 0.15 }));
     // Barely over 1: this close to the eye, anything brighter blooms the
     // whole rifle into one blue glare.
     const energy = keepMat(new THREE.MeshBasicMaterial({ color: new THREE.Color(0.22, 0.8, 1.35) }));
@@ -361,36 +320,38 @@ export function createHeroModels(ctx, S, api) {
     group.visible = false;
     Sim.three.scene.add(group);
     const vm = { group, muzzle: muzzleNode, flash: flashMesh, energy, panel, shown: -1 };
-    drawCellPanel(vm);
+    drawChargePanel(vm);
     return vm;
   }
 
   /**
-   * The rifle's readout: the cell as a big number, and a bar under it.
-   * Redrawn only when the whole-number value changes.
+   * The rifle's readout: READY, the charge building toward the MEGA BEAM
+   * (seconds held, and a bar), or MEGA once it is there. Redrawn only when
+   * what it shows changes (tenths of a second while charging).
    * @param {{panel: THREE.CanvasTexture, shown: number}} vm
    * @returns {void}
    */
-  function drawCellPanel(vm) {
-    const value = Math.floor(S.state.cell);
+  function drawChargePanel(vm) {
+    const k = Math.min(1, S.state.charge / HERO.chargeSeconds);
+    const value = S.state.charging ? Math.round(k * 10) : -1;
     if (value === vm.shown) return;
     vm.shown = value;
     const canvas = /** @type {HTMLCanvasElement} */ (vm.panel.image);
     const g = canvas.getContext('2d');
-    const ready = S.state.cell >= HERO.cellCost;
+    const mega = value >= 10;
     g.fillStyle = '#04121c';
     g.fillRect(0, 0, 128, 80);
-    g.fillStyle = ready ? '#7fe3ff' : '#ff7a5a';
-    g.font = 'bold 44px system-ui, sans-serif';
+    g.fillStyle = mega ? '#ffd35a' : '#7fe3ff';
+    g.font = `bold ${value < 0 ? 30 : 40}px system-ui, sans-serif`;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillText(String(value), 64, 34);
+    g.fillText(value < 0 ? 'READY' : mega ? 'MEGA' : `${(k * HERO.chargeSeconds).toFixed(1)}`, 64, 34);
     g.fillStyle = 'rgba(127, 227, 255, 0.25)';
     g.fillRect(12, 64, 104, 8);
-    g.fillStyle = ready ? '#7fe3ff' : '#ff7a5a';
-    g.fillRect(12, 64, 104 * (S.state.cell / 100), 8);
+    g.fillStyle = mega ? '#ffd35a' : '#7fe3ff';
+    g.fillRect(12, 64, 104 * Math.max(0, k), 8);
     vm.panel.needsUpdate = true;
   }
 
-  return { keepMat, keepGeo, buildRifle, buildNameTag, bunkerGlyphTexture, buildMarker, buildRoger, buildPursuer, buildViewRifle, drawCellPanel };
+  return { keepMat, keepGeo, buildRifle, buildOverhead, drawOverhead, buildRoger, buildPursuer, buildViewRifle, drawChargePanel };
 }
