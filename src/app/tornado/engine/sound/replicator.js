@@ -14,7 +14,11 @@ import { createShortNoiseBuffer } from './thunder.js';
  *    crunch of noise;
  *  - **swarm call**: the encirclement starting (patientZero/encircle.js): a
  *    deep pulsing drone under a rising, detuned screech, three seconds;
- *  - **shard**: a nanite shard thrown, a short falling whistle.
+ *  - **shard**: a nanite shard thrown, a short falling whistle;
+ *  - **hit**: a shot that does not bring one down -- a bright metallic clink
+ *    and a crackle of sparks;
+ *  - **evolve**: the original's second evolution -- a long grinding rise of
+ *    detuned saws under the swarm call, ending in a deep slam.
  */
 
 const BUS_LEVEL = 0.85;
@@ -27,6 +31,8 @@ const HEAR = 160; // metres: silent beyond
  *   playShatter: (x: number, z: number) => void,
  *   playSwarmCall: () => void,
  *   playShard: (x: number, z: number) => void,
+ *   playHit: (x: number, z: number) => void,
+ *   playEvolve: (x: number, z: number, seconds: number) => void,
  *   disposeReplicatorSound: () => void
  * }}
  */
@@ -210,11 +216,54 @@ export function createReplicatorSoundSystem(engineCtx) {
     noiseBurst(g, 'highpass', 4000, 0.7, 0.12 * level, 0.002, 0.08);
   }
 
+  /**
+   * @param {number} x @param {number} z
+   * @returns {void}
+   */
+  function playHit(x, z) {
+    const g = ensureGraph();
+    const level = near(x, z);
+    if (!g || level <= 0.01) return;
+    const base = 1700 + Math.random() * 900;
+    for (const k of [1, 1.47]) {
+      tone(g, 'sine', 0.16 * level / k, 0, 0.22, (f, t) => f.setValueAtTime(base * k, t), 8000);
+    }
+    noiseBurst(g, 'highpass', 3500, 0.7, 0.25 * level, 0.001, 0.06);
+    for (let i = 0; i < 5; i++) noiseBurst(g, 'bandpass', 4000 + Math.random() * 3000, 12, 0.12 * level, 0.001, 0.025, 0.02 + Math.random() * 0.15);
+  }
+
+  /**
+   * @param {number} x @param {number} z
+   * @param {number} seconds how long the transformation takes
+   * @returns {void}
+   */
+  function playEvolve(x, z, seconds) {
+    const g = ensureGraph();
+    if (!g) return;
+    const level = Math.max(0.5, near(x, z));
+    for (const k of [1, 1.02, 0.5]) {
+      tone(g, 'sawtooth', 0.12 * level, 0, seconds, (f, t) => {
+        f.setValueAtTime(70 * k, t);
+        f.exponentialRampToValueAtTime(420 * k, t + seconds * 0.95);
+      }, 1800);
+    }
+    const ticks = 50;
+    for (let i = 0; i < ticks; i++) {
+      noiseBurst(g, 'bandpass', 2500 + Math.random() * 5000, 10, 0.18 * level, 0.002, 0.03, (i / ticks) * seconds);
+    }
+    // The slam as it is done.
+    tone(g, 'sine', 0.8 * level, seconds, 0.9, (f, t) => {
+      f.setValueAtTime(120, t);
+      f.exponentialRampToValueAtTime(30, t + 0.8);
+    }, 500);
+    noiseBurst(g, 'lowpass', 400, 0.8, 0.9 * level, 0.005, 0.6, seconds);
+  }
+
   /** @returns {void} */
   function disposeReplicatorSound() {
     if (graph) quietly(graph.bus);
     graph = null;
   }
 
-  return { playAssemble, playShatter, playSwarmCall, playShard, disposeReplicatorSound };
+  return { playAssemble, playShatter, playSwarmCall, playShard, playHit, playEvolve, disposeReplicatorSound };
 }

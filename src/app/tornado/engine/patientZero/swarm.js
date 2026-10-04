@@ -1,6 +1,8 @@
 // @ts-check
 import * as THREE from 'three';
 import { glowMaterial, REPLICATOR } from './model.js';
+import { createParticlePool, pointScaleFor, markPoolDirty, disposeParticlePool } from '../particlePool.js';
+import { createSoftDotTexture } from '../../utils/textures.js';
 
 /**
  * ===========================================================================
@@ -18,6 +20,10 @@ import { glowMaterial, REPLICATOR } from './model.js';
  *    bouncing on the street, gone;
  *  - **ripple**: a ring of green light running out over the ground, under a
  *    clone finishing itself or a swarm arriving;
+ *  - **sparks**: a hit that does not bring a figure down (patientZero.js
+ *    wounded) -- a spray of hot green sparks off it, away from the shot,
+ *    with a few loose blocks knocked off (burst); one pooled Points within
+ *    the shared particle cap;
  *  - **stain**: where a clone was built, a scorch of toxic green on the
  *    street -- a glowing blot speckled with stray blocks, flaring as it is
  *    left, burning steady for SWARM.stainHold seconds, then fading over
@@ -39,7 +45,9 @@ export const SWARM = {
   stainSize: 2.4,       // metres across, for a clone
   stainHold: 10,        // seconds at full glow
   stainFade: 15,        // seconds fading out
-  stainFlash: 0.4       // seconds of the bright flash when it is left
+  stainFlash: 0.4,      // seconds of the bright flash when it is left
+  sparks: 240,          // particles in the spark pool
+  sparkGravity: 12
 };
 
 /**
@@ -96,17 +104,19 @@ function stainTexture() {
 
 /**
  * @param {THREE.Scene} scene
+ * @param {Object} ctx the engine context (the particle cap, the camera)
  * @returns {{
  *   assemble: (fx: number, fy: number, fz: number, spread: number, tx: number, tz: number, n: number, seconds: number, scale?: number) => void,
  *   burst: (x: number, y: number, z: number, n: number, speed: number) => void,
  *   ripple: (x: number, z: number, radius: number, colour?: THREE.Color) => void,
  *   stain: (x: number, z: number, size?: number) => void,
+ *   sparks: (x: number, y: number, z: number, dx: number, dz: number, n: number) => void,
  *   update: (dt: number) => void,
  *   clear: () => void,
  *   dispose: () => void
  * }}
  */
-export function createSwarm(scene) {
+export function createSwarm(scene, ctx) {
   const N = SWARM.max;
   const geo = new THREE.BoxGeometry(SWARM.size, SWARM.size, SWARM.size);
   // Every block lit a little from inside.
@@ -188,6 +198,81 @@ export function createSwarm(scene) {
   let stainNext = 0;
   let stainsLive = 0;
   const stainColour = new THREE.Color();
+
+  // The sparks: hot green points, additive, one pool.
+  const sparkPool = createParticlePool(scene, SWARM.sparks, createSoftDotTexture(), THREE.AdditiveBlending, 'replicator_sparks');
+  ctx.systems.caps.trackPool(sparkPool);
+  let sparksAlive = false;
+
+  /**
+   * A spray of sparks from (x, y, z), thrown mostly along (dx, dz) -- away
+   * from the shot -- and up.
+   * @param {number} x @param {number} y @param {number} z
+   * @param {number} dx @param {number} dz unit-ish direction, or 0, 0 for all round
+   * @param {number} n
+   * @returns {void}
+   */
+  function sparks(x, y, z, dx, dz, n) {
+    const count = Math.min(n, ctx.systems.caps.particleRoom());
+    const pool = sparkPool;
+    for (let k = 0; k < count; k++) {
+      const i = pool.next;
+      pool.next = (pool.next + 1) % pool.life.length;
+      const life = 0.22 + Math.random() * 0.35;
+      pool.life[i] = life;
+      pool.maxLife[i] = life;
+      pool.seed[i] = Math.random();
+      const v = i * 3;
+      pool.positions[v] = x;
+      pool.positions[v + 1] = y;
+      pool.positions[v + 2] = z;
+      const a = Math.random() * Math.PI * 2;
+      const speed = 5 + Math.random() * 10;
+      const spread = 0.9;
+      pool.velocities[v] = (dx + Math.cos(a) * spread) * speed;
+      pool.velocities[v + 1] = (0.3 + Math.random() * 0.9) * speed * 0.6;
+      pool.velocities[v + 2] = (dz + Math.sin(a) * spread) * speed;
+    }
+    if (count > 0) sparksAlive = true;
+  }
+
+  /**
+   * @param {number} dt
+   * @returns {void}
+   */
+  function updateSparks(dt) {
+    if (!sparksAlive) return;
+    const pool = sparkPool;
+    pool.points.material.uniforms.uScale.value = pointScaleFor(ctx.Sim.three.renderer, ctx.Sim.three.camera);
+    let any = false;
+    for (let i = 0; i < pool.life.length; i++) {
+      if (pool.life[i] <= 0) {
+        if (pool.sizes[i] !== 0) {
+          pool.colours[i * 4 + 3] = 0;
+          pool.sizes[i] = 0;
+        }
+        continue;
+      }
+      any = true;
+      pool.life[i] -= dt;
+      const t = 1 - Math.max(0, pool.life[i]) / pool.maxLife[i];
+      const v = i * 3;
+      pool.velocities[v + 1] -= SWARM.sparkGravity * dt;
+      pool.positions[v] += pool.velocities[v] * dt;
+      pool.positions[v + 1] = Math.max(0.05, pool.positions[v + 1] + pool.velocities[v + 1] * dt);
+      pool.positions[v + 2] += pool.velocities[v + 2] * dt;
+      // White-hot, then green, then out.
+      const c = i * 4;
+      const hot = Math.max(0, 1 - t * 3);
+      pool.colours[c] = 0.35 + 0.65 * hot;
+      pool.colours[c + 1] = 1;
+      pool.colours[c + 2] = 0.35 + 0.5 * hot;
+      pool.colours[c + 3] = 1 - t;
+      pool.sizes[i] = (0.16 + pool.seed[i] * 0.18) * (1 - t * 0.5);
+    }
+    markPoolDirty(pool);
+    sparksAlive = any;
+  }
 
   /** @returns {number} a free slot, or -1 when the swarm is full */
   function claim() {
@@ -339,6 +424,7 @@ export function createSwarm(scene) {
    */
   function update(dt) {
     updateStains(dt);
+    updateSparks(dt);
     for (const r of ripples) {
       if (r.t >= 1) continue;
       r.t = Math.min(1, r.t + dt / SWARM.rippleSeconds);
@@ -419,6 +505,11 @@ export function createSwarm(scene) {
     stains.count = 0;
     stains.instanceMatrix.needsUpdate = true;
     if (stains.instanceColor) stains.instanceColor.needsUpdate = true;
+    sparkPool.life.fill(0);
+    sparkPool.sizes.fill(0);
+    for (let i = 3; i < sparkPool.colours.length; i += 4) sparkPool.colours[i] = 0;
+    markPoolDirty(sparkPool);
+    sparksAlive = false;
     mode.fill(0);
     alive = 0;
     high = 0;
@@ -446,7 +537,8 @@ export function createSwarm(scene) {
     stainGeo.dispose();
     stainMat.dispose();
     stainTex.dispose();
+    disposeParticlePool(scene, sparkPool);
   }
 
-  return { assemble, burst, ripple, stain, update, clear, dispose };
+  return { assemble, burst, ripple, stain, sparks, update, clear, dispose };
 }

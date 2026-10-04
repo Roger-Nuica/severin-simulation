@@ -328,6 +328,52 @@ function buildLeg(s) {
 }
 
 /**
+ * The evolved original's back scythe (patientZero.js evolution): a jointed
+ * limb rising from behind the shoulder, up and back, then a long curved blade
+ * of dark metal sweeping forward and down over it, lit along its edge, with
+ * barbs. From its pivot (on the upper back).
+ * @param {number} s +1 left, -1 right
+ * @returns {THREE.BufferGeometry}
+ */
+function buildScythe(s) {
+  const G = REPLICATOR.greenHot;
+  const k = new Kit();
+  const knee = v(s * 0.12, 0.62, -0.28);
+  k.box(0.1, 0.1, 0.1, v(0, 0, 0));
+  k.rod(v(0, 0, 0), knee, 0.055, 0.04, 5);
+  k.spike(knee, v(s * 0.2, 0.5, -1), 0.04, 0.28);
+  k.box(0.09, 0.09, 0.09, knee);
+  // The blade: three flattened segments curving forward and down.
+  const points = [knee, v(s * 0.16, 0.78, 0.15), v(s * 0.18, 0.62, 0.62), v(s * 0.17, 0.25, 0.95)];
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const width = 0.11 - i * 0.03;
+    // A flat rod: a four-sided cylinder squashed sideways.
+    const len = a.distanceTo(b);
+    const geo = new THREE.CylinderGeometry(width * 0.6, width, len, 4);
+    geo.scale(0.25, 1, 1);
+    k.d.subVectors(b, a).normalize();
+    k.q.setFromUnitVectors(Y, k.d);
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    k.pieces.push(part(geo, k.m.compose(mid, k.q, k.s.set(1, 1, 1)), null));
+    // The lit edge, along its underside.
+    k.rod(v(a.x, a.y - width * 0.45, a.z + 0.02), v(b.x, b.y - width * 0.45 + 0.02, b.z + 0.02), 0.012, 0.008, 4, G);
+    k.spike(mid, v(0, 0.6, -0.4), 0.02, 0.12);
+  }
+  k.spike(points[3], v(0, -1, 0.4), 0.03, 0.3, G, 3);
+  return k.merge();
+}
+
+/**
+ * The evolution's extra geometry, built once.
+ * @returns {{scytheL: THREE.BufferGeometry, scytheR: THREE.BufferGeometry}}
+ */
+export function buildEvolvedGeometry() {
+  return { scytheL: buildScythe(1), scytheR: buildScythe(-1) };
+}
+
+/**
  * Every part's geometry, built once.
  * @returns {Record<PartName, THREE.BufferGeometry>}
  */

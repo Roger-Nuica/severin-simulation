@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { bannerHost } from '../utils/banners.js';
 import { CHARACTERS } from './scale.js';
-import { REPLICATOR, PARTS, glowMaterial, withGlow, buildReplicatorGeometry, makePose, poseReplicator, partTurn } from './patientZero/model.js';
+import { REPLICATOR, PARTS, glowMaterial, withGlow, buildReplicatorGeometry, buildEvolvedGeometry, makePose, poseReplicator, partTurn } from './patientZero/model.js';
 import { createSwarm } from './patientZero/swarm.js';
 import { createEncircle, ENCIRCLE } from './patientZero/encircle.js';
 
@@ -42,6 +42,21 @@ import { createEncircle, ENCIRCLE } from './patientZero/encircle.js';
  * At 15 clones they surround Roger at 100 m and close in from every side,
  * throwing shards (patientZero/encircle.js). The six body parts of all the
  * clones are six InstancedMeshes.
+ *
+ * **Second evolution** (2026-10-04, on request): an original left alive for
+ * PZ.evolveAfter seconds after it stands (a warning PZ.evolveWarn seconds
+ * before) stops, rises off the ground in a cyclone of blocks pulled in from
+ * all round, and over PZ.evolveSeconds grows half again as big, sprouts a
+ * second pair of arms under the first and two great scythes of light out of
+ * its back, and a second crown turning the other way. Evolved, it is faster
+ * (PZ.evolvedSpeed), buds a clone every PZ.evolvedCloneEvery seconds, reaches
+ * further with its touch (the scythes), and its light burns hotter. Its
+ * health is not changed (R-039): the same shots kill it, just get them in.
+ *
+ * **Hit feedback**: a shot that does not bring one down (the registry's
+ * `wounded`, engine/enemies.js) throws hot green sparks off it away from the
+ * shot, knocks a few loose blocks off, clinks, and makes it flinch -- a jolt
+ * back and a stagger of PZ.hurtSeconds.
  */
 
 export const PZ = {
@@ -70,7 +85,19 @@ export const PZ = {
   // to a searing lime; warnings at these counts.
   heatTint: new THREE.Color(2.6, 1.35, 1.2),
   heatFlare: 0.9,
-  heatWarnings: [10, 13]
+  heatWarnings: [10, 13],
+  // The second evolution.
+  evolveAfter: 75,          // seconds standing
+  evolveWarn: 15,           // the warning, this long before
+  evolveSeconds: 3,         // the transformation
+  evolveGrow: 1.5,          // its size after, times
+  evolvedSpeed: 3.6,        // m/s (2.2 before)
+  evolvedCloneEvery: 1.6,   // seconds between buds (2.5 before)
+  evolvedReach: 1.7,        // its touch reaches this many times further (the scythes)
+  // A hit that does not bring one down.
+  hurtSeconds: 0.25,
+  hitSparks: 22,
+  hitBlocks: 5
 };
 
 /**
@@ -91,6 +118,7 @@ export const PZ = {
  * @property {number} attack 0..1, claws up
  * @property {number} size
  * @property {number} pace how fast it is going, for the stride
+ * @property {number} hurt seconds left of a flinch (hit feedback)
  * @property {{yaw: number, pitch: number, roll: number, ty: number, tp: number, tr: number, next: number}} twitch
  */
 
@@ -109,7 +137,7 @@ export const PZ = {
 export function createPatientZeroSystem(ctx) {
   const { Sim } = ctx;
   /**
-   * @typedef {Walker & {hp: number, root: THREE.Group, halo: THREE.Group, parts: Record<string, THREE.Object3D>, budTimer: number, budding: number, orbit: THREE.InstancedMesh}} Original
+   * @typedef {Walker & {hp: number, root: THREE.Group, halo: THREE.Group, halo2: THREE.Group, parts: Record<string, THREE.Object3D>, budTimer: number, budding: number, orbit: THREE.InstancedMesh, life: number, evolve: number, evolved: boolean, warned: boolean, pull: number}} Original
    */
   /** @type {Original|null} */
   let original = null;
@@ -119,6 +147,8 @@ export function createPatientZeroSystem(ctx) {
   let instanced = null;
   /** @type {Record<string, THREE.BufferGeometry>|null} */
   let geo = null;
+  /** @type {{scytheL: THREE.BufferGeometry, scytheR: THREE.BufferGeometry}|null} the evolution's */
+  let evolvedGeo = null;
   /** @type {THREE.MeshStandardMaterial|null} the clones' */
   let cloneMat = null;
   /** @type {THREE.MeshStandardMaterial|null} the original's */
@@ -194,7 +224,7 @@ export function createPatientZeroSystem(ctx) {
       pos: new THREE.Vector3(x, 0, z), heading: Math.random() * Math.PI * 2, speed: 0, retarget: Math.random() * PZ.retarget,
       bob: Math.random() * 6, target: null, prey: null,
       form: 0, formRate: 1 / PZ.formSeconds, warp: null, ring: false, slot: 0, slotX: x, slotZ: z, throwT: 0, wind: 0,
-      attack: 0, size: 0.94 + Math.random() * 0.12, pace: 0,
+      attack: 0, size: 0.94 + Math.random() * 0.12, pace: 0, hurt: 0,
       twitch: { yaw: 0, pitch: 0, roll: 0, ty: 0, tp: 0, tr: 0, next: Math.random() }
     };
   }
@@ -202,7 +232,7 @@ export function createPatientZeroSystem(ctx) {
   /**
    * The original's figure: the six parts as meshes on their pivots, the
    * crown of shards turning over its head, blocks orbiting it.
-   * @returns {{root: THREE.Group, halo: THREE.Group, parts: Record<string, THREE.Object3D>, orbit: THREE.InstancedMesh}}
+   * @returns {{root: THREE.Group, halo: THREE.Group, halo2: THREE.Group, parts: Record<string, THREE.Object3D>, orbit: THREE.InstancedMesh}}
    */
   function buildOriginal() {
     const root = new THREE.Group();
@@ -237,13 +267,46 @@ export function createPatientZeroSystem(ctx) {
     }
     halo.position.set(0, 2.32, 0.02);
     figure.add(halo);
+    // The evolution's parts, hidden until then: a second crown turning the
+    // other way, a second pair of arms under the first, two scythes from
+    // the back.
+    const halo2 = new THREE.Group();
+    for (let i = 0; i < 11; i++) {
+      const a = (i / 11) * Math.PI * 2;
+      const shard = new THREE.Mesh(shardGeo, shardMat);
+      shard.position.set(Math.sin(a) * 0.5, 0, Math.cos(a) * 0.5);
+      shard.rotation.set(-0.6 * Math.cos(a), 0, 0.6 * Math.sin(a));
+      shard.scale.setScalar(1.4);
+      halo2.add(shard);
+    }
+    halo2.position.set(0, 2.2, 0.02);
+    halo2.visible = false;
+    figure.add(halo2);
+    const extras = /** @type {const} */ ([
+      ['armL2', 'armL', new THREE.Vector3(0.27, 1.43, 0.04)],
+      ['armR2', 'armR', new THREE.Vector3(-0.27, 1.43, 0.04)],
+      ['scytheL', 'scytheL', new THREE.Vector3(0.15, 1.64, -0.18)],
+      ['scytheR', 'scytheR', new THREE.Vector3(-0.15, 1.64, -0.18)]
+    ]);
+    for (const [name, source, at] of extras) {
+      const g = source.startsWith('scythe') ? /** @type {any} */ (evolvedGeo)[source] : /** @type {any} */ (geo)[source];
+      const mesh = new THREE.Mesh(g, /** @type {THREE.Material} */ (originalMat));
+      mesh.castShadow = true;
+      const pivot = new THREE.Group();
+      pivot.position.copy(at);
+      pivot.add(mesh);
+      pivot.visible = false;
+      figure.add(pivot);
+      parts[name] = pivot;
+    }
+    parts.halo2 = halo2;
     // Blocks orbiting it, like a cloud of its own parts.
     const orbit = new THREE.InstancedMesh(blockGeo, /** @type {THREE.Material} */ (originalMat), 28);
     orbit.frustumCulled = false;
     orbit.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(orbit);
     root.add(figure);
-    return { root, halo, parts, orbit };
+    return { root, halo, halo2, parts, orbit };
   }
 
   /** @returns {boolean} */
@@ -255,7 +318,10 @@ export function createPatientZeroSystem(ctx) {
     built.parts.figure.scale.setScalar(originalScale);
     Sim.three.scene.add(built.root);
     const w = walker(Math.sin(angle) * PZ.spawnRing, Math.cos(angle) * PZ.spawnRing);
-    original = Object.assign(w, { hp: PZ.hp, root: built.root, halo: built.halo, parts: built.parts, orbit: built.orbit, budTimer: PZ.cloneEvery + PZ.originalFormSeconds, budding: 0 });
+    original = Object.assign(w, {
+      hp: PZ.hp, root: built.root, halo: built.halo, halo2: built.halo2, parts: built.parts, orbit: built.orbit,
+      budTimer: PZ.cloneEvery + PZ.originalFormSeconds, budding: 0, life: 0, evolve: -1, evolved: false, warned: false, pull: 0
+    });
     original.speed = PZ.speed;
     original.size = originalScale;
     original.formRate = 1 / PZ.originalFormSeconds;
@@ -393,6 +459,113 @@ export function createPatientZeroSystem(ctx) {
   }
 
   /**
+   * A hit that did not bring it down (the registry's `wounded`): sparks off
+   * it away from the shot, a few loose blocks, a clink, and a flinch.
+   * @param {any} w
+   * @param {import('./enemies.js').Hit} hit
+   * @returns {void}
+   */
+  function wounded(w, hit) {
+    if (!w || !w.pos) return;
+    // Away from where the shot came from: its point if it has one, else Roger.
+    const roger = ctx.systems.heroMode && ctx.systems.heroMode.rogerTarget();
+    const from = hit && hit.at ? hit.at : roger;
+    let dx = 0;
+    let dz = 0;
+    if (from) {
+      dx = w.pos.x - from.x;
+      dz = w.pos.z - from.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 1e-3) {
+        dx /= d;
+        dz /= d;
+      } else {
+        dx = dz = 0;
+      }
+    }
+    const y = (0.9 + Math.random() * 0.9) * w.size;
+    if (swarm) {
+      swarm.sparks(w.pos.x - dx * 0.3, y, w.pos.z - dz * 0.3, dx, dz, PZ.hitSparks);
+      swarm.burst(w.pos.x, y, w.pos.z, PZ.hitBlocks, 3.5);
+    }
+    if (sounds()) sounds().playHit(w.pos.x, w.pos.z);
+    w.hurt = PZ.hurtSeconds;
+    // The head snapped round by it.
+    w.twitch.next = 0;
+  }
+
+  /**
+   * A flinch in the pose: jolted back, shaking.
+   * @param {import('./patientZero/model.js').Pose} out
+   * @param {Walker} w
+   * @returns {void}
+   */
+  function flinch(out, w) {
+    if (!(w.hurt > 0)) return;
+    const k = w.hurt / PZ.hurtSeconds;
+    out.lean -= 0.5 * k;
+    out.roll += (Math.random() - 0.5) * 0.25 * k;
+    out.armL += 0.6 * k;
+    out.armR += 0.6 * k;
+    out.armSpread += 0.4 * k;
+  }
+
+  /**
+   * The second evolution starting.
+   * @param {Original} o
+   * @returns {void}
+   */
+  function startEvolve(o) {
+    o.evolve = 0;
+    o.pull = 0;
+    flareGoal = 2.6;
+    showBanner('PATIENT ZERO IS EVOLVING', 'Bigger · faster · more arms · it buds faster · kill it now');
+    if (sounds()) sounds().playEvolve(o.pos.x, o.pos.z, PZ.evolveSeconds);
+    ctx.systems.gamefeel.addShake(0.4, PZ.evolveSeconds);
+    ctx.systems.creatureSounds.play('snarl', o.pos, { pitch: 0.5, size: 1.6, gain: 1.4 });
+  }
+
+  /**
+   * The transformation, a frame: it hangs in the air and grows while a
+   * cyclone of blocks is pulled into it from all round.
+   * @param {Original} o
+   * @param {number} dt
+   * @returns {void}
+   */
+  function evolveStep(o, dt) {
+    o.evolve = Math.min(1, o.evolve + dt / PZ.evolveSeconds);
+    const e = o.evolve * o.evolve * (3 - 2 * o.evolve);
+    o.size = originalScale * (1 + (PZ.evolveGrow - 1) * e);
+    o.pace = 0;
+    o.attack = 0.4;
+    o.twitch.next = 0;
+    // Blocks pulled in, a batch every tenth of a second.
+    o.pull -= dt;
+    if (o.pull <= 0 && swarm) {
+      o.pull = 0.1;
+      const a = Math.random() * Math.PI * 2;
+      const r = 10 + Math.random() * 8;
+      swarm.assemble(o.pos.x + Math.sin(a) * r, 1 + Math.random() * 5, o.pos.z + Math.cos(a) * r, 4, o.pos.x, o.pos.z, 26, 0.9, o.size);
+      swarm.sparks(o.pos.x, 1.6 * o.size, o.pos.z, 0, 0, 6);
+    }
+    if (o.evolve < 1) return;
+    // Done.
+    o.evolve = -1;
+    o.evolved = true;
+    o.size = originalScale * PZ.evolveGrow;
+    o.speed = PZ.evolvedSpeed;
+    flareGoal = 1;
+    if (swarm) {
+      swarm.ripple(o.pos.x, o.pos.z, 14);
+      swarm.ripple(o.pos.x, o.pos.z, 7);
+      swarm.stain(o.pos.x, o.pos.z, 2.5);
+      swarm.burst(o.pos.x, 2, o.pos.z, 60, 9);
+    }
+    ctx.systems.gamefeel.addShake(1, 0.6);
+    showBanner('PATIENT ZERO · EVOLVED', 'Four arms, two scythes · faster · it buds every ' + PZ.evolvedCloneEvery + ' s');
+  }
+
+  /**
    * One walker's step, and whom it touches.
    * @param {Walker} w
    * @param {number} dt
@@ -401,6 +574,12 @@ export function createPatientZeroSystem(ctx) {
    */
   function step(w, dt, isOriginal) {
     twitch(w, dt);
+    // Flinching from a hit: a stagger, nothing else.
+    if (w.hurt > 0) {
+      w.hurt = Math.max(0, w.hurt - dt);
+      w.pace = 0;
+      return;
+    }
     const hero = ctx.systems.heroMode;
     const roger = hero && hero.rogerTarget();
     // In the ring (patientZero/encircle.js): to its place on it, facing
@@ -460,9 +639,11 @@ export function createPatientZeroSystem(ctx) {
       if (Math.random() < dt * (isOriginal ? 0.4 : 0.08)) creature.play('groan', w.pos, { pitch: isOriginal ? 0.6 : creature.pitchOf(w) * 0.8, size: isOriginal ? 1.3 : 1 });
       if (isOriginal && Math.floor(before / Math.PI) !== Math.floor(w.bob / Math.PI)) creature.play('footstep', w.pos, { size: 1.3, gain: 0.8 });
     }
-    if (d > PZ.touch) return;
+    // The evolved original's scythes reach further.
+    const reach = PZ.touch * (isOriginal && original && original.evolved ? PZ.evolvedReach : 1);
+    if (d > reach) return;
     // A touch.
-    if (roger && !w.prey && Math.hypot(roger.x - w.pos.x, roger.z - w.pos.z) < PZ.touch * 1.2) {
+    if (roger && !w.prey && Math.hypot(roger.x - w.pos.x, roger.z - w.pos.z) < reach * 1.2) {
       ctx.systems.health.damagePlayer({
         source: 'patientZero', instantKill: true, position: { x: w.pos.x, y: 0, z: w.pos.z },
         title: 'INFECTED', sub: isOriginal ? 'Patient Zero got to Roger' : 'A clone of Patient Zero got to Roger'
@@ -543,6 +724,7 @@ export function createPatientZeroSystem(ctx) {
     for (let i = 0; i < clones.length; i++) {
       const c = clones[i];
       poseReplicator(pose, c.bob, c.pace, c.attack, c.twitch);
+      flinch(pose, c);
       bodyMatrix(c, c.size, body);
       for (const name of PARTS) {
         if (name === 'body') {
@@ -576,21 +758,47 @@ export function createPatientZeroSystem(ctx) {
     const fig = /** @type {THREE.Object3D} */ (o.parts.figure);
     const grown = o.form < 1 ? Math.max(0.02, 1 - Math.pow(1 - o.form, 2.2)) : 1;
     const glitch = grown < 1 ? (Math.random() - 0.5) * 0.2 * (1 - grown) : 0;
-    fig.scale.set(originalScale * (1 + (1 - grown) * 0.5 + glitch), originalScale * grown, originalScale * (1 + (1 - grown) * 0.5 + glitch));
-    fig.position.y = pose.lift * grown;
-    fig.rotation.set(pose.lean, o.heading, pose.roll, 'YXZ');
+    const size = o.size;
+    flinch(pose, o);
+    fig.scale.set(size * (1 + (1 - grown) * 0.5 + glitch), size * grown, size * (1 + (1 - grown) * 0.5 + glitch));
+    // Evolving: lifted off the ground, shaking.
+    const rising = o.evolve >= 0 ? Math.sin(Math.PI * o.evolve) : 0;
+    fig.position.y = pose.lift * grown + rising * 0.9 + (rising > 0 ? (Math.random() - 0.5) * 0.06 : 0);
+    fig.rotation.set(pose.lean - rising * 0.35, o.heading, pose.roll, 'YXZ');
     for (const name of PARTS) {
       if (name === 'body') continue;
       partTurn(name, pose, turn);
       o.parts[name].rotation.copy(turn);
     }
-    o.halo.rotation.y += dt * 2.2;
+    // The evolution's parts, grown in with it.
+    const sprout = o.evolved ? 1 : o.evolve >= 0 ? o.evolve * o.evolve * (3 - 2 * o.evolve) : 0;
+    const extraArms = /** @type {const} */ ([['armL2', 1], ['armR2', -1]]);
+    for (const [name, side] of extraArms) {
+      const pivot = o.parts[name];
+      pivot.visible = sprout > 0.01;
+      pivot.scale.setScalar(0.78 * sprout);
+      // Out of step with the arms above, reaching when it attacks.
+      pivot.rotation.set(Math.sin(o.bob + 1.3 * side) * 0.5 * Math.min(1, o.pace) - attack * 1.0 + rising * 0.8, 0, side * (0.3 + attack * 0.4 + rising * 0.6));
+    }
+    const scythes = /** @type {const} */ ([['scytheL', 1], ['scytheR', -1]]);
+    for (const [name, side] of scythes) {
+      const pivot = o.parts[name];
+      pivot.visible = sprout > 0.01;
+      pivot.scale.setScalar(sprout);
+      // Swaying over its shoulders; slashing down in turn when close.
+      const slash = attack > 0.5 ? 0.5 + 0.5 * Math.sin(clock * 8 + (side > 0 ? 0 : Math.PI)) : 0;
+      pivot.rotation.set(-0.15 + Math.sin(clock * 1.4 + side) * 0.12 + slash * 0.95 - rising * 0.5, 0, side * (0.12 + rising * 0.3));
+    }
+    o.halo2.visible = sprout > 0.01;
+    o.halo2.scale.setScalar(sprout);
+    o.halo2.rotation.y -= dt * 3.2;
+    o.halo.rotation.y += dt * (o.evolve >= 0 ? 9 : 2.2);
     o.halo.position.y = 2.32 + Math.sin(clock * 3) * 0.04;
     // Blocks orbiting it at different heights and speeds.
     for (let i = 0; i < o.orbit.count; i++) {
       const a = clock * (0.8 + (i % 5) * 0.25) + i * 2.399;
-      const r = (0.75 + (i % 3) * 0.25) * originalScale;
-      const y = (0.4 + ((i * 37) % 19) / 19 * 2) * originalScale * grown;
+      const r = (0.75 + (i % 3) * 0.25) * size * (1 + rising * 1.5);
+      const y = (0.4 + ((i * 37) % 19) / 19 * 2) * size * grown;
       euler.set(a * 2, a, 0);
       q.setFromEuler(euler);
       m4.compose(p.set(Math.cos(a) * r, y + Math.sin(a * 3 + i) * 0.1, Math.sin(a) * r), q, one);
@@ -610,7 +818,7 @@ export function createPatientZeroSystem(ctx) {
       linkTo = null;
       return;
     }
-    const from = p.set(original.pos.x, 1.5 * originalScale, original.pos.z);
+    const from = p.set(original.pos.x, 1.5 * original.size, original.pos.z);
     const d = sc.set(linkTo.pos.x, 1.1 * linkTo.form + 0.2, linkTo.pos.z).sub(from);
     const len = d.length();
     link.position.copy(from);
@@ -636,14 +844,14 @@ export function createPatientZeroSystem(ctx) {
     }
     ctx.events.emit('notice', { text: `🧟 PATIENT ZERO ${Math.round((original.hp / PZ.hp) * 100)}%` });
     ctx.systems.creatureSounds.play('snarl', original.pos, { pitch: 0.7, size: 1.3 });
-    // Blocks knocked off it.
-    if (swarm) swarm.burst(original.pos.x, 1.6, original.pos.z, 12, 4);
+    // The sparks and loose blocks are `wounded`'s, as for a clone.
     return false;
   }
 
   /** @returns {void} */
   function initPatientZero() {
     geo = buildReplicatorGeometry();
+    evolvedGeo = buildEvolvedGeometry();
     const shardGeo = new THREE.ConeGeometry(0.035, 0.32, 3);
     const shardMat = new THREE.MeshBasicMaterial({ color: PZ.halo });
     const blockGeo = withGlow(new THREE.BoxGeometry(0.055, 0.055, 0.055), REPLICATOR.green.clone().multiplyScalar(0.5));
@@ -663,7 +871,7 @@ export function createPatientZeroSystem(ctx) {
       Sim.three.scene.add(m);
       instanced[name] = m;
     }
-    swarm = createSwarm(Sim.three.scene);
+    swarm = createSwarm(Sim.three.scene, ctx);
     encircle = createEncircle(ctx, {
       clones: () => clones,
       warp,
@@ -705,7 +913,9 @@ export function createPatientZeroSystem(ctx) {
         killOriginal();
         return true;
       },
-      hitbox: (w) => ({ x: w.pos.x, z: w.pos.z, radius: 0.9, top: 2.8 }),
+      // Bigger once evolved.
+      hitbox: (w) => ({ x: w.pos.x, z: w.pos.z, radius: 0.9 * w.size / originalScale, top: 2.8 * w.size / originalScale }),
+      wounded: (w, hit) => wounded(w, hit),
       object: (w) => w.root,
       // The black hole: gone quietly. Its clones are swallowed one by one
       // (they are their own kind), not killed with it.
@@ -731,6 +941,7 @@ export function createPatientZeroSystem(ctx) {
         return true;
       },
       hitbox: (w) => ({ x: w.pos.x, z: w.pos.z, radius: 0.7, top: 2.1 }),
+      wounded: (w, hit) => wounded(w, hit),
       // Drawn instanced, from its pos: the black hole moves that.
       object: () => null,
       size: () => 1.8,
@@ -756,17 +967,28 @@ export function createPatientZeroSystem(ctx) {
     const enemies = ctx.systems.enemies;
     if (original) {
       const o = original;
-      if (!enemies.getState(o, 'frozen') && !build(o, dt)) {
+      if (!enemies.getState(o, 'frozen') && !build(o, dt) && o.evolve >= 0) {
+        evolveStep(o, dt);
+      } else if (!enemies.getState(o, 'frozen') && o.form >= 1 && !o.warp) {
+        // Left alive long enough, it evolves (once); a warning first.
+        if (!o.evolved) {
+          o.life += dt;
+          if (!o.warned && o.life >= PZ.evolveAfter - PZ.evolveWarn) {
+            o.warned = true;
+            ctx.events.emit('notice', { text: `☣ PATIENT ZERO WILL EVOLVE IN ${PZ.evolveWarn} s · kill the one with the crown` });
+          }
+          if (o.life >= PZ.evolveAfter) startEvolve(o);
+        }
         step(o, dt, true);
         if (o.budding > 0) o.budding -= dt;
         o.budTimer -= dt;
         if (o.budTimer <= 0) {
-          o.budTimer = PZ.cloneEvery;
+          o.budTimer = o.evolved ? PZ.evolvedCloneEvery : PZ.cloneEvery;
           const a = o.heading + (Math.random() < 0.5 ? -1 : 1) * (0.9 + Math.random() * 1.2);
           const x = o.pos.x + Math.sin(a) * 2.4;
           const z = o.pos.z + Math.cos(a) * 2.4;
           // Out of its chest, along the link.
-          const bud = addClone(x, z, o.pos.x, 1.5 * originalScale, o.pos.z, 0.35, PZ.budBlocks);
+          const bud = addClone(x, z, o.pos.x, 1.5 * o.size, o.pos.z, 0.35, PZ.budBlocks);
           if (bud) {
             linkTo = bud;
             o.budding = PZ.formSeconds;
@@ -809,7 +1031,9 @@ export function createPatientZeroSystem(ctx) {
     }
     if (originalMat) {
       originalMat.userData.glow.value = 1.3 * Math.max(1, level) * breathe;
-      originalMat.userData.tint.value.copy(tint);
+      // Evolved, it burns hot whatever the swarm's count.
+      const oh = original && (original.evolved || original.evolve >= 0) ? Math.max(h, 0.8) : h;
+      originalMat.userData.tint.value.setRGB(1, 1, 1).lerp(PZ.heatTint, oh);
     }
     writeInstances();
     writeOriginal(dt);
@@ -844,6 +1068,8 @@ export function createPatientZeroSystem(ctx) {
     instanced = null;
     if (geo) for (const g of Object.values(geo)) g.dispose();
     geo = null;
+    if (evolvedGeo) for (const g of Object.values(evolvedGeo)) g.dispose();
+    evolvedGeo = null;
     if (swarm) swarm.dispose();
     swarm = null;
     if (encircle) encircle.dispose();
