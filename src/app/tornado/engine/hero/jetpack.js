@@ -11,17 +11,25 @@ import { createSoftDotTexture } from '../../utils/textures.js';
  * jump", on request):
  *
  *  - **Space on the ground**: a plain jump, about a metre, free.
- *  - **Space again in the air**: the jetpack on his back fires for
- *    JETPACK.burnSeconds -- climbing at up to JETPACK.climbSpeed and driving
- *    him ahead (the way he faces on foot, the way he looks or walks in first
- *    person) at up to JETPACK.flySpeed -- with two flames under the nozzles,
- *    smoke and a roar (sound/grappleJet.js). Once a flight, for one energy
- *    segment (engine/player/abilities.js, its HUD slot "Space JETPACK") and a
- *    cooldown. It burns out and he comes down under gravity, carried on by
+ *  - **Space again in the air**: the jetpack fires for JETPACK.burnSeconds,
+ *    and flies the way the one in San Andreas does (on request, 2026-10-04):
+ *    **Space held climbs** (up to JETPACK.climbSpeed), **let go it hovers**
+ *    (sinking JETPACK.hoverSink), and W A S D fly him about at up to
+ *    JETPACK.flySpeed (the way he faces on foot, the way he looks in first
+ *    person) -- no keys, he holds his place in the air. Two flames from the
+ *    thrusters at his hips, longer as he climbs, smoke and a roar
+ *    (sound/grappleJet.js). Once a flight, for one energy segment
+ *    (engine/player/abilities.js, its HUD slot "Space JETPACK") and a
+ *    cooldown. It runs dry and he comes down under gravity, carried on by
  *    the speed he has, steering a little.
  *
- * About twenty metres up at the top: over the houses, the shops and the
- * townhouses, and onto a roof if he comes down over one. A roof is ground
+ * The pack is the San Andreas kind: a frame on his back, a fuel tank across
+ * it, two fat thrusters out at his hips on struts with bell nozzles, and a
+ * control arm from each to a grip in front of him, which he holds while it
+ * burns -- upright, legs dangling.
+ *
+ * Over the houses, the shops and the townhouses, and onto a roof if he comes
+ * down over one. A roof is ground
  * (groundAt): he stands and walks on it, and walks off the edge and falls.
  * The walls he cannot clear still stop him (movement.js pushOut with his
  * height). A building that collapses under him drops him with it. Nothing
@@ -42,11 +50,12 @@ export const JETPACK = {
   maxFall: 32,          // m/s, terminal
   cost: 1,              // energy segments (10%)
   cooldown: 3,          // seconds, after the burn
-  burnSeconds: 1.5,     // how long it fires
-  climbSpeed: 13,       // m/s up at full thrust
-  lift: 42,             // m/s^2 towards climbSpeed
-  flySpeed: 15,         // m/s ahead while it burns
-  thrust: 22,           // m/s^2 towards flySpeed
+  burnSeconds: 4,       // the fuel: how long it fires (1.5 before the San Andreas pack)
+  climbSpeed: 11,       // m/s up with Space held
+  hoverSink: 0.6,       // m/s down with Space let go: a hover
+  lift: 30,             // m/s^2 towards climbSpeed / the hover
+  flySpeed: 12,         // m/s about with W A S D while it burns
+  thrust: 16,           // m/s^2 towards flySpeed (and to a stop with no keys)
   airControl: 5,        // m/s^2 of steering once it has burned out
   stepUp: 0.35,         // a ledge this high is stepped onto (and a roof is landed on from this far below its top)
   landShake: 0.45,      // a hard landing's camera shake, at most
@@ -104,6 +113,8 @@ export function createHeroJetpack(ctx, S, api) {
     const st = S.state;
     if (st.phase !== 'running' && st.phase !== 'aiming') return;
     if (st.zipActive) return;
+    // Already burning: Space held is the climb (S.keys.jump), nothing more.
+    if (st.jetBurn > 0) return;
     if (!st.airborne) {
       st.vy = JETPACK.jumpSpeed;
       st.airborne = true;
@@ -187,12 +198,15 @@ export function createHeroJetpack(ctx, S, api) {
     let wx = wishX;
     let wz = wishZ;
     if (burning) {
-      // Ahead at full speed: where the keys point, else where he faces.
+      // Where the keys point at flying speed; no keys, he holds his place.
       const len = Math.hypot(wishX, wishZ);
-      const fx = len > 1e-3 ? wishX / len : Math.sin(st.heading);
-      const fz = len > 1e-3 ? wishZ / len : Math.cos(st.heading);
-      wx = fx * JETPACK.flySpeed;
-      wz = fz * JETPACK.flySpeed;
+      wx = len > 1e-3 ? (wishX / len) * JETPACK.flySpeed : 0;
+      wz = len > 1e-3 ? (wishZ / len) * JETPACK.flySpeed : 0;
+      // Backing off is slower, as on foot.
+      if (len > 1e-3 && st.phase === 'running' && S.keys.down && !S.keys.up) {
+        wx *= 0.5;
+        wz *= 0.5;
+      }
     }
     if (burning || steering) {
       const accel = (burning ? JETPACK.thrust : JETPACK.airControl) * dt;
@@ -224,7 +238,10 @@ export function createHeroJetpack(ctx, S, api) {
     const p = S.roger.mesh.position;
     if (st.jetBurn > 0) {
       st.jetBurn = Math.max(0, st.jetBurn - dt);
-      st.vy = Math.min(JETPACK.climbSpeed, st.vy + JETPACK.lift * dt);
+      // Space held: climb; let go: hover, sinking slowly.
+      const want = S.keys.jump ? JETPACK.climbSpeed : -JETPACK.hoverSink;
+      const step = JETPACK.lift * dt;
+      st.vy = st.vy < want ? Math.min(want, st.vy + step) : Math.max(want, st.vy - step);
       if (st.jetBurn <= 0) cutOut();
     } else if (st.airborne) {
       st.vy = Math.max(-JETPACK.maxFall, st.vy - JETPACK.gravity * dt);
@@ -330,74 +347,104 @@ export function createHeroJetpack(ctx, S, api) {
   }
 
   /**
-   * The pack on Roger's back: two tanks, two nozzles and a flame under
-   * each. Parts of his mesh (in its built units), in the run's geometry and
-   * material lists.
+   * The pack, San Andreas style: a frame on his back with a fuel tank across
+   * it, a strut out to each hip carrying a fat thruster with a bell nozzle,
+   * and a control arm from each thruster forward to a grip he holds. A flame
+   * and a white-hot core under each nozzle. Parts of his mesh (in its built
+   * units), in the run's geometry and material lists.
    * @param {Object} roger the figure from buildRoger
    * @returns {void}
    */
   function attachJetpack(roger) {
-    const metal = api.keepMat(new THREE.MeshStandardMaterial({ color: 0x5b6470, metalness: 0.75, roughness: 0.35 }));
-    const dark = api.keepMat(new THREE.MeshStandardMaterial({ color: 0x1b1e23, metalness: 0.6, roughness: 0.5 }));
-    const stripe = api.keepMat(new THREE.MeshBasicMaterial({ color: 0xffb02e }));
+    const metal = api.keepMat(new THREE.MeshStandardMaterial({ color: 0x4a4f57, metalness: 0.8, roughness: 0.35 }));
+    const chrome = api.keepMat(new THREE.MeshStandardMaterial({ color: 0xc9ced6, metalness: 1, roughness: 0.18 }));
+    const dark = api.keepMat(new THREE.MeshStandardMaterial({ color: 0x17191d, metalness: 0.5, roughness: 0.6 }));
+    const warn = api.keepMat(new THREE.MeshBasicMaterial({ color: 0xffb02e }));
     const flameMat = api.keepMat(new THREE.MeshBasicMaterial({
-      color: 0xff7a1a, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false
+      color: 0xff8a26, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false
     }));
     const coreMat = api.keepMat(new THREE.MeshBasicMaterial({
-      color: 0xfff2b0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false
+      color: 0xbfe4ff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false
     }));
-    const tankGeo = api.keepGeo(new THREE.CylinderGeometry(0.085, 0.085, 0.46, 12));
-    const capGeo = api.keepGeo(new THREE.SphereGeometry(0.085, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2));
-    const nozzleGeo = api.keepGeo(new THREE.CylinderGeometry(0.06, 0.09, 0.1, 12, 1, true));
-    const stripeGeo = api.keepGeo(new THREE.CylinderGeometry(0.087, 0.087, 0.035, 12));
-    const frameGeo = api.keepGeo(new THREE.BoxGeometry(0.3, 0.36, 0.05));
+    const box = (/** @type {number} */ w, /** @type {number} */ h, /** @type {number} */ d) => api.keepGeo(new THREE.BoxGeometry(w, h, d));
+    const cyl = (/** @type {number} */ rt, /** @type {number} */ rb, /** @type {number} */ h, open = false) => api.keepGeo(new THREE.CylinderGeometry(rt, rb, h, 14, 1, open));
+    /**
+     * A rod from a to b (local units).
+     * @param {THREE.Vector3} a
+     * @param {THREE.Vector3} b
+     * @param {number} r
+     * @param {THREE.Material} mat
+     * @returns {THREE.Mesh}
+     */
+    const rod = (a, b, r, mat) => {
+      const len = a.distanceTo(b);
+      const m = new THREE.Mesh(cyl(r, r, len), mat);
+      m.position.copy(a).add(b).multiplyScalar(0.5);
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3().subVectors(b, a).normalize());
+      return m;
+    };
     // A flame: a cone hanging point-down from the nozzle, scaled by the thrust.
-    const flameGeo = api.keepGeo(new THREE.ConeGeometry(0.075, 1, 10, 1, true));
+    const flameGeo = api.keepGeo(new THREE.ConeGeometry(0.1, 1, 12, 1, true));
     flameGeo.rotateX(Math.PI);
     flameGeo.translate(0, -0.5, 0);
-    const coreGeo = api.keepGeo(new THREE.ConeGeometry(0.04, 1, 8, 1, true));
+    const coreGeo = api.keepGeo(new THREE.ConeGeometry(0.055, 1, 10, 1, true));
     coreGeo.rotateX(Math.PI);
     coreGeo.translate(0, -0.5, 0);
 
     const pack = new THREE.Group();
     pack.name = 'hero_jetpack';
-    const frame = new THREE.Mesh(frameGeo, dark);
-    frame.position.set(0, 0, 0.03);
-    pack.add(frame);
+    // The frame on his back and the tank across it, in Roger's own frame
+    // (feet at 0, +z ahead).
+    const plate = new THREE.Mesh(box(0.36, 0.5, 0.06), dark);
+    plate.position.set(0, 1.25, -0.36);
+    const tank = new THREE.Mesh(cyl(0.09, 0.09, 0.46), metal);
+    tank.rotation.z = Math.PI / 2;
+    tank.position.set(0, 1.38, -0.44);
+    tank.castShadow = true;
+    const band = new THREE.Mesh(cyl(0.093, 0.093, 0.04), warn);
+    band.rotation.z = Math.PI / 2;
+    band.position.set(0, 1.38, -0.44);
+    pack.add(plate, tank, band);
     /** @type {THREE.Mesh[]} */
     const flames = [];
     /** @type {THREE.Mesh[]} */
     const cores = [];
     for (const side of [-1, 1]) {
-      const tank = new THREE.Mesh(tankGeo, metal);
-      tank.position.set(side * 0.1, 0, -0.04);
-      tank.castShadow = true;
-      const cap = new THREE.Mesh(capGeo, metal);
-      cap.position.set(0, 0.23, 0);
-      tank.add(cap);
-      const band = new THREE.Mesh(stripeGeo, stripe);
-      band.position.set(0, 0.1, 0);
-      tank.add(band);
-      const noz = new THREE.Mesh(nozzleGeo, dark);
-      noz.position.set(0, -0.28, 0);
-      tank.add(noz);
+      // The strut round to the hip, the thruster on it.
+      const hip = new THREE.Vector3(side * 0.43, 0.98, -0.05);
+      pack.add(rod(new THREE.Vector3(side * 0.14, 1.12, -0.38), new THREE.Vector3(side * 0.43, 1.02, -0.12), 0.025, chrome));
+      const pod = new THREE.Mesh(cyl(0.12, 0.12, 0.38), metal);
+      pod.position.copy(hip);
+      pod.castShadow = true;
+      const cap = new THREE.Mesh(api.keepGeo(new THREE.SphereGeometry(0.12, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2)), chrome);
+      cap.position.set(0, 0.19, 0);
+      pod.add(cap);
+      const ring = new THREE.Mesh(cyl(0.125, 0.125, 0.04), warn);
+      ring.position.set(0, 0.08, 0);
+      pod.add(ring);
+      const bell = new THREE.Mesh(cyl(0.085, 0.14, 0.14, true), dark);
+      bell.position.set(0, -0.26, 0);
+      pod.add(bell);
+      // The control arm, forward from the thruster to the grip.
+      const grip = new THREE.Vector3(side * 0.3, 1.02, 0.34);
+      pack.add(rod(new THREE.Vector3(side * 0.43, 1.05, 0.08), grip, 0.022, chrome));
+      const handle = new THREE.Mesh(cyl(0.032, 0.032, 0.14), dark);
+      handle.position.copy(grip);
+      pack.add(handle);
       const flame = new THREE.Mesh(flameGeo, flameMat);
       flame.position.set(0, -0.32, 0);
       flame.visible = false;
       flame.frustumCulled = false;
-      tank.add(flame);
+      pod.add(flame);
       const core = new THREE.Mesh(coreGeo, coreMat);
       core.position.set(0, -0.32, 0);
       core.visible = false;
       core.frustumCulled = false;
-      tank.add(core);
+      pod.add(core);
       flames.push(flame);
       cores.push(core);
-      pack.add(tank);
+      pack.add(pod);
     }
-    // High on the back, behind the Katana's sheath.
-    pack.position.set(0, 1.12, -0.4);
-    pack.rotation.x = 0.08;
     roger.mesh.add(pack);
     rig = { pack, flames, cores };
   }
@@ -420,14 +467,17 @@ export function createHeroJetpack(ctx, S, api) {
         flame.visible = core.visible = k > 0;
         if (k <= 0) continue;
         const wobble = 0.85 + 0.3 * Math.abs(Math.sin(flicker + i * 1.7)) + Math.random() * 0.12;
-        flame.scale.set(1 + 0.15 * wobble, (0.7 + 0.6 * k) * wobble, 1 + 0.15 * wobble);
-        core.scale.set(1, (0.35 + 0.3 * k) * wobble, 1);
+        // Longer while he climbs, a short steady jet in the hover.
+        const climb = THREE.MathUtils.clamp(st.vy / JETPACK.climbSpeed, 0, 1);
+        const len = (0.45 + 0.9 * climb) * k;
+        flame.scale.set(1 + 0.15 * wobble, len * wobble, 1 + 0.15 * wobble);
+        core.scale.set(1, len * 0.55 * wobble, 1);
         if (dt > 0) {
           // Smoke from under the nozzle, blown down and back.
           core.getWorldPosition(nozzle);
           nozzle.y -= 0.3;
           const owed = JETPACK.smokeRate * dt + Math.random();
-          puff(nozzle.x, nozzle.y, nozzle.z, Math.floor(owed), 7);
+          puff(nozzle.x, nozzle.y, nozzle.z, Math.floor(owed * (0.5 + climb)), 7);
         }
       }
       // The pack is seen in first person only from outside; hide nothing.
@@ -445,9 +495,10 @@ export function createHeroJetpack(ctx, S, api) {
   }
 
   /**
-   * The pose in the air, over the walk: legs together and trailing, arms
-   * back for the burn, out for balance in the fall. Not while dazed or
-   * aiming (the rifle and the Katana keep their arms).
+   * The pose in the air, over the walk. On the jetpack, San Andreas style:
+   * upright, a hand on each grip in front of him, legs dangling and swinging
+   * a little with the way he flies. Falling: legs trailing, arms out for
+   * balance. Not while dazed; the rifle and the Katana keep their arms.
    * @param {Object} L the limbs
    * @param {any} root
    * @param {boolean} armsFree
@@ -457,15 +508,26 @@ export function createHeroJetpack(ctx, S, api) {
     const st = S.state;
     const burning = st.jetBurn > 0;
     const t = flicker * 0.05;
-    L.legL.rotation.set(burning ? 0.25 : -0.35 + Math.sin(t * 6) * 0.15, 0, -0.05);
-    L.legR.rotation.set(burning ? 0.35 : 0.2 - Math.sin(t * 6) * 0.15, 0, 0.05);
-    root.rotation.x = burning ? 0.32 : 0.1;
+    if (burning) {
+      // A lean into the way he flies, as the pack tilts.
+      const fwd = st.airVx * Math.sin(st.heading) + st.airVz * Math.cos(st.heading);
+      const lean = THREE.MathUtils.clamp(fwd / JETPACK.flySpeed, -1, 1) * 0.18;
+      const sway = Math.sin(t * 5) * 0.08;
+      L.legL.rotation.set(0.12 + sway - lean, 0, -0.06);
+      L.legR.rotation.set(0.18 - sway - lean, 0, 0.06);
+      root.rotation.x = 0.04 + lean;
+    } else {
+      L.legL.rotation.set(-0.35 + Math.sin(t * 6) * 0.15, 0, -0.05);
+      L.legR.rotation.set(0.2 - Math.sin(t * 6) * 0.15, 0, 0.05);
+      root.rotation.x = 0.1;
+    }
     root.rotation.z = 0;
     if (S.roger.torso) S.roger.torso.rotation.y = 0;
     if (!armsFree) return;
     if (burning) {
-      L.armL.rotation.set(0.5, 0, -0.35);
-      L.armR.rotation.set(0.5, 0, 0.35);
+      // Down and forward to the grips at his hips.
+      L.armL.rotation.set(-0.62, 0, -0.32);
+      L.armR.rotation.set(-0.62, 0, 0.32);
     } else {
       L.armL.rotation.set(-0.3, 0, -1.25);
       L.armR.rotation.set(-0.3, 0, 1.25);

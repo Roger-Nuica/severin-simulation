@@ -130,7 +130,9 @@ export function createHeroInput(ctx, S, api) {
             S.weapons.katanaCancel();
           } else if (code === 'Space') {
             // Space: a jump on the ground, the jetpack in the air
-            // (hero/jetpack.js); not dazed or frozen.
+            // (hero/jetpack.js); not dazed or frozen. Held, the lit jetpack
+            // climbs; let go, it hovers.
+            S.keys.jump = true;
             if ((phase() === 'running' || phase() === 'aiming') && !(S.state.frozen > 0)) api.pressJump();
           } else if ((phase() === 'running' || phase() === 'aiming' || phase() === 'dazed') && !(S.state.frozen > 0)) {
             ctx.systems.abilities.press(code);
@@ -139,6 +141,7 @@ export function createHeroInput(ctx, S, api) {
         }
         case 'keyup':
           if (isEnter(e.code)) releaseTrigger();
+          if (e.code === 'Space') S.keys.jump = false;
           break;
         case 'wheel':
           if (phase() === 'running' || phase() === 'aiming' || phase() === 'dazed') {

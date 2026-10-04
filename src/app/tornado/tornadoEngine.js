@@ -28,6 +28,7 @@ import { createHeroSoundSystem } from './engine/sound/hero.js';
 import { createBlackHoleSoundSystem } from './engine/sound/blackHole.js';
 import { createKatanaSoundSystem } from './engine/sound/katana.js';
 import { createGrappleJetSoundSystem } from './engine/sound/grappleJet.js';
+import { createReplicatorSoundSystem } from './engine/sound/replicator.js';
 import { createEmpChargeSystem } from './engine/empCharge.js';
 import { createEmpHumSoundSystem } from './engine/sound/empHum.js';
 import { createCreatureSoundSystem } from './engine/sound/creatures.js';
@@ -811,6 +812,8 @@ export function createSimulation(container) {
   register('katanaSound', createKatanaSoundSystem(ctx));
   // The grappling hook's GET OVER HERE! and chain, the jump and the jetpack (sound/grappleJet.js).
   register('grappleJetSound', createGrappleJetSoundSystem(ctx));
+  // Patient Zero the Replicator: its building, shattering, swarm call and shards (sound/replicator.js).
+  register('replicatorSound', createReplicatorSoundSystem(ctx));
   const heroSystem = createHeroModeSystem(ctx);
   register('heroMode', heroSystem);
   const { initHero, updateHero, resetHero, disposeHero } = heroSystem;
@@ -1586,6 +1589,7 @@ export function createSimulation(container) {
     ctx.systems.heroSound.disposeHeroSound();
     ctx.systems.katanaSound.disposeKatanaSound();
     ctx.systems.grappleJetSound.disposeGrappleJetSound();
+    ctx.systems.replicatorSound.disposeReplicatorSound();
     for (const { groundFx: { GroundSpray, PathTrack } } of tornadoRegistry.instances) {
       if (GroundSpray.points) {
         Sim.three.scene.remove(GroundSpray.points);

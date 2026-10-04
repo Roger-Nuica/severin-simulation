@@ -287,7 +287,8 @@ export function createHeroModeSystem(ctx) {
       tornadoes: 1
     },
     // W A S D: the only movement keys, in every mode (the arrows do nothing).
-    keys: { up: false, down: false, left: false, right: false },
+    // jump: Space held (the jetpack climbs while it is, hero/jetpack.js).
+    keys: { up: false, down: false, left: false, right: false, jump: false },
   
     /** @type {Object|null} Roger: a people.js figure, never in Sim.objects */
     roger: null,
