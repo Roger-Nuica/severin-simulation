@@ -1414,11 +1414,9 @@ export function createNetSystem(ctx) {
           break;
         case 'wheel': {
           if (!up) break;
-          const fromKatana = WEAPONS[S.weapon] === 'katana';
           S.weapon = (S.weapon + e.dir + WEAPONS.length) % WEAPONS.length;
+          // As Roger's: first person stays up across the wheel, the Katana included.
           S.buttons.fire = false;
-          // As Roger's: wheeling off or onto the Katana lowers first person.
-          if (S.buttons.aim && (fromKatana || WEAPONS[S.weapon] === 'katana')) leavePeerAim();
           break;
         }
         case 'blur':

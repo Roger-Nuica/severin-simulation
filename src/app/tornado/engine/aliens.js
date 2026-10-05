@@ -802,6 +802,19 @@ export function createAliensSystem(ctx) {
       }
       api.fireRay(new THREE.Vector3(hero.x + 30, 34, hero.z - 20), new THREE.Vector3(hero.x + 6, 1.5, hero.z + 4), 'red');
       return n;
+    },
+    /** For testing from the console: steps a hunter's tracking laser by `dt`, its foot set down 14 m in front of Roger, from 40 m up beyond it (it can hurt him: use V). */
+    debugLaser: (/** @type {number} */ dt = 1 / 60) => {
+      const hero = api.heroTarget(0, 0);
+      const pose = ctx.systems.heroMode && ctx.systems.heroMode.rogerPose();
+      const tr = S.hunterTrackers[0];
+      if (!hero || !tr || !pose) return false;
+      const fx = Math.sin(pose.heading), fz = Math.cos(pose.heading);
+      const fresh = !tr.active;
+      if (fresh) tr.cooldown = 0;
+      api.updateTracker(tr, S.trackerFrom.set(hero.x + fx * 45 + fz * 12, 40, hero.z + fz * 45 - fx * 12), true, dt);
+      if (fresh && tr.active) { tr.fx = hero.x + fx * 14; tr.fz = hero.z + fz * 14; }
+      return tr.active;
     }, nearestAlien: api.nearestAlien, strikeAlien: api.strikeAlien, targets, eachCuttable,
     shipTargets: api.shipTargets, huntersPresent: api.huntersPresent, plannedSpot: api.plannedSpot, frameLanding: api.frameLanding, plasmaKill: api.plasmaKill, boltKill: api.boltKill,
     sendSecondWave: api.sendSecondWave, mutate: api.mutate, mutatedCount: api.mutatedCount, instanceSources,

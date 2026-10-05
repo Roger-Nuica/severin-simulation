@@ -162,14 +162,11 @@ export function createHeroInput(ctx, S, api) {
         case 'wheel':
           if (phase() === 'running' || phase() === 'aiming' || phase() === 'dazed') {
             api.cancelCharge();
-            const fromKatana = S.weapons.current() === 'katana';
             S.weapons.cycle(e.dir);
-            // Leaving the Katana puts the first-person view away (the follow
-            // camera, FOV, Roger and the cursor back); the other weapons keep
-            // their raised state as before.
-            // Wheeling ONTO the Katana from a raised weapon lowers it as well:
-            // first person for the Katana is entered by right-click only.
-            if (phase() === 'aiming' && (fromKatana || S.weapons.current() === 'katana')) api.leaveAim();
+            // First person stays up across the whole wheel, the Katana
+            // included (user request 2026-10-05): the view in hand, the
+            // blade and the crosshair follow the weapon each frame
+            // (hero/screen.js placeAimCamera, heroWeapons.showView).
             if (S.viewRifle) S.viewRifle.group.visible = phase() === 'aiming' && S.weapons.current() === 'rifle';
           }
           break;
