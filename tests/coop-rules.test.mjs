@@ -8,6 +8,22 @@ import { createPlayerRegistry, REVIVE } from '../src/app/tornado/engine/net/play
 const input = (o = {}) => ({ type: 'input', v: 2, seq: 1, mx: 0, mz: 1, yaw: 0, pitch: 0, fire: false, aim: false, weapon: 0, abil: 0, use: false, hero: false, ...o });
 
 // ---- input gate ----
+test('gate exposes the latest accepted seq per known peer as ack rows', () => {
+  const g = createInputGate({ now: () => 0 });
+  const known = (id) => id === '1' || id === '2';
+  assert.deepEqual(g.acks(known), []);
+  g.accept({ ...input({ seq: 3 }), from: '1' }, known);
+  g.accept({ ...input({ seq: 7 }), from: '2' }, known);
+  g.accept({ ...input({ seq: 2 }), from: '1' }, known); // stale: ack stays at 3
+  g.accept({ ...input({ seq: 9, mx: 5 }), from: '2' }, known); // invalid: ack stays at 7
+  assert.deepEqual(g.acks(known), [[1, 3], [2, 7]]);
+  assert.deepEqual(g.acks((id) => id === '2'), [[2, 7]]);
+  g.forget('1');
+  assert.deepEqual(g.acks(known), [[2, 7]]);
+  g.clear();
+  assert.deepEqual(g.acks(known), []);
+});
+
 test('gate binds to the relay-stamped id and drops unknown peers', () => {
   const g = createInputGate({ now: () => 0 });
   assert.equal(g.accept({ ...input(), from: '9' }, (id) => id === '1').error, 'unknown-peer');

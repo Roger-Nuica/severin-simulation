@@ -154,6 +154,11 @@ export function validateInput(msg) {
  * The client derives the bar's glow from `sinceLastDamage`; glow itself is
  * never sent. The players row keeps its nine columns on purpose: a longer
  * row would fail an older client's strict row-width check.
+ * Optional `ack` (added for client-side prediction; absent from older hosts,
+ * and ignored by older clients, which read only the listed fields):
+ *   ack          [playerId, lastAcceptedInputSeq]
+ * The last input `seq` the host accepted from each guest (the host itself,
+ * id 0, never sends inputs and has no row). Same additive rule as `hp`.
  * @typedef {{type:'snapshot', v:number, room:string, tick:number, t:number,
  *   score:number, players:number[][], tornadoes:number[][], terminators:number[][],
  *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][]}} Snapshot
@@ -190,6 +195,13 @@ export function validateSnapshot(msg) {
     for (const row of msg.hp) {
       if (!Array.isArray(row) || row.length !== 3 || !row.every(num)) return { ok: false, error: 'hp' };
       if (!inRange(row[1], 0, 1000) || row[2] < 0) return { ok: false, error: 'hp' };
+    }
+  }
+  if (msg.ack !== undefined) {
+    if (!Array.isArray(msg.ack) || msg.ack.length > LIMITS.maxPerKind) return { ok: false, error: 'ack' };
+    for (const row of msg.ack) {
+      if (!Array.isArray(row) || row.length !== 2 || !row.every(num)) return { ok: false, error: 'ack' };
+      if (!Number.isInteger(row[0]) || !Number.isInteger(row[1]) || row[1] < 0 || row[1] > 0x7fffffff) return { ok: false, error: 'ack' };
     }
   }
   return { ok: true };

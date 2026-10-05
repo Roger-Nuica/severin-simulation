@@ -60,6 +60,17 @@ test('snapshot hp field is optional and validated (older hosts omit it)', () => 
   assert.equal(validateSnapshot(snap({ players: [[0, 1, 2, 0, 0, 0, 100, -1, -1, 80]] })).ok, false);
 });
 
+test('snapshot ack field is optional and validated (older hosts omit it)', () => {
+  assert.equal('ack' in snap(), false);
+  assert.equal(validateSnapshot(snap()).ok, true);
+  assert.equal(validateSnapshot(snap({ ack: [] })).ok, true);
+  assert.equal(validateSnapshot(snap({ ack: [[1, 0], [2, 4096]], hp: [[1, 100, 0]] })).ok, true);
+  const bad = [{ ack: 'x' }, { ack: [[1]] }, { ack: [[1, 2, 3]] }, { ack: [[1, -1]] }, { ack: [[1, 1.5]] }, { ack: [[1.5, 1]] }, { ack: [[1, NaN]] }, { ack: [[1, 0x80000000]] }, { ack: new Array(65).fill([1, 1]) }];
+  for (const b of bad) assert.equal(validateSnapshot(snap(b)).error, 'ack', JSON.stringify(b));
+  assert.equal(validateSnapshot(snap({ players: [[0, 1, 2, 0, 0, 0, 100, -1, -1, 80]], ack: [[1, 1]] })).ok, false);
+  assert.equal(V, 2);
+});
+
 test('playerDamage is a replicable event', () => {
   assert.equal(validateEvent({ type: 'event', v: V, id: 1, kind: 'playerDamage', data: { id: 1, source: 'blackHole', amount: 100 } }).ok, true);
 });

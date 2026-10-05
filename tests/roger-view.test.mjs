@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  rogerStyle, newRunCycle, stepRunCycle, swingLimbs, kneeBend, newCameraPose, followCamera, wheelHtml, WHEEL_NAMES
+  rogerStyle, newRunCycle, stepRunCycle, swingLimbs, kneeBend, newCameraPose, followCamera, wheelHtml, WHEEL_NAMES,
+  wrapAngle, newFireLatch, fireLatchPress, fireLatchRelease, fireLatchSample
 } from '../src/app/tornado/engine/net/rogerView.js';
 import { createPlayerRegistry } from '../src/app/tornado/engine/net/players.js';
 import { isHittable } from '../src/app/tornado/engine/health/state.js';
@@ -104,4 +105,47 @@ test('a new run gives every guest the spawn shield and leaves Roger to his own',
   assert.equal(isHittable(reg.get('1')), true);
   reg.resetRun();
   assert.equal(reg.get('1').shield, 0, 'no argument keeps the old behaviour');
+});
+
+test('wrapAngle keeps any yaw inside the protocol range and the same direction', () => {
+  for (const a of [0, 1, -1, Math.PI, -Math.PI, 7 * Math.PI, -9.3, 100, -100, 4 * Math.PI + 0.2]) {
+    const w = wrapAngle(a);
+    assert.ok(w > -Math.PI && w <= Math.PI, `wrapped ${a} -> ${w}`);
+    assert.ok(Math.abs(w) <= 4 * Math.PI, 'inside the validator limit');
+    assert.ok(Math.abs(Math.sin(w) - Math.sin(a)) < 1e-9);
+    assert.ok(Math.abs(Math.cos(w) - Math.cos(a)) < 1e-9);
+  }
+  assert.equal(wrapAngle(0.5), 0.5, 'in-range values are untouched');
+  assert.equal(wrapAngle(NaN), 0);
+  assert.equal(wrapAngle(Infinity), 0);
+});
+
+test('a click shorter than one input interval is still sent once', () => {
+  let l = newFireLatch();
+  assert.equal(fireLatchSample(l).fire, false, 'idle sends no fire');
+  l = fireLatchPress(l);
+  l = fireLatchRelease(l); // pressed and released between two samples
+  const first = fireLatchSample(l);
+  assert.equal(first.fire, true, 'the click is held for one message');
+  const second = fireLatchSample(first.next);
+  assert.equal(second.fire, false, 'and then released');
+});
+
+test('a held fire stays on across samples and a release clears it', () => {
+  let l = fireLatchPress(newFireLatch());
+  for (let i = 0; i < 3; i += 1) {
+    const s = fireLatchSample(l);
+    assert.equal(s.fire, true);
+    l = s.next;
+  }
+  l = fireLatchRelease(l);
+  assert.equal(fireLatchSample(l).fire, false);
+});
+
+test('the latch is immutable: each step returns a new value', () => {
+  const a = newFireLatch();
+  const b = fireLatchPress(a);
+  assert.deepEqual(a, { down: false, pending: false });
+  assert.deepEqual(b, { down: true, pending: true });
+  assert.notEqual(newFireLatch(), newFireLatch());
 });

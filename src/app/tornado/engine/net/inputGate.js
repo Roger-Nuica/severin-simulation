@@ -48,6 +48,22 @@ export function createInputGate(opts = {}) {
       p.seq = v.input.seq;
       return { ok: true, id: from, input: v.input };
     },
+    /**
+     * The latest accepted input `seq` per peer, as snapshot `ack` rows
+     * `[playerId, seq]`. Peers that have not yet had an input accepted are
+     * left out (their seq is still -1).
+     * @param {(id: string) => boolean} known whether the id is a joined player
+     * @returns {number[][]}
+     */
+    acks(known) {
+      /** @type {number[][]} */
+      const rows = [];
+      for (const [id, p] of peers) {
+        const n = Number(id);
+        if (p.seq >= 0 && Number.isInteger(n) && known(id)) rows.push([n, p.seq]);
+      }
+      return rows;
+    },
     /** @param {string} id */
     forget(id) { peers.delete(id); },
     clear() { peers.clear(); }

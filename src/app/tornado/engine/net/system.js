@@ -6,7 +6,10 @@ import { createSnapshotBuffer } from './interp.js';
 import { createEventEmitter, createEventDeduper } from './events.js';
 import { createPlayerRegistry, REVIVE, FRIENDLY_FIRE } from './players.js';
 import { PROTOCOL_VERSION, LIMITS, WEAPONS } from './protocol.js';
+import { GUEST_WEAPONS, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrigger, coolDown } from './guestWeapons.js';
 import { HERO } from '../hero/config.js';
+import { stepMove } from './movement.js';
+import { newPrediction, viewPoint, predictFrame, recordSent, reconcile } from './prediction.js';
 import { HOLE } from '../player/blackHole.js';
 import { ENERGY } from '../player/energy.js';
 import { IMPACT_SCORE } from '../damage/config.js';
@@ -14,7 +17,8 @@ import { HEALTH } from '../health/config.js';
 import { glowLevel } from '../health/state.js';
 import { mayHurtPlayer, splashAmount, rayBodyDistance, inSector } from '../health/friendlyFire.js';
 import { dressAsRoger, rogerLimbs, newOwned, disposeRoger } from '../hero/rogerLook.js';
-import { rogerStyle, newRunCycle, stepRunCycle, swingLimbs, newCameraPose, followCamera, wheelHtml } from './rogerView.js';
+import { rogerStyle, newRunCycle, stepRunCycle, swingLimbs, newCameraPose, followCamera, wheelHtml, wrapAngle, newFireLatch, fireLatchPress, fireLatchRelease, fireLatchSample } from './rogerView.js';
+import { createNetMetrics, isNetDebug } from './metrics.js';
 import { createHeroRequests, heroRequestOutcome, mayRequestLock, HERO_FLAG_SECONDS } from './heroRequest.js';
 
 /**
@@ -64,16 +68,13 @@ const VERSION_TEXT = 'Version mismatch: refresh the page (Ctrl+Shift+R) so host 
 
 const SNAP_INTERVAL = 1 / LIMITS.snapshotHz;
 const INPUT_INTERVAL = 1 / 30;
-/** Hitscan weapons: the damage type each answers with in the enemy registry. */
-const GUEST_WEAPONS = {
-  rifle: { type: /** @type {const} */ ('plasma'), cooldown: 0.45, range: 140 },
-  minigun: { type: /** @type {const} */ ('bullet'), cooldown: 0.09, range: 100 },
-  railgun: { type: /** @type {const} */ ('bolt'), cooldown: 1.6, range: 220 }
-};
-const KATANA = { cooldown: 0.5, reach: 3.6, halfAngle: 0.9 };
-const HOLE_COOLDOWN = 0.6;
+/** The Katana's arc: reach and cooldown come from the guest weapon table. */
+const KATANA = { cooldown: GUEST_WEAPONS.katana.cooldown, reach: GUEST_WEAPONS.katana.range, halfAngle: KATANA_HALF_ANGLE };
+const HOLE_COOLDOWN = GUEST_WEAPONS.blackhole.cooldown;
 const HOLE_MIN_RANGE = 12;
 const EYE = 1.4;
+/** The hero's own walking speeds, read from the protected values, for the shared movement step. @type {import('./movement.js').MoveSpeeds} */
+const GUEST_SPEEDS = { run: HERO.runSpeed, aim: HERO.aimWalkSpeed, back: HERO.backSpeed };
 const KILL_SCORE = 20;
 /** The car Roger drives is the one co-op vehicle (Hero Mode car flow). */
 const CAR_ID = 9000;
@@ -92,6 +93,8 @@ export function createNetSystem(ctx) {
   const deduper = createEventDeduper();
   const buffer = createSnapshotBuffer();
   const heroRequests = createHeroRequests();
+  /** Dev-only diagnostics: null (and every hook below skipped) unless the page has `?netdebug`. */
+  const dbg = typeof location !== 'undefined' && isNetDebug(location.search) ? createNetMetrics({ weapons: WEAPONS.length }) : null;
 
   const S = {
     /** @type {ReturnType<typeof createRelayClient>|null} */
@@ -111,7 +114,7 @@ export function createNetSystem(ctx) {
     bypass: false,
     holdRevive: false,
     pendingWelcome: false,
-    /** @type {Map<string, {obj: any, cd: number, tpCd: number, lastAbil: number, lastUse: boolean, flame: {tick: number, shooter: string}, run: import('./rogerView.js').RunCycle, owned: import('../hero/rogerLook.js').Owned, limbs: any}>} */
+    /** @type {Map<string, {obj: any, cd: number, pending: import('./guestWeapons.js').Trigger|null, tpCd: number, lastAbil: number, lastUse: boolean, flame: {tick: number, shooter: string}, run: import('./rogerView.js').RunCycle, owned: import('../hero/rogerLook.js').Owned, limbs: any}>} */
     avatars: new Map(),
     /** @type {WeakMap<object, number>} */
     ids: new WeakMap(),
@@ -126,6 +129,10 @@ export function createNetSystem(ctx) {
     lockExitAt: 0,
     wasLocked: false,
     versionWarned: false,
+    /** @type {HTMLPreElement|null} the `?netdebug` overlay */
+    dbgEl: null,
+    dbgAcc: 0,
+    dbgPingAcc: 0,
     peerReadyShown: false,
     resetting: false,
     /** @type {{pos: THREE.Vector3, target: THREE.Vector3}|null} */
@@ -133,6 +140,10 @@ export function createNetSystem(ctx) {
     /** Panel controls disabled for the peer, with what to put back. */
     lockedUi: /** @type {Map<HTMLElement, {disabled: boolean, title: string}>} */ (new Map()),
     peerRow: /** @type {number[]|null} */ (null),
+    /** Client-side prediction of the guest's own avatar (prediction.js); immutable, replaced each step. */
+    pred: newPrediction(),
+    /** `?netdebug` only: reconciliation counts and the last / worst error (m). */
+    predStats: { snaps: 0, blends: 0, last: 0, worst: 0 },
     /** Latest synced health per player id: value, seconds since last damage, receipt time (ms). */
     peerHp: /** @type {Map<number, {v: number, since: number, at: number}>} */ (new Map()),
     hudHtml: '',
@@ -150,6 +161,8 @@ export function createNetSystem(ctx) {
     keys: { up: false, down: false, left: false, right: false },
     look: { yaw: 0, pitch: 0 },
     buttons: { fire: false, aim: false, use: false },
+    // Fire is latched so a click shorter than one input interval still reaches the host.
+    fireLatch: newFireLatch(),
     weapon: 0,
     abil: 0,
     savedControls: true,
@@ -248,9 +261,12 @@ export function createNetSystem(ctx) {
     deduper.reset();
     emitter.reset();
     buffer.clear();
+    if (dbg) { dbg.reset(); S.dbgAcc = S.dbgPingAcc = 0; }
     S.tick = 0;
     S.peerScore = 0;
     S.peerRow = null;
+    S.pred = newPrediction();
+    S.predStats = { snaps: 0, blends: 0, last: 0, worst: 0 };
     S.peerHp.clear();
     S.hudHtml = '';
     S.peerMission = null;
@@ -340,6 +356,7 @@ export function createNetSystem(ctx) {
   /** @param {any} msg */
   function onRelayMessage(msg) {
     if (!msg || typeof msg.type !== 'string') return;
+    if (dbg && msg.type === 'pong') { dbg.pong(Number(msg.id), performance.now()); return; }
     if (S.role === 'host') hostMessage(msg);
     else peerMessage(msg);
   }
@@ -371,10 +388,14 @@ export function createNetSystem(ctx) {
       }
       case 'input': {
         const r = gate.accept(msg, (id) => id !== '0' && !!players.get(id));
-        if (!r.ok) return;
+        if (!r.ok) { if (dbg) dbg.reject(r.error); return; }
+        if (dbg) dbg.inputAccepted(performance.now());
         const p = players.get(r.id);
         if (p) {
           p.input = r.input;
+          // A fire seen in this message survives a newer message in the same host frame.
+          const av = S.avatars.get(r.id);
+          if (av) av.pending = notePending(av.pending, r.input);
           p.wantsRevive = r.input.use;
           if (heroRequests.edge(r.id, r.input.hero)) onGuestHeroRequest(r.id);
         }
@@ -412,7 +433,7 @@ export function createNetSystem(ctx) {
     const style = rogerStyle(id);
     dressAsRoger(obj.mesh, owned.keep, { tee: style.tee });
     Sim.three.scene.add(obj.mesh);
-    S.avatars.set(id, { obj, cd: 0, tpCd: 0, lastAbil: 0, lastUse: false, flame: { tick: 0, shooter: id }, run: newRunCycle(), owned, limbs: rogerLimbs(obj.mesh) });
+    S.avatars.set(id, { obj, cd: 0, pending: null, tpCd: 0, lastAbil: 0, lastUse: false, flame: { tick: 0, shooter: id }, run: newRunCycle(), owned, limbs: rogerLimbs(obj.mesh) });
   }
 
   /** @param {string} id */
@@ -670,7 +691,7 @@ export function createNetSystem(ctx) {
     for (const p of players.list()) {
       if (p.id === '0') continue;
       let a = S.avatars.get(p.id);
-      if (!heroOn) { if (a) removeAvatar(p.id); continue; }
+      if (!heroOn) { if (dbg && p.input && p.input.fire) dbg.unfired(0); if (a) removeAvatar(p.id); continue; }
       if (!a) {
         const nx = (pose.x) + (Number(p.id) % 2 ? 2 : -2);
         spawnAvatar(p.id, nx, pose.z + 2);
@@ -680,7 +701,7 @@ export function createNetSystem(ctx) {
         a = /** @type {NonNullable<typeof a>} */ (S.avatars.get(p.id));
       }
       const pos = a.obj.mesh.position;
-      a.cd = Math.max(0, a.cd - dt);
+      a.cd = coolDown(a.cd, dt);
       a.tpCd = Math.max(0, a.tpCd - dt);
       const input = p.input;
       const ctl = players.controls(p.id);
@@ -704,7 +725,10 @@ export function createNetSystem(ctx) {
         p.heading = input.yaw;
         p.weapon = input.weapon;
         if (ctl.move && dt > 0) moveGuest(p, input, dt);
-        if (ctl.aim && input.fire) guestFire(p, a, input, dt);
+        const trigger = pickTrigger(input, a.pending);
+        a.pending = null;
+        if (trigger && ctl.aim) guestFire(p, a, input, dt, trigger);
+        else if (dbg && trigger) dbg.unfired(1);
         const edge = input.abil & ~a.lastAbil;
         a.lastAbil = input.abil;
         // Bit 2: Teleport. Bits 1 and 4 (Time Slow, EMP) are host-only.
@@ -774,20 +798,9 @@ export function createNetSystem(ctx) {
   /** @param {import('./players.js').Player} p @param {import('./protocol.js').PlayerInput} input @param {number} dt */
   function moveGuest(p, input, dt) {
     const h = hero();
-    const speed = (input.aim ? HERO.aimWalkSpeed : HERO.runSpeed) * (input.mz < 0 ? HERO.backSpeed / HERO.runSpeed : 1);
-    const mag = Math.hypot(input.mx, input.mz);
-    if (mag < 1e-3) return;
-    const k = Math.min(1, 1 / mag);
-    const fx = Math.sin(input.yaw), fz = Math.cos(input.yaw);
-    const rx = Math.cos(input.yaw), rz = -Math.sin(input.yaw);
-    const dx = (fx * input.mz + rx * input.mx) * k * speed * dt;
-    const dz = (fz * input.mz + rz * input.mx) * k * speed * dt;
-    // Each axis on its own, so a wall slides rather than sticks.
-    let nx = THREE.MathUtils.clamp(p.x + dx, -HERO.bound, HERO.bound);
-    if (h.standable(nx, p.z)) p.x = nx;
-    const nz = THREE.MathUtils.clamp(p.z + dz, -HERO.bound, HERO.bound);
-    if (h.standable(p.x, nz)) p.z = nz;
-    void nx;
+    const next = stepMove(p, input, dt, (x, z) => h.standable(x, z), HERO.bound, GUEST_SPEEDS);
+    p.x = next.x;
+    p.z = next.z;
   }
 
   /**
@@ -835,27 +848,33 @@ export function createNetSystem(ctx) {
    * fire is on, R-053).
    * @param {import('./players.js').Player} p
    * @param {{cd: number, flame: {tick: number}}} a
-   * @param {import('./protocol.js').PlayerInput} input
+   * @param {import('./protocol.js').PlayerInput} input the latest input (aim direction)
    * @param {number} dt
+   * @param {import('./guestWeapons.js').Trigger} trigger the pull being acted on (weapon and raised state when it was made)
    */
-  function guestFire(p, a, input, dt) {
-    const name = WEAPONS[input.weapon];
+  function guestFire(p, a, input, dt, trigger) {
+    const name = WEAPONS[trigger.weapon];
+    const { verdict } = resolveTrigger(trigger, a.cd);
+    if (dbg) { dbg.fire(trigger.weapon, 0); if (!trigger.aim) dbg.unfired(2); }
+    // The weapon must be raised first (the Katana excepted): no shot, no cooldown spent.
+    if (verdict === 'unraised' || verdict === 'none') return;
     const ox = p.x, oz = p.z;
     const cp = Math.cos(input.pitch);
     const dx = Math.sin(input.yaw) * cp, dy = Math.sin(input.pitch), dz = Math.cos(input.yaw) * cp;
-    if (name === 'fire') {
+    if (verdict === 'flame') {
       // Held: the same flame, sound and burning as Roger's, from the guest.
       aimVec.set(dx, dy, dz);
       muzzleVec.set(ox, EYE, oz);
       hero().guestFlame(a.flame, dt, muzzleVec, aimVec);
       return;
     }
-    if (a.cd > 0) return;
+    if (verdict === 'cooldown') { if (dbg) dbg.fire(trigger.weapon, 1); return; }
     if (name === 'rifle' || name === 'minigun' || name === 'railgun') {
-      const w = /** @type {NonNullable<typeof GUEST_WEAPONS[keyof typeof GUEST_WEAPONS]>} */ (GUEST_WEAPONS[name]);
+      const w = /** @type {typeof GUEST_WEAPONS.rifle} */ (GUEST_WEAPONS[name]);
       a.cd = w.cooldown;
       const hit = scan(p, input, w.range);
-      if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: EYE + dy * hit.t, z: oz + dz * hit.t } })) credit(KILL_SCORE, p.id);
+      if (dbg && hit) dbg.fire(trigger.weapon, 2);
+      if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: EYE + dy * hit.t, z: oz + dz * hit.t } })) { if (dbg) dbg.fire(trigger.weapon, 3); credit(KILL_SCORE, p.id); }
       // Friendly fire (D4): the partner in the line of fire, if nearer than the enemy hit.
       hurtRay(p.id, ox, EYE, oz, dx, dy, dz, hit ? hit.t : w.range, w.type);
     } else if (name === 'katana') {
@@ -875,7 +894,8 @@ export function createNetSystem(ctx) {
       });
       if (target) {
         const t = /** @type {{e: any, kind: any, q: {x: number, z: number}}} */ (target);
-        if (ctx.systems.enemies.hit(t.e, t.kind, { type: 'blade', amount: 1, at: { x: t.q.x, z: t.q.z } })) credit(KILL_SCORE, p.id);
+        if (dbg) dbg.fire(trigger.weapon, 2);
+        if (ctx.systems.enemies.hit(t.e, t.kind, { type: 'blade', amount: 1, at: { x: t.q.x, z: t.q.z } })) { if (dbg) dbg.fire(trigger.weapon, 3); credit(KILL_SCORE, p.id); }
       }
       // Friendly fire (D4): the other player inside the same arc.
       hurtSector(p.id, ox, oz, Math.sin(input.yaw), Math.cos(input.yaw), KATANA.reach, Math.cos(KATANA.halfAngle), 0.05, 'blade', 'melee', 'Cut down by');
@@ -985,13 +1005,51 @@ export function createNetSystem(ctx) {
     }
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
-      score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp
+      score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
+      ack: gate.acks((id) => id !== '0' && !!players.get(id))
     };
   }
 
   // ---------------------------------------------------------------------
   // Peer
   // ---------------------------------------------------------------------
+
+  /**
+   * The peer's movement environment for prediction: the same step as the host
+   * (`stepMove`) over the peer's own town, built from the host's seed. The host
+   * has the final say, so a wall the peer does not know only costs a blend.
+   * @type {import('./prediction.js').MoveEnv}
+   */
+  const predEnv = {
+    standable: (x, z) => {
+      const h = hero();
+      if (!h || typeof h.standable !== 'function') return true;
+      try { return h.standable(x, z); } catch { return true; }
+    },
+    bound: HERO.bound,
+    speeds: GUEST_SPEEDS
+  };
+
+  /**
+   * A snapshot was accepted: reconcile the prediction with the host's row for
+   * this player (newest snapshot, not the interpolated one) and its input ack.
+   * Down, dead or seated means the host is not moving us: prediction is off.
+   * @param {any} msg
+   */
+  function reconcileOwn(msg) {
+    const id = Number(S.myId);
+    const row = Array.isArray(msg.players) ? msg.players.find((/** @type {number[]} */ r) => r[0] === id) : null;
+    if (!row) { S.pred = newPrediction(); return; }
+    let ack = -1;
+    if (Array.isArray(msg.ack)) for (const r of msg.ack) if (r[0] === id) ack = r[1];
+    const out = reconcile(S.pred, { x: row[1], z: row[2] }, ack, row[4] === 0 && row[7] < 0, predEnv);
+    S.pred = out.state;
+    if (dbg && S.pred.active) {
+      if (out.snapped) S.predStats.snaps++; else S.predStats.blends++;
+      S.predStats.last = out.error;
+      S.predStats.worst = Math.max(S.predStats.worst, out.error);
+    }
+  }
 
   /** @param {any} msg */
   function peerMessage(msg) {
@@ -1007,7 +1065,12 @@ export function createNetSystem(ctx) {
           if (e) { e.v = r[1]; e.since = r[2]; e.at = at; } else S.peerHp.set(r[0], { v: r[1], since: r[2], at });
         }
       }
-      buffer.push(msg, performance.now() / 1000);
+      if (dbg) {
+        let mine = -1;
+        if (Array.isArray(msg.ack)) for (const r of msg.ack) if (String(r[0]) === S.myId) mine = r[1];
+        dbg.snapshotArrived(performance.now(), mine);
+      }
+      if (buffer.push(msg, performance.now() / 1000).ok) reconcileOwn(msg);
       return;
     }
     if (msg.type !== 'event') return;
@@ -1021,6 +1084,7 @@ export function createNetSystem(ctx) {
         // The same town as the host's first: the reset it triggers puts the
         // panel and the camera back to defaults, which the peer view then locks.
         if (Number.isFinite(d.seed)) applySeed(d.seed >>> 0);
+        S.pred = newPrediction();
         enterPeerView();
         say('Click the game view to look around (Esc frees the mouse). Hero asks the host to bring you in.');
         setStatus();
@@ -1089,6 +1153,7 @@ export function createNetSystem(ctx) {
     if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
     S.keys.up = S.keys.down = S.keys.left = S.keys.right = false;
     S.buttons.fire = S.buttons.aim = S.buttons.use = false;
+    S.fireLatch = newFireLatch();
     S.abil = 0;
     S.look.yaw = 0;
     S.look.pitch = 0;
@@ -1182,19 +1247,30 @@ export function createNetSystem(ctx) {
     S.heroFlag = Math.max(0, S.heroFlag - dt);
     // Input at ~30 Hz.
     S.inputAcc += dt;
+    // Prediction: this frame's live keys move the avatar at once.
+    const liveYaw = wrapAngle(S.look.yaw);
+    const k0 = S.keys;
+    S.pred = predictFrame(S.pred, { mx: (k0.right ? 1 : 0) - (k0.left ? 1 : 0), mz: (k0.up ? 1 : 0) - (k0.down ? 1 : 0), yaw: liveYaw, aim: S.buttons.aim }, dt, predEnv);
     if (S.inputAcc >= INPUT_INTERVAL) {
       S.inputAcc = 0;
       const k = S.keys;
+      const sampled = fireLatchSample(S.fireLatch);
+      S.fireLatch = sampled.next;
+      if (dbg) dbg.inputSent(S.seq + 1, performance.now());
+      const mx = (k.right ? 1 : 0) - (k.left ? 1 : 0), mz = (k.up ? 1 : 0) - (k.down ? 1 : 0);
+      S.pred = recordSent(S.pred, S.seq + 1, { mx, mz, yaw: liveYaw, aim: S.buttons.aim });
       S.client.send({
         type: 'input', v: PROTOCOL_VERSION, seq: ++S.seq,
-        mx: (k.right ? 1 : 0) - (k.left ? 1 : 0), mz: (k.up ? 1 : 0) - (k.down ? 1 : 0),
-        yaw: S.look.yaw, pitch: S.look.pitch,
-        fire: S.buttons.fire, aim: S.buttons.aim, weapon: S.weapon, abil: S.abil, use: S.buttons.use, hero: S.heroFlag > 0
+        mx, mz, yaw: liveYaw, pitch: S.look.pitch,
+        fire: sampled.fire, aim: S.buttons.aim, weapon: S.weapon, abil: S.abil, use: S.buttons.use, hero: S.heroFlag > 0
       });
     }
+    if (dbg) dbg.peerFrame(performance.now());
     const s = buffer.sample(performance.now() / 1000);
     if (!s) return;
     S.peerScore = s.score;
+    // Own avatar from the prediction while it runs (else from the host's row).
+    const pv = S.pred.active ? viewPoint(S.pred) : null;
     for (const [kind, rows] of Object.entries(s.kinds)) {
       let map = S.proxies.get(kind);
       if (!map) { map = new Map(); S.proxies.set(kind, map); }
@@ -1212,11 +1288,12 @@ export function createNetSystem(ctx) {
           obj.position.set(row[1], row[2], row[3]);
           obj.rotation.y = row[4];
         } else {
-          obj.position.set(row[1], 0, row[2]);
-          obj.rotation.y = row[3];
+          const px = mine && pv ? pv.x : row[1], pz = mine && pv ? pv.z : row[2];
+          obj.position.set(px, 0, pz);
+          obj.rotation.y = mine && pv ? liveYaw : row[3];
           if (kind === 'players') {
             obj.rotation.x = row[4] === 0 ? 0 : -Math.PI / 2 + 0.1;
-            swingLimbs(obj.userData.limbs, obj.userData.run.phase, row[4] === 0 ? stepRunCycle(obj.userData.run, row[1], row[2], dt, HERO.stride, HERO.runSpeed) : 0);
+            swingLimbs(obj.userData.limbs, obj.userData.run.phase, row[4] === 0 ? stepRunCycle(obj.userData.run, px, pz, dt, HERO.stride, HERO.runSpeed) : 0);
           }
           if (kind === 'terminators') obj.rotation.x = row[4] === 0 ? 0 : -Math.PI / 2 + 0.1;
         }
@@ -1228,7 +1305,7 @@ export function createNetSystem(ctx) {
     const me = s.kinds.players.get(Number(S.myId));
     if (me) {
       const cam = Sim.three.camera;
-      followCamera(camPose, me[1], me[2], S.look.yaw, S.look.pitch, S.buttons.aim, FOLLOW);
+      followCamera(camPose, pv ? pv.x : me[1], pv ? pv.z : me[2], S.look.yaw, S.look.pitch, S.buttons.aim, FOLLOW);
       if (camPose.firstPerson) cam.position.set(camPose.px, camPose.py, camPose.pz);
       else cam.position.lerp(camGoal.set(camPose.px, camPose.py, camPose.pz), Math.min(1, dt * 8));
       cam.lookAt(camPose.lx, camPose.ly, camPose.lz);
@@ -1320,6 +1397,12 @@ export function createNetSystem(ctx) {
     S.toast = document.createElement('div');
     S.toast.className = 'coop-toast';
     container.appendChild(S.toast);
+    if (dbg) {
+      S.dbgEl = document.createElement('pre');
+      S.dbgEl.className = 'coop-netdebug';
+      S.dbgEl.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:9999;margin:0;padding:6px 8px;max-width:90vw;font:11px/1.35 monospace;color:#9f9;background:rgba(0,0,0,0.72);pointer-events:none;white-space:pre-wrap';
+      container.appendChild(S.dbgEl);
+    }
     // The aim crosshair, in the host's own style (tornado.css `.hero-crosshair`).
     S.cross = document.createElement('div');
     S.cross.className = 'hero-crosshair';
@@ -1335,7 +1418,7 @@ export function createNetSystem(ctx) {
         if (e.code === 'KeyQ') S.abil |= 1;
         if (e.code === 'KeyE') S.abil |= 2;
         if (e.code === 'KeyR') S.abil |= 4;
-        if (e.code === 'Enter') S.buttons.fire = true;
+        if (e.code === 'Enter' && !e.repeat) { S.buttons.fire = true; S.fireLatch = fireLatchPress(S.fireLatch); }
       } else if (S.role === 'host' && e.code === 'KeyF') S.holdRevive = true;
     }, opts);
     window.addEventListener('keyup', (e) => {
@@ -1344,11 +1427,11 @@ export function createNetSystem(ctx) {
       if (e.code === 'KeyQ') S.abil &= ~1;
       if (e.code === 'KeyE') S.abil &= ~2;
       if (e.code === 'KeyR') S.abil &= ~4;
-      if (e.code === 'Enter') S.buttons.fire = false;
+      if (e.code === 'Enter') { S.buttons.fire = false; S.fireLatch = fireLatchRelease(S.fireLatch); }
     }, opts);
     window.addEventListener('blur', () => {
       S.keys.up = S.keys.down = S.keys.left = S.keys.right = false;
-      S.buttons.fire = S.buttons.aim = S.buttons.use = false; S.abil = 0; S.holdRevive = false;
+      S.buttons.fire = S.buttons.aim = S.buttons.use = false; S.fireLatch = newFireLatch(); S.abil = 0; S.holdRevive = false;
     }, opts);
     const canvas = Sim.three.renderer.domElement;
 
@@ -1397,16 +1480,16 @@ export function createNetSystem(ctx) {
     canvas.addEventListener('mousedown', (e) => {
       if (S.role !== 'peer' || !S.peerReadyShown) return;
       if (document.pointerLockElement !== canvas) { requestLock(); return; }
-      if (e.button === 0) S.buttons.fire = true;
+      if (e.button === 0) { S.buttons.fire = true; S.fireLatch = fireLatchPress(S.fireLatch); }
       if (e.button === 2) S.buttons.aim = true;
     }, opts);
     window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) S.buttons.fire = false;
+      if (e.button === 0) { S.buttons.fire = false; S.fireLatch = fireLatchRelease(S.fireLatch); }
       if (e.button === 2) S.buttons.aim = false;
     }, opts);
     window.addEventListener('mousemove', (e) => {
       if (S.role !== 'peer' || document.pointerLockElement !== canvas) return;
-      S.look.yaw -= e.movementX * HERO.lookSensitivity;
+      S.look.yaw = wrapAngle(S.look.yaw - e.movementX * HERO.lookSensitivity);
       S.look.pitch = THREE.MathUtils.clamp(S.look.pitch - e.movementY * HERO.lookSensitivity, -1, 1);
     }, opts);
     canvas.addEventListener('wheel', (e) => {
@@ -1422,6 +1505,29 @@ export function createNetSystem(ctx) {
     setStatus();
   }
 
+  /**
+   * `?netdebug` only: host frame cadence, the relay ping once a second and the
+   * overlay refresh once a second. Never called when the flag is off.
+   * @param {number} rawDt
+   * @returns {void}
+   */
+  function debugTick(rawDt) {
+    if (!dbg) return;
+    const now = performance.now();
+    if (S.role === 'host') dbg.hostFrameAt(now);
+    S.dbgPingAcc += rawDt;
+    if (S.dbgPingAcc >= 1 && S.client && S.client.state().status === 'in-room') {
+      S.dbgPingAcc = 0;
+      const id = dbg.nextPing(now);
+      if (id > 0) S.client.send({ type: 'ping', v: PROTOCOL_VERSION, id });
+    }
+    S.dbgAcc += rawDt;
+    if (S.dbgAcc >= 1) {
+      S.dbgAcc = 0;
+      if (S.dbgEl) S.dbgEl.textContent = `NETDEBUG ${S.role || ''} (5 s window)\n${dbg.report(now).join('\n')}${S.role === 'peer' ? `\nprediction: ${S.pred.active ? 'on' : 'off'} pending ${S.pred.pending.length} blends ${S.predStats.blends} snaps ${S.predStats.snaps} error last ${S.predStats.last.toFixed(2)} worst ${S.predStats.worst.toFixed(2)} m` : ''}`;
+    }
+  }
+
   /** @param {number} rawDt */
   function updateNet(rawDt) {
     if (S.toastTimer > 0) {
@@ -1429,6 +1535,7 @@ export function createNetSystem(ctx) {
       if (S.toastTimer <= 0 && S.toast) S.toast.classList.remove('visible');
     }
     if (!S.client) return;
+    if (dbg) debugTick(rawDt);
     const dt = Sim.state.paused ? 0 : rawDt;
     if (S.role === 'host' && S.client.state().status === 'in-room') {
       updateGuests(dt);
@@ -1442,6 +1549,7 @@ export function createNetSystem(ctx) {
       S.snapAcc += rawDt;
       if (S.snapAcc >= SNAP_INTERVAL && players.list().length > 1) {
         S.snapAcc = 0;
+        if (dbg) dbg.snapshotSent(performance.now());
         S.client.send(buildSnapshot());
       }
     } else if (S.role === 'peer') updatePeer(rawDt);
@@ -1463,6 +1571,8 @@ export function createNetSystem(ctx) {
     if (S.hud && S.hud.parentNode) S.hud.parentNode.removeChild(S.hud);
     if (S.toast && S.toast.parentNode) S.toast.parentNode.removeChild(S.toast);
     if (S.cross && S.cross.parentNode) S.cross.parentNode.removeChild(S.cross);
+    if (S.dbgEl && S.dbgEl.parentNode) S.dbgEl.parentNode.removeChild(S.dbgEl);
+    S.dbgEl = null;
     S.panel = S.hud = S.toast = S.status = S.cross = null;
   }
 

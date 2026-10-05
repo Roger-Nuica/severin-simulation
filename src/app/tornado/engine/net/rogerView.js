@@ -12,6 +12,10 @@
  *  - `followCamera`: the per-client third-person camera (and the first-person
  *    one while aiming), written into a caller-owned scratch object.
  *  - `wheelHtml`: the weapon wheel's markup for the guest HUD.
+ *  - `wrapAngle`: keeps the guest's look yaw inside the protocol's range.
+ *  - `newFireLatch` / `fireLatchPress` / `fireLatchRelease` / `fireLatchSample`:
+ *    a fire click held for at least one input message, so a short click is
+ *    never lost between two samples.
  */
 
 /**
@@ -160,3 +164,53 @@ export const WHEEL_NAMES = Object.freeze(['RIFLE', 'MINIGUN', 'RAILGUN', 'FIRE',
  */
 export const wheelHtml = (current) =>
   `<div class="coop-wheel">${WHEEL_NAMES.map((n, i) => `<span${i === current ? ' class="on"' : ''}>${n}</span>`).join('')}</div>`;
+
+/**
+ * Wraps an angle into (-PI, PI]. The result is equivalent modulo 2*PI, so
+ * sin/cos of it match the original; it keeps the guest's yaw inside the
+ * protocol's accepted range however far the mouse has turned.
+ * @param {number} angle Radians, any magnitude.
+ * @returns {number} The same direction, within (-PI, PI]; 0 for a non-finite input.
+ */
+export const wrapAngle = (angle) => {
+  if (!Number.isFinite(angle)) return 0;
+  const TAU = Math.PI * 2;
+  const r = angle - Math.floor((angle + Math.PI) / TAU) * TAU;
+  // Floor maps +PI to -PI; keep the upper bound inclusive instead.
+  return r <= -Math.PI ? Math.PI : r;
+};
+
+/**
+ * @typedef {Object} FireLatch
+ * @property {boolean} down Whether the fire input is held right now.
+ * @property {boolean} pending Whether a press has not yet been sampled.
+ */
+
+/** @returns {FireLatch} A released latch with nothing pending. */
+export const newFireLatch = () => ({ down: false, pending: false });
+
+/**
+ * A press: held, and owed to the next sample even if released first.
+ * @param {FireLatch} _latch Previous latch (unused: a press always latches).
+ * @returns {FireLatch} The new latch.
+ */
+export const fireLatchPress = (_latch) => ({ down: true, pending: true });
+
+/**
+ * A release: no longer held, but an unsampled press stays pending.
+ * @param {FireLatch} latch Previous latch.
+ * @returns {FireLatch} The new latch.
+ */
+export const fireLatchRelease = (latch) => ({ down: false, pending: latch.pending });
+
+/**
+ * Samples the latch when an input message is built: fire is true while held
+ * or while a press is still unsent, so every click reaches at least one
+ * message. The pending flag is consumed by the sample.
+ * @param {FireLatch} latch Previous latch.
+ * @returns {{fire: boolean, next: FireLatch}} The value to send and the new latch.
+ */
+export const fireLatchSample = (latch) => ({
+  fire: latch.down || latch.pending,
+  next: { down: latch.down, pending: false }
+});
