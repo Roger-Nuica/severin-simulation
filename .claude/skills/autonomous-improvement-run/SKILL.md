@@ -41,7 +41,7 @@ Runtime code is the source of truth for implemented behaviour. Report contradict
 
 ## Stage 1: Scout (discover)
 
-Produce exactly five candidates, each repository-specific and evidenced by file paths and line references or quoted text. Sources: existing plans, TODO/FIXME comments, runtime code, tests and missing tests, documentation drift, lint or build warnings, performance notes in `FINDINGS.md` and `docs/performance.md`, and obvious technical debt. If an optional focus is given, bias towards it without ignoring a clearly more important problem; say so if you do.
+Produce exactly five candidates, each repository-specific and evidenced by file paths and line references or quoted text. Sources: existing plans, TODO/FIXME comments, runtime code, tests and missing tests, documentation drift, lint or build warnings, performance notes in `PROJECT_HISTORY.md` (findings) and `docs/performance.md`, and obvious technical debt. If an optional focus is given, bias towards it without ignoring a clearly more important problem; say so if you do.
 
 Write `docs/auto-improvements/run-<run_id>-<attempt>.md` section "Stage 1: candidates" (format below). Do not rank.
 

@@ -88,7 +88,7 @@ Reuse the weapon, enemy, and damage contracts instead of building a parallel mel
 
 ## Stack
 
-- Next.js 16.3.5
+- Next.js 16.3.8
 - React 19.2.8
 - JavaScript + JSDoc, no TypeScript
 - Three.js 0.186.1
@@ -107,11 +107,11 @@ Reuse the weapon, enemy, and damage contracts instead of building a parallel mel
 - `src/app/tornado/engine/sound/` — procedural audio and cues
 - `public/sounds/` — audio assets
 - `docs/` — architecture, combat, weapons, enemies, performance notes
-- `GAME_DESIGN.md` — player-facing gameplay narrative and design context
+- `GAME_DESIGN.md` — what the game is now, in plain words: the key behaviour of every mode, disaster, weapon and enemy (no exact numbers)
 - `.claude/rules.md` — implementation contracts, exact numeric gameplay values, and hard constraints
-- `FINDINGS.md` — measurements, benchmarks, and performance lessons
-- `BACKLOG.md` — feature ideas the owner wants kept (disasters and Roger abilities)
-- `PROJECT_HISTORY.md` — archived decision snapshots and the superseded roadmap; not a source of current behavior
+- `TODO.md` — open work: the sound files the owner will provide, checks only a person can make, and the feature backlog (ideas the owner wants kept)
+- `PROJECT_HISTORY.md` — part 1: findings (measurements, performance budget, key lessons and traps, still valid); part 2: archived decision snapshots, the superseded roadmap and unapproved ideas (history, not current behaviour)
+- `PLAN_*.md`, `VERIFICATION_*.md` — plans and reports of past tasks; history, not current behaviour
 
 ## Architecture
 
@@ -158,19 +158,29 @@ Key rules:
 - Keep the simulation’s lifecycle reset/dispose behavior intact for all new systems.
 - Do not introduce global state or duplicate central systems just to make a feature easier to code.
 
+## Keeping the docs current
+
+After a change that alters behaviour, update in the same commit:
+
+- `.claude/rules.md` — every protected number or contract that changed; report a rule change to the owner explicitly.
+- `GAME_DESIGN.md` — a sentence or two in the right section on how it now plays; key behaviour only, no numbers, no implementation detail. Its changelog keeps one short dated line per change set.
+- `PROJECT_HISTORY.md` part 1 — only when something was measured (a benchmark, a budget, a trap found).
+- `TODO.md` — open items, sound files still owed, checks only a person can make; tick a backlog idea when it ships.
+
 ## Performance rules
 
 - `Sim.objects` is a hot path.
 - Reuse pooling for debris, bursts, lights, and other repetitive effects.
 - Avoid per-frame allocations in hot loops.
 - Keep object traversal and effect churn low.
-- Follow the project’s perf caps and benchmark notes in `engine/perf/` and `FINDINGS.md`.
+- Follow the project’s perf caps and benchmark notes in `engine/perf/` and the findings in `PROJECT_HISTORY.md` (part 1: budget, key findings, traps).
 
 ## Validation
 
 Project gate:
 
 - `npm run lint`
+- `npm test`
 - `npm run build`
 
 For gameplay/visual tasks, manual validation is expected when the change is stateful or visual rather than pure logic.
@@ -194,6 +204,7 @@ For gameplay/visual tasks, manual validation is expected when the change is stat
 
 ## Validation
 - `npm run lint`
+- `npm test`
 - `npm run build`
 
 ## Known issues

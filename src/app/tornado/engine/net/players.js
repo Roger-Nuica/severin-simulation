@@ -8,7 +8,7 @@
  * the room's player id ('0' = host). Per-player state (weapon, energy,
  * down/revive) lives on the entry, never shared.
  *
- * Approved rules (PLAN_coop.md):
+ * Approved rules (the co-op plan, now archived in PROJECT_HISTORY.md):
  *   - A player taken out is *down*, not dead: revivable by a teammate who
  *     stays within REVIVE.range and holds the revive input for REVIVE.hold s.
  *     Moving out of range, being downed, or releasing interrupts it.

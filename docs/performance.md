@@ -38,7 +38,7 @@ The repo already contains performance budget helpers in:
 - `engine/perf/`
 - `engine/perf/caps.js`
 - `engine/perf/bench.js`
-- `FINDINGS.md`
+- `PROJECT_HISTORY.md` (part 1: findings, measurements and traps)
 
 Check those before changing high-impact systems.
 

@@ -63,7 +63,7 @@ Deliberately **not** enabled: `--allow-unrestricted-file-access`, `--no-sandbox`
 
 ## Known limits for this project
 
-- The simulator is WebGL (Three.js). Headless Chrome may fall back to software rendering, so a blank or slow canvas is not evidence of a bug, and frame timings measured this way are meaningless. Do not use this skill for performance claims; see `FINDINGS.md` and `engine/perf/`.
+- The simulator is WebGL (Three.js). Headless Chrome may fall back to software rendering, so a blank or slow canvas is not evidence of a bug, and frame timings measured this way are meaningless. Do not use this skill for performance claims; see `PROJECT_HISTORY.md` (findings) and `engine/perf/`.
 - Web Audio is not meaningfully testable here.
 - Keyboard and pointer-lock hero controls may not behave as they do in a real session.
 - This setup has only been checked as far as the server starting and listing its tools. Whether the simulator renders correctly in this headless configuration has not been tested.
