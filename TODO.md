@@ -27,6 +27,9 @@ send a file and it will be hooked up):
 - Look, sound and frame rate on a real phone and a real desktop: every
   change of 2026-10-05 was checked headless in Chromium (software
   rendering), which is not a visual or audio check.
+- The aliens' new shots and their sounds (bolts, ship lances, the tracking
+  laser's warning, hits on Roger): look and loudness at real speed, with
+  sound on, in a crossfire of several aliens and ships.
 
 ## Feature backlog
 

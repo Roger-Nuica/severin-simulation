@@ -604,15 +604,16 @@ export function createAlienCrew(ctx, S, api) {
       api.raiseGun(alien, at);
       alien.aim = Math.max(alien.aim, 0.1);
       if (alien.rayTimer <= 0) {
-        api.shoot(alien, new THREE.Vector3(alien.lockX, 2, alien.lockZ));
+        // Whether it hits is settled now, where he stands as it fires; the
+        // damage lands with the bolt (aliens/weapons.js), on his chest.
+        const onTarget = Math.hypot(hero.x - alien.lockX, hero.z - alien.lockZ) < ALIENS.rayHitRadius;
+        const hit = onTarget ? {
+          source: 'alienRay', type: 'ray', title: 'ZAPPED', sub: 'An alien ray hit Roger', targetId: hero.id ?? '0',
+          position: { x: alien.root.position.x, y: alien.root.position.y, z: alien.root.position.z }
+        } : null;
+        api.shoot(alien, new THREE.Vector3(alien.lockX, onTarget ? 1.3 : 2, alien.lockZ), { hit, sizzle: onTarget });
         alien.rayTimer = api.between(ALIENS.rayEvery);
         alien.locked = false;
-        if (Math.hypot(hero.x - alien.lockX, hero.z - alien.lockZ) < ALIENS.rayHitRadius) {
-          ctx.systems.health.damagePlayer({
-            source: 'alienRay', type: 'ray', title: 'ZAPPED', sub: 'An alien ray hit Roger', targetId: hero.id ?? '0',
-            position: { x: alien.root.position.x, y: alien.root.position.y, z: alien.root.position.z }
-          });
-        }
       }
     }
     return true;

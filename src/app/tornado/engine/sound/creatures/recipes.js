@@ -114,13 +114,47 @@ export const RECIPES = {
     for (const at of [t, t + len * 0.6]) k.noise(at, at + 0.012, k.filter('highpass', 3000, 0.7, k.env(out, at, 0.001, 0.25, 0.01)));
     return len + 0.06;
   },
-  // A laser zap: a saw falling fast through a resonant band.
+  // The crew's blaster (redone 2026-10-05: the old zap was lost past 20 m):
+  // a bright "pew", a square and a sine diving together through a low-pass,
+  // a crack of noise on the front, and a short ring after. Each alien's own
+  // pitch, and a touch of chance, so no two shots sound alike.
   alienZap(k, out, t, p) {
-    const amp = k.env(out, t, 0.003, 0.4, 0.18);
-    const o = k.osc('sawtooth', 2600 * p.pitch, t, t + 0.22, k.filter('bandpass', 1800 * p.pitch, 2, amp));
-    o.frequency.exponentialRampToValueAtTime(220, t + 0.18);
-    k.noise(t, t + 0.02, k.filter('highpass', 5000, 0.7, k.env(out, t, 0.001, 0.2, 0.02)));
-    return 0.24;
+    const f = p.pitch * (0.92 + Math.random() * 0.16);
+    const len = 0.15 + Math.random() * 0.05;
+    const lp = k.filter('lowpass', 5200, 1.4, k.env(out, t, 0.002, 0.55, len));
+    lp.frequency.exponentialRampToValueAtTime(900, t + len);
+    const sq = k.osc('square', 1650 * f, t, t + len + 0.05, lp);
+    sq.frequency.exponentialRampToValueAtTime(240 * f, t + len);
+    const si = k.osc('sine', 2400 * f, t, t + len + 0.05, k.env(out, t, 0.002, 0.4, len * 0.9));
+    si.frequency.exponentialRampToValueAtTime(380 * f, t + len * 0.9);
+    k.noise(t, t + 0.03, k.filter('bandpass', 6500, 1.1, k.env(out, t, 0.001, 0.35, 0.025)));
+    const ring = k.osc('sine', 3100 * f, t + 0.02, t + 0.32, k.env(out, t + 0.02, 0.005, 0.07, 0.25));
+    ring.frequency.exponentialRampToValueAtTime(2600 * f, t + 0.3);
+    return len + 0.3;
+  },
+  // A ship's lance: heavier and lower than the crew's blaster. Two detuned
+  // saws diving from a scream to a growl under a closing low-pass, a sub
+  // thump, and a sizzle of noise that trails off.
+  shipBolt(k, out, t) {
+    const lp = k.filter('lowpass', 3200, 5, k.env(out, t, 0.004, 0.6, 0.5));
+    lp.frequency.exponentialRampToValueAtTime(280, t + 0.45);
+    for (const f of [640, 655]) {
+      const s = k.osc('sawtooth', f, t, t + 0.55, lp);
+      s.frequency.exponentialRampToValueAtTime(f / 9, t + 0.45);
+    }
+    const sub = k.osc('sine', 120, t, t + 0.4, k.env(out, t, 0.004, 0.65, 0.32));
+    sub.frequency.exponentialRampToValueAtTime(38, t + 0.32);
+    k.noise(t, t + 0.4, k.filter('highpass', 2600, 0.8, k.env(out, t, 0.003, 0.22, 0.35)));
+    return 0.6;
+  },
+  // A shot landing on Roger: a hard, short crackle and a hiss, so a hit
+  // is heard where it lands even through the shield.
+  rayImpact(k, out, t) {
+    k.noise(t, t + 0.12, k.filter('bandpass', 3800, 1.6, k.env(out, t, 0.001, 0.6, 0.1)), 1.6);
+    k.noise(t + 0.03, t + 0.3, k.filter('highpass', 6000, 0.7, k.env(out, t + 0.03, 0.01, 0.2, 0.24)));
+    const tick = k.osc('triangle', 900, t, t + 0.08, k.env(out, t, 0.001, 0.3, 0.06));
+    tick.frequency.exponentialRampToValueAtTime(260, t + 0.06);
+    return 0.32;
   },
   // A wet squelch: noise through a resonant low-pass sweeping down, a
   // falling blip, and a last chirp dying.

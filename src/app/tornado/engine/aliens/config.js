@@ -77,7 +77,6 @@ export const ALIENS = {
   raySight: 70,            // how far off a target draws them
   rayRange: 30,            // they stop and shoot from here
   rayEvery: [2.2, 4],      // seconds between two shots from one alien
-  rayLife: 0.5,
   aimLead: 0.45,           // seconds the gun arm is up before the shot
   aimHold: 0.5,            // and after it
   rayEnergy: 2600,         // an impact's worth, on damage.js's scale
@@ -107,6 +106,7 @@ export const ALIENS = {
   laserSpeed: 5,           // m/s the foot crawls after him (he runs 9)
   laserStart: 14,          // how far off him the foot comes down
   laserKill: 1.2,
+  laserWarm: 0.6,          // s of the thin aiming line before the beam burns (no harm yet)
   // Hull points: a normal plasma shot takes 1, a mega beam 5 (heroMode.js
   // SHIP_DAMAGE) -- six shots, or a mega beam and a shot.
   shipHull: 6,
@@ -163,11 +163,27 @@ export const ALIENS = {
   goalSeconds: 7           // the opening "STOP THE ALIENS" message
 };
 
-// Ray colours: the crew's green, the hunters' red. Less than half as bright
-// as they were (on request, 2026-10-05: they read as too bright).
+// Ray colours: the crew's green, the ships' red. HDR values, so only the
+// core's middle reaches the bloom; the glow stays well below it.
 export const RAY_COLOURS = {
-  green: { core: new THREE.Color(1.1, 2.6, 1.3), glow: new THREE.Color(0.12, 0.9, 0.25), flare: new THREE.Color(0.5, 2, 0.65), splash: new THREE.Color(0.4, 1.6, 0.55) },
-  red: { core: new THREE.Color(2.6, 1, 0.85), glow: new THREE.Color(0.9, 0.12, 0.1), flare: new THREE.Color(2, 0.55, 0.45), splash: new THREE.Color(1.6, 0.45, 0.35) }
+  green: { core: new THREE.Color(1, 2, 1.1), glow: new THREE.Color(0.08, 0.55, 0.16), flare: new THREE.Color(0.7, 1.8, 0.8), splash: new THREE.Color(0.6, 1.5, 0.7) },
+  red: { core: new THREE.Color(2, 0.85, 0.7), glow: new THREE.Color(0.6, 0.08, 0.06), flare: new THREE.Color(1.8, 0.6, 0.45), splash: new THREE.Color(1.5, 0.45, 0.35) }
+};
+
+// How each kind of shot looks (2026-10-05, on request: the rays read as ugly
+// slabs and a hit on Roger as a blinding ball). The crew fire a short bolt
+// that flies to the target, so a shot is seen coming from its alien; a ship
+// fires an instant lance that strobes. Radii in metres, times in seconds.
+export const SHOTS = {
+  crew: { speed: 110, head: 3.2, core: 0.055, glow: 0.26, trail: 0.22, impact: 0.22 },
+  ship: { life: 0.42, core: 0.1, glow: 0.55, impact: 0.3 },
+  impactSize: 0.45,        // the spark's radius where a shot lands
+  ringSize: 1.4,           // how far its ring runs out
+  nearRoger: 3,            // impacts this close to Roger share one brightness
+  // The ships' tracking laser: a thin aiming line first, then the beam.
+  laserCore: 0.13,
+  laserGlow: 0.75,
+  laserFoot: 1.6
 };
 
 export const UP = new THREE.Vector3(0, 1, 0);

@@ -46,7 +46,7 @@ export const CREATURE = {
 
 // Seconds between two sounds of one kind, wherever they come from.
 const GAP = {
-  alienChirp: 0.18, alienZap: 0.05, alienDeath: 0.08,
+  alienChirp: 0.18, alienZap: 0.05, alienDeath: 0.08, shipBolt: 0.08, rayImpact: 0.07,
   groan: 0.35, snarl: 0.2, zombieDeath: 0.12,
   footstep: 0.12, robotStep: 0.1, robotHit: 0.08, boot: 0.15, servo: 0.4, iceCrackle: 0.15, sparkle: 0.2, punch: 0.1,
   samuraiShout: 0.7, katanaSwish: 0.06, katanaHit: 0.07, samuraiDeath: 0.15

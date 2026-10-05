@@ -489,7 +489,7 @@ export function createAlienShip(ctx, S, api) {
       }
     } else if (person && S.state.missileTimer <= 0 && d < ALIENS.hunterShootRange) {
       S.state.missileTimer = api.between(ALIENS.hunterShotEvery) + 1;
-      api.fireRay(new THREE.Vector3(g.position.x, g.position.y - 0.5, g.position.z), new THREE.Vector3(tx, 1.5, tz));
+      api.fireRay(new THREE.Vector3(g.position.x, g.position.y - 0.5, g.position.z), new THREE.Vector3(tx, 1.5, tz), 'green', { style: 'ship' });
       ctx.systems.people.explodePerson(person);
     }
   }

@@ -193,7 +193,7 @@ export function createAlienWaves(ctx, S, api) {
     const living = S.aliens.filter(a => a.phase !== 'dead' && a.phase !== 'burning').length;
     // Too many on their feet already: the ray only kills.
     if (living + S.mutants.length >= ALIENS.mutantMax) {
-      api.fireRay(new THREE.Vector3(p.x, 50, p.z), new THREE.Vector3(p.x, 1, p.z));
+      api.fireRay(new THREE.Vector3(p.x, 50, p.z), new THREE.Vector3(p.x, 1, p.z), 'green', { style: 'ship' });
       ctx.systems.people.explodePerson(person);
       return true;
     }

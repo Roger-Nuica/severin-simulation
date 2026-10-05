@@ -1,7 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
 import { bannerHost } from '../utils/banners.js';
-import { ALIENS, RAY_COLOURS } from './aliens/config.js';
+import { ALIENS } from './aliens/config.js';
 import { SHIP_DAMAGE } from './hero/config.js';
 import { createAlienModels } from './aliens/models.js';
 import { createAlienShip } from './aliens/ship.js';
@@ -203,7 +203,6 @@ export function createAliensSystem(ctx) {
      */
     rays: [],
     /** @type {THREE.BufferGeometry[]} shared by the pool */
-    rayGeos: [],
     /** @type {{group: THREE.Group, glow: THREE.Material[], rim: THREE.Material, legs: THREE.Object3D[]}|null} */
     ship: null,
     /** @type {{x: number, z: number}|null} where the ship will come down (plannedSpot) */
@@ -265,7 +264,6 @@ export function createAliensSystem(ctx) {
     /** @type {Object[]} one per hunter */
     hunterTrackers: [],
     /** @type {THREE.BufferGeometry[]} */
-    trackerGeos: [],
     /** @type {HTMLDivElement|null} */
     banner: null,
     // Worked out once a frame (updateAliens) for every alien: Smooth Criminal
@@ -417,72 +415,8 @@ export function createAliensSystem(ctx) {
     S.light.name = 'alien_light';
     Sim.three.scene.add(S.light);
 
-    // A unit-length beam along +y from its base, stretched and pointed per
-    // shot: a white-green core inside a wider green glow, with a flare at
-    // the muzzle and a splash where it lands.
-    const coreGeo = new THREE.CylinderGeometry(0.09, 0.09, 1, 6, 1, true);
-    coreGeo.translate(0, 0.5, 0);
-    const glowGeo = new THREE.CylinderGeometry(0.4, 0.4, 1, 8, 1, true);
-    glowGeo.translate(0, 0.5, 0);
-    const flareGeo = new THREE.SphereGeometry(0.5, 10, 8);
-    S.rayGeos = [coreGeo, glowGeo, flareGeo];
-    /**
-     * @param {THREE.BufferGeometry} geometry
-     * @param {THREE.Color} colour
-     * @returns {THREE.Mesh}
-     */
-    const glowMesh = (geometry, colour) => {
-      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-        color: colour, transparent: true, opacity: 0,
-        blending: THREE.AdditiveBlending, depthWrite: false
-      }));
-      mesh.frustumCulled = false;
-      return mesh;
-    };
-    for (let i = 0; i < ALIENS.rayMax; i++) {
-      const mesh = new THREE.Group();
-      mesh.name = 'alien_ray';
-      mesh.visible = false;
-      const core = glowMesh(coreGeo, new THREE.Color(2.5, 6, 3));
-      const glow = glowMesh(glowGeo, new THREE.Color(0.3, 2.4, 0.6));
-      mesh.add(core, glow);
-      const flare = glowMesh(flareGeo, new THREE.Color(1.2, 5, 1.6));
-      const splash = glowMesh(flareGeo, new THREE.Color(1, 4, 1.4));
-      flare.visible = splash.visible = false;
-      Sim.three.scene.add(mesh, flare, splash);
-      S.rays.push({ mesh, core, glow, flare, splash, life: 0 });
-    }
-
-    // The tracking lasers, one for the ship and one per hunter: made now,
-    // shown when they fire.
-    const beamCore = new THREE.CylinderGeometry(0.35, 0.35, 1, 8, 1, true);
-    beamCore.translate(0, 0.5, 0);
-    const beamGlow = new THREE.CylinderGeometry(1.3, 1.3, 1, 10, 1, true);
-    beamGlow.translate(0, 0.5, 0);
-    const footGeo = new THREE.CircleGeometry(2.4, 20);
-    footGeo.rotateX(-Math.PI / 2);
-    S.trackerGeos = [beamCore, beamGlow, footGeo];
-    /**
-     * @param {'green'|'red'} colour
-     * @returns {Object}
-     */
-    const tracker = (colour) => {
-      const c = RAY_COLOURS[colour];
-      const group = new THREE.Group();
-      group.name = 'alien_laser';
-      const core = glowMesh(beamCore, c.core);
-      const glow = glowMesh(beamGlow, c.glow);
-      group.add(core, glow);
-      group.visible = false;
-      const foot = glowMesh(footGeo, c.splash);
-      foot.visible = false;
-      Sim.three.scene.add(group, foot);
-      // `source` keys the health damage table; `struck` is the once-per-burst re-arm flag.
-      return { group, core, glow, foot, active: false, timer: 0, cooldown: 2, fx: 0, fz: 0, source: colour === 'green' ? 'ufoTracker' : 'hunterTracker', struck: false };
-    };
-    S.shipTracker = tracker('green');
-    S.hunterTrackers = [];
-    for (let i = 0; i < ALIENS.hunterCount + ALIENS.extraHunters; i++) S.hunterTrackers.push(tracker('red'));
+    // The shots and the tracking lasers (aliens/weapons.js).
+    api.initWeapons();
     api.initMissiles();
 
     S.banner = document.createElement('div');
@@ -676,7 +610,7 @@ export function createAliensSystem(ctx) {
           const plant = nuclear.nearestIntact(S.state.x, S.state.z);
           if (plant) {
             S.state.plantTimer = ALIENS.shipPlantFirst - ALIENS.shipPlantEvery;
-            api.fireRay(new THREE.Vector3(S.state.x, g.position.y - 0.5, S.state.z), plant.aim.clone());
+            api.fireRay(new THREE.Vector3(S.state.x, g.position.y - 0.5, S.state.z), plant.aim.clone(), 'green', { style: 'ship' });
             nuclear.shipHit(plant, plant.aim);
           }
         }
@@ -797,10 +731,7 @@ export function createAliensSystem(ctx) {
     S.aliens = [];
     // The people themselves belong to the town the reset is replacing.
     S.abductees = [];
-    for (const ray of S.rays) {
-      ray.life = 0;
-      ray.mesh.visible = ray.flare.visible = ray.splash.visible = false;
-    }
+    api.resetWeapons();
     for (const hunter of S.hunters) api.removeHunter(hunter);
     S.hunters = [];
     for (const m of S.mutants) {
@@ -846,22 +777,7 @@ export function createAliensSystem(ctx) {
     S.haloGeo = null;
     if (S.light) Sim.three.scene.remove(S.light);
     S.light = null;
-    for (const geo of S.rayGeos) geo.dispose();
-    S.rayGeos = [];
-    for (const ray of S.rays) {
-      Sim.three.scene.remove(ray.mesh, ray.flare, ray.splash);
-      for (const mesh of [ray.core, ray.glow, ray.flare, ray.splash]) mesh.material.dispose();
-    }
-    S.rays.length = 0;
-    for (const tr of [S.shipTracker, ...S.hunterTrackers]) {
-      if (!tr) continue;
-      Sim.three.scene.remove(tr.group, tr.foot);
-      for (const mesh of [tr.core, tr.glow, tr.foot]) mesh.material.dispose();
-    }
-    S.shipTracker = null;
-    S.hunterTrackers = [];
-    for (const geo of S.trackerGeos) geo.dispose();
-    S.trackerGeos = [];
+    api.disposeWeapons();
     api.disposeMissiles();
     if (S.banner && S.banner.parentNode) S.banner.parentNode.removeChild(S.banner);
     S.banner = null;
@@ -875,6 +791,17 @@ export function createAliensSystem(ctx) {
       if (lift && S.state.phase === 'hovering') api.liftOff();
       return { phase: S.state.phase, x: Math.round(S.state.x), z: Math.round(S.state.z), y: S.ship ? +S.ship.group.position.y.toFixed(1) : null,
         hunters: S.hunters.length, missiles: api.missilesOut(), hull: S.state.hull };
+    },
+    /** For testing from the console: `n` crew bolts at Roger from 40 m round him and one ship lance (no harm). */
+    debugVolley: (/** @type {number} */ n = 6) => {
+      const hero = api.heroTarget(0, 0);
+      if (!hero) return 0;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        api.fireRay(new THREE.Vector3(hero.x + Math.cos(a) * 40, 2.2, hero.z + Math.sin(a) * 40), new THREE.Vector3(hero.x, 1.3, hero.z), 'green', { style: 'crew', sizzle: true });
+      }
+      api.fireRay(new THREE.Vector3(hero.x + 30, 34, hero.z - 20), new THREE.Vector3(hero.x + 6, 1.5, hero.z + 4), 'red');
+      return n;
     }, nearestAlien: api.nearestAlien, strikeAlien: api.strikeAlien, targets, eachCuttable,
     shipTargets: api.shipTargets, huntersPresent: api.huntersPresent, plannedSpot: api.plannedSpot, frameLanding: api.frameLanding, plasmaKill: api.plasmaKill, boltKill: api.boltKill,
     sendSecondWave: api.sendSecondWave, mutate: api.mutate, mutatedCount: api.mutatedCount, instanceSources,
