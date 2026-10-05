@@ -112,7 +112,7 @@ export function createNetSystem(ctx) {
     bypass: false,
     holdRevive: false,
     pendingWelcome: false,
-    /** @type {Map<string, {obj: any, cd: number, tpCd: number, speed: number, reviveLeft: number, lastAbil: number, lastUse: boolean, flame: {tick: number, shooter: string}, run: import('./rogerView.js').RunCycle, owned: import('../hero/rogerLook.js').Owned, limbs: any}>} */
+    /** @type {Map<string, {obj: any, cd: number, tpCd: number, speed: number, lastUse: boolean, flame: {tick: number, shooter: string}, run: import('./rogerView.js').RunCycle, owned: import('../hero/rogerLook.js').Owned, limbs: any}>} */
     avatars: new Map(),
     /** @type {WeakMap<object, number>} */
     ids: new WeakMap(),
@@ -157,6 +157,8 @@ export function createNetSystem(ctx) {
     abil: 0,
     /** The pointer lock was taken for the guest's first person (losing it lowers the weapon, as Roger's). */
     aimLocked: false,
+    /** Ability bits pressed since the last input was sent: a tap shorter than the send interval still reaches the host. */
+    abilLatch: 0,
     /** Each player's Invincible as last announced by the host (guest HUD). */
     peerInv: /** @type {Map<number, boolean>} */ (new Map()),
     savedControls: true,
@@ -186,6 +188,9 @@ export function createNetSystem(ctx) {
   const reviveShown = new Map();
   /** @type {Map<number, number[]>} The partners' latest snapshot rows (guest HUD). */
   const partnerRows = new Map();
+  /** @type {Map<string, number>} Per guest: ability bits pressed since the host last acted on them, and the bits of the last message. */
+  const abilEdges = new Map();
+  const abilSeen = new Map();
   // Scratch for the peer camera.
   const camPose = newCameraPose();
   const camGoal = new THREE.Vector3();
@@ -270,6 +275,8 @@ export function createNetSystem(ctx) {
     S.peerInv.clear();
     reviveShown.clear();
     partnerRows.clear();
+    abilEdges.clear();
+    abilSeen.clear();
     S.hudHtml = '';
     S.peerMission = null;
     clearProxies();
@@ -383,6 +390,8 @@ export function createNetSystem(ctx) {
         players.remove(id);
         gate.forget(id);
         heroRequests.forget(id);
+        abilEdges.delete(id);
+        abilSeen.delete(id);
         say(msg.reason === 'dropped' ? 'A player lost connection.' : 'A player left.');
         setStatus();
         return;
@@ -392,6 +401,11 @@ export function createNetSystem(ctx) {
         if (!r.ok) return;
         const p = players.get(r.id);
         if (p) {
+          // Ability presses are found per message, not per frame: two inputs
+          // arriving between two host frames must not swallow a tap.
+          const last = abilSeen.get(r.id) || 0;
+          abilEdges.set(r.id, (abilEdges.get(r.id) || 0) | (r.input.abil & ~last));
+          abilSeen.set(r.id, r.input.abil);
           p.input = r.input;
           p.wantsRevive = r.input.use;
           if (heroRequests.edge(r.id, r.input.hero)) onGuestHeroRequest(r.id);
@@ -430,7 +444,7 @@ export function createNetSystem(ctx) {
     const style = rogerStyle(id);
     dressAsRoger(obj.mesh, owned.keep, { tee: style.tee });
     Sim.three.scene.add(obj.mesh);
-    S.avatars.set(id, { obj, cd: 0, tpCd: 0, speed: 0, reviveLeft: 0, lastAbil: 0, lastUse: false, flame: { tick: 0, shooter: id }, run: newRunCycle(), owned, limbs: rogerLimbs(obj.mesh) });
+    S.avatars.set(id, { obj, cd: 0, tpCd: 0, speed: 0, lastUse: false, flame: { tick: 0, shooter: id }, run: newRunCycle(), owned, limbs: rogerLimbs(obj.mesh) });
   }
 
   /** @param {string} id */
@@ -725,8 +739,8 @@ export function createNetSystem(ctx) {
       if (p.seat && car) { p.x = car.mesh.position.x; p.z = car.mesh.position.z; }
       else if (p.seat && !car) players.leaveSeat(p.id);
       if (input) {
-        const edge = input.abil & ~a.lastAbil;
-        a.lastAbil = input.abil;
+        const edge = abilEdges.get(p.id) || 0;
+        abilEdges.set(p.id, 0);
         // Bit 8: V, the guest's own Invincible, whenever they are in the run
         // (down included, as Roger's V works while he is down).
         if (edge & 8) setGuestInvincible(p, !p.invincible);
@@ -876,8 +890,8 @@ export function createNetSystem(ctx) {
       const tell = (/** @type {string} */ id, /** @type {string} */ text) => {
         if (id === '0') say(text); else sendEvent('notice', { text }, id);
       };
-      tell(helper, `Reviving ${attacker(p.id)}… keep holding F (${left} s)`);
-      tell(p.id, `${attacker(helper)} is reviving you… ${left} s`);
+      tell(helper, `Reviving ${rogerStyle(p.id).label}… keep holding F (${left} s)`);
+      tell(p.id, `${rogerStyle(helper).label} is reviving you… ${left} s`);
     }
   }
 
@@ -1370,15 +1384,15 @@ export function createNetSystem(ctx) {
       switch (e.type) {
         case 'keydown': {
           if (e.repeat) break;
-          if (e.code === 'KeyV') { S.abil |= 8; break; }
+          if (e.code === 'KeyV') { S.abil |= 8; S.abilLatch |= 8; break; }
           if (!up) break;
           if (e.code === 'Enter' || e.code === 'NumpadEnter') {
             if (S.buttons.aim) S.buttons.fire = true;
             else say('RIGHT-CLICK to raise the weapon · ENTER to fire');
           } else if (e.code === 'Escape' && S.buttons.aim) leavePeerAim();
-          else if (e.code === 'KeyQ') S.abil |= 1;
-          else if (e.code === 'KeyE') S.abil |= 2;
-          else if (e.code === 'KeyR') S.abil |= 4;
+          else if (e.code === 'KeyQ') { S.abil |= 1; S.abilLatch |= 1; }
+          else if (e.code === 'KeyE') { S.abil |= 2; S.abilLatch |= 2; }
+          else if (e.code === 'KeyR') { S.abil |= 4; S.abilLatch |= 4; }
           else if (e.code === 'KeyF') S.buttons.use = true;
           break;
         }
@@ -1448,8 +1462,9 @@ export function createNetSystem(ctx) {
         type: 'input', v: PROTOCOL_VERSION, seq: ++S.seq,
         mx: (k.right ? 1 : 0) - (k.left ? 1 : 0), mz: (k.up ? 1 : 0) - (k.down ? 1 : 0),
         yaw: S.look.yaw, pitch: S.look.pitch,
-        fire: S.buttons.fire, aim: S.buttons.aim, weapon: S.weapon, abil: S.abil, use: S.buttons.use, hero: S.heroFlag > 0
+        fire: S.buttons.fire, aim: S.buttons.aim, weapon: S.weapon, abil: S.abil | S.abilLatch, use: S.buttons.use, hero: S.heroFlag > 0
       });
+      S.abilLatch = 0;
     }
     const s = buffer.sample(performance.now() / 1000);
     if (!s) return;
