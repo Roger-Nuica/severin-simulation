@@ -174,7 +174,11 @@ export function createNewsTickerSystem(ctx) {
   /** @param {number} dt real seconds @returns {void} */
   function updateNewsTicker(dt) {
     if (!root) return;
-    root.classList.toggle('hidden', !!(ctx.Hero && ctx.Hero.active));
+    // Hidden in Hero Mode (Roger's HUD does its job) and on a co-op guest,
+    // whose own simulation is idle: its headlines would describe a town that
+    // is not the one being played.
+    const peer = !!(ctx.systems.net && ctx.systems.net.isPeerView());
+    root.classList.toggle('hidden', !!(ctx.Hero && ctx.Hero.active) || peer);
     check -= dt;
     if (check <= 0) {
       check = CHECK_SECONDS;

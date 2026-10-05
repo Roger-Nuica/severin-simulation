@@ -224,7 +224,7 @@ export function createNetSystem(ctx) {
     else if (st.status === 'in-room') {
       text = S.role === 'host'
         ? `Hosting · invite code ${S.code} · ${players.list().length > 1 ? 'guest connected' : 'waiting for a guest'}`
-        : (S.pendingWelcome ? `Joined ${S.code} · waiting for the host…` : `Joined ${S.code} · you are Player ${S.myId}`);
+        : (S.pendingWelcome ? `Joined ${S.code} · waiting for the host…` : `Joined ${S.code} · you are ${rogerStyle(S.myId).label}`);
     } else if (st.status === 'closed') text = st.error ? `Disconnected (${st.error})` : 'Disconnected';
     S.status.textContent = text;
     const idle = !S.client || st.status === 'idle' || st.status === 'closed';
@@ -1132,7 +1132,7 @@ export function createNetSystem(ctx) {
         // panel and the camera back to defaults, which the peer view then locks.
         if (Number.isFinite(d.seed)) applySeed(d.seed >>> 0);
         enterPeerView();
-        say('Click the game view to look around (Esc frees the mouse). Hero asks the host to bring you in.');
+        say('You are ROGER 2: W S run, A D turn, right-click raises the weapon (then the mouse looks). Hero asks the host to bring you in.');
         setStatus();
         break;
       case 'announce': say(`${String(d.title || '')} ${String(d.sub || '')}`.trim()); break;
