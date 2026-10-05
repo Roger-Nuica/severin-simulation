@@ -12,15 +12,15 @@ test('real relay: create, join, input to host, snapshot to peer, role enforcemen
   t.after(() => srv.kill());
   await new Promise((r) => srv.stdout.once('data', r));
   const host = await open(`ws://localhost:${PORT}`);
-  host.send(JSON.stringify({ type: 'create', v: 2 }));
+  host.send(JSON.stringify({ type: 'create', v: 3 }));
   const created = await next(host);
   assert.equal(created.type, 'created');
   const peer = await open(`ws://localhost:${PORT}`);
-  peer.send(JSON.stringify({ type: 'join', v: 2, code: created.code }));
+  peer.send(JSON.stringify({ type: 'join', v: 3, code: created.code }));
   assert.equal((await next(peer)).type, 'joined');
   assert.equal((await next(host)).type, 'peerJoined');
 
-  const input = { type: 'input', v: 2, seq: 1, mx: 0, mz: 1, yaw: 0, pitch: 0, fire: false, aim: false, weapon: 0, abil: 0, use: false, hero: false };
+  const input = { type: 'input', v: 3, seq: 1, mx: 0, mz: 1, yaw: 0, pitch: 0, fire: false, aim: false, weapon: 0, abil: 0, use: false, hero: false };
   peer.send(JSON.stringify(input));
   const got = await next(host);
   assert.equal(got.type, 'input');
@@ -28,10 +28,10 @@ test('real relay: create, join, input to host, snapshot to peer, role enforcemen
 
   peer.send(JSON.stringify({ ...input, damage: 9 }));
   assert.match((await next(peer)).code, /field:damage/);
-  peer.send(JSON.stringify({ type: 'snapshot', v: 2 }));
+  peer.send(JSON.stringify({ type: 'snapshot', v: 3 }));
   assert.equal((await next(peer)).code, 'role');
 
-  const snap = { type: 'snapshot', v: 2, room: created.code, tick: 1, t: 1, score: 0, players: [], tornadoes: [], terminators: [], aliens: [], ships: [], vehicles: [] };
+  const snap = { type: 'snapshot', v: 3, room: created.code, tick: 1, t: 1, score: 0, players: [], tornadoes: [], terminators: [], aliens: [], ships: [], vehicles: [] };
   host.send(JSON.stringify(snap));
   assert.equal((await next(peer)).tick, 1);
   host.close(); peer.close();

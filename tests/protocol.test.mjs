@@ -7,7 +7,7 @@ const input = (o = {}) => ({ type: 'input', v: V, seq: 1, mx: 0, mz: 1, yaw: 0.5
 test('valid input is accepted and normalised', () => assert.equal(validateInput(input()).ok, true));
 
 test('input rejects bad fields', () => {
-  for (const bad of [{ mx: 2 }, { mz: NaN }, { seq: -1 }, { seq: 1.5 }, { weapon: 9 }, { abil: 8 }, { fire: 1 }, { pitch: 3 }, { v: 99 }, { x: 5 }, { score: 1e9 }, { position: [0, 0] }]) {
+  for (const bad of [{ mx: 2 }, { mz: NaN }, { seq: -1 }, { seq: 1.5 }, { weapon: 9 }, { abil: 16 }, { fire: 1 }, { pitch: 3 }, { v: 99 }, { x: 5 }, { score: 1e9 }, { position: [0, 0] }]) {
     assert.equal(validateInput(input(bad)).ok, false, JSON.stringify(bad));
   }
 });
@@ -68,7 +68,7 @@ test('snapshot ack field is optional and validated (older hosts omit it)', () =>
   const bad = [{ ack: 'x' }, { ack: [[1]] }, { ack: [[1, 2, 3]] }, { ack: [[1, -1]] }, { ack: [[1, 1.5]] }, { ack: [[1.5, 1]] }, { ack: [[1, NaN]] }, { ack: [[1, 0x80000000]] }, { ack: new Array(65).fill([1, 1]) }];
   for (const b of bad) assert.equal(validateSnapshot(snap(b)).error, 'ack', JSON.stringify(b));
   assert.equal(validateSnapshot(snap({ players: [[0, 1, 2, 0, 0, 0, 100, -1, -1, 80]], ack: [[1, 1]] })).ok, false);
-  assert.equal(V, 2);
+  assert.equal(V, 3);
 });
 
 test('playerDamage is a replicable event', () => {

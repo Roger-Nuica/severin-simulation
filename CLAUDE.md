@@ -21,7 +21,7 @@ npm run start
 npm run lint
 ```
 
-The project has a small automated suite: `npm test` runs `node --test` over `tests/*.test.mjs` (health, melee, damage table, enemy routing, friendly fire, protocol, co-op rules and relay, terminator spawn points, news headlines, street traffic, air support, HAVOC the gunner, Hank Granite's throws, the alien ship's homing missiles, the crew's stand-off, the session clock). It covers pure logic, not the browser simulation, so validation is still lint, production build and manual checks.
+The project has a small automated suite: `npm test` runs `node --test` over `tests/*.test.mjs` (health, melee, damage table, enemy routing, friendly fire, protocol, co-op rules and relay, terminator spawn points, news headlines, street traffic, air support, HAVOC the gunner, Hank Granite's throws, the alien ship's homing missiles, the crew's stand-off, the session clock, Roger's walking rules). It covers pure logic, not the browser simulation, so validation is still lint, production build and manual checks.
 
 ## AGENT WORKFLOW
 
@@ -79,6 +79,12 @@ Reuse the weapon, enemy, and damage contracts instead of building a parallel mel
 - `src/app/tornado/engine/enemies.js`
 - `src/app/tornado/engine/damage.js`
 - `src/app/tornado/engine/aliens.js`, `terminator.js`, `trex.js`, `yeti.js`, `patientZero.js`
+
+### Co-op (two players, two computers)
+
+- `src/app/tornado/engine/net/system.js`, `net/players.js`, `net/protocol.js`
+- `src/app/tornado/engine/player/input.js` (the one local input pipeline), `hero/walk.js` (the walking rules both Rogers share)
+- Ownership model: `docs/architecture.md`, "Co-op: who owns what"; contract R-059. Local input and the local camera serve only the local player; a remote Roger is network state only. Never add a second keyboard/mouse listener for a player.
 
 ### Visual and performance tasks
 

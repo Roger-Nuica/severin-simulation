@@ -39,6 +39,7 @@ export const FRIENDLY_FIRE = true;
  * @property {{vehicle: number, seat: 0|1}|null} seat
  * @property {Object|null} input last accepted input
  * @property {boolean} wantsRevive revive input currently held
+ * @property {boolean} invincible the player's own Invincible toggle (V), as Roger's
  */
 
 export function createPlayerRegistry() {
@@ -54,7 +55,7 @@ export function createPlayerRegistry() {
     /** @type {Player} */
     const p = {
       id, x, z, heading: 0, state: 'up', downFor: 0, reviveProgress: 0, reviver: null,
-      weapon: 0, energy: 100, shield: 0, seat: null, input: null, wantsRevive: false
+      weapon: 0, energy: 100, shield: 0, seat: null, input: null, wantsRevive: false, invincible: false
     };
     players.set(id, p);
     return p;

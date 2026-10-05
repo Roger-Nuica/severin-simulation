@@ -17,12 +17,15 @@
  */
 
 /**
- * Version 2 adds the peer's `hero` request flag to the input message (a guest
- * asking the host to bring it into Hero Mode). Host, relay and peer must run
+ * Version 2 added the peer's `hero` request flag to the input message (a guest
+ * asking the host to bring it into Hero Mode). Version 3 gives the guest the
+ * single-player controls: on foot the movement keys turn and run (the look is
+ * only read while `aim` is held), `abil` gains bit 8 (V, Invincible), and the
+ * host sends an `invincible` event. Host, relay and peer must run
  * the same build: a mismatch is rejected with the `version` error, which the
  * client turns into a "refresh the page" message.
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 export const LIMITS = {
   /** Largest raw frame the relay or a client will parse, in bytes. */
@@ -57,7 +60,7 @@ export const WEAPONS = ['rifle', 'minigun', 'railgun', 'fire', 'blackhole', 'kat
 export const SNAPSHOT_KINDS = ['players', 'tornadoes', 'terminators', 'aliens', 'ships', 'vehicles'];
 
 /** Major events the host may replicate (cosmetic destruction stays local). */
-export const EVENT_TYPES = ['welcome', 'announce', 'notice', 'explosion', 'playerDown', 'playerRevived', 'playerDamage', 'gameOver', 'score', 'mission'];
+export const EVENT_TYPES = ['welcome', 'announce', 'notice', 'explosion', 'playerDown', 'playerRevived', 'playerDamage', 'gameOver', 'score', 'mission', 'invincible'];
 
 const CODE_RE = new RegExp(`^[${ROOM.codeAlphabet}]{${ROOM.codeLength}}$`);
 
@@ -129,8 +132,8 @@ export function validateInput(msg) {
   if (!inRange(msg.pitch, -1.6, 1.6)) return { ok: false, error: 'pitch' };
   if (typeof msg.fire !== 'boolean' || typeof msg.aim !== 'boolean' || typeof msg.use !== 'boolean' || typeof msg.hero !== 'boolean') return { ok: false, error: 'buttons' };
   if (!Number.isInteger(msg.weapon) || msg.weapon < 0 || msg.weapon >= WEAPONS.length) return { ok: false, error: 'weapon' };
-  // Ability bits: 1 time slow, 2 teleport, 4 EMP.
-  if (!Number.isInteger(msg.abil) || msg.abil < 0 || msg.abil > 7) return { ok: false, error: 'abil' };
+  // Ability bits: 1 time slow, 2 teleport, 4 EMP, 8 Invincible (V).
+  if (!Number.isInteger(msg.abil) || msg.abil < 0 || msg.abil > 15) return { ok: false, error: 'abil' };
   return {
     ok: true,
     input: {

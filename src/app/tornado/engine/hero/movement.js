@@ -4,6 +4,7 @@ import { PERSON_SCALE } from '../environment/people.js';
 import { HERO, STREETS_ALONG_X, STREETS_ALONG_Z } from './config.js';
 import { JETPACK } from './jetpack.js';
 import { steerRun } from './touchMath.js';
+import { stepRun, aimDirection } from './walk.js';
 import { kneeBend } from '../net/rogerView.js';
 
 /**
@@ -22,6 +23,8 @@ import { kneeBend } from '../net/rogerView.js';
  */
 export function createHeroMovement(ctx, S, api) {
   const { Sim, container } = ctx;
+  // Scratch for the first-person walk (per instance, never module state).
+  const walkDir = { x: 0, z: 0 };
 
   // ---------------------------------------------------------------------
   // Placing things
@@ -380,21 +383,19 @@ export function createHeroMovement(ctx, S, api) {
       const mz = (fz * ahead - fx * across) * HERO.aimWalkSpeed;
       api.airMove(p, dt, mx, mz, ahead !== 0 || across !== 0);
     } else if (S.state.phase === 'running') {
-      let want;
       if (S.stick.x || S.stick.y) {
         // The touch joystick (hero/touch.js): the way it points on screen,
         // from the camera, and as fast as it is pushed.
         const cam = Sim.three.camera.position;
         const steer = steerRun(S.state.heading, Math.atan2(p.x - cam.x, p.z - cam.z), S.stick.x, S.stick.y, dt);
         S.state.heading = steer.heading;
-        want = HERO.runSpeed * steer.speed;
+        const want = HERO.runSpeed * steer.speed;
+        const step = HERO.accel * dt;
+        S.state.speed = S.state.speed < want ? Math.min(want, S.state.speed + step) : Math.max(want, S.state.speed - step * 1.5);
       } else {
-        const turn = (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
-        S.state.heading += turn * HERO.turnRate * dt;
-        want = S.keys.up ? HERO.runSpeed : S.keys.down ? -HERO.backSpeed : 0;
+        // The keyboard: the walking rules every Roger shares (hero/walk.js).
+        stepRun(S.state, S.keys, dt);
       }
-      const step = HERO.accel * dt;
-      S.state.speed = S.state.speed < want ? Math.min(want, S.state.speed + step) : Math.max(want, S.state.speed - step * 1.5);
       p.x += Math.sin(S.state.heading) * S.state.speed * dt;
       p.z += Math.cos(S.state.heading) * S.state.speed * dt;
     } else if (S.state.phase === 'dazed') {
@@ -422,15 +423,14 @@ export function createHeroMovement(ctx, S, api) {
       // First person: the mouse looks, W A S D walk (slowly) relative to
       // it -- up/down forward and back, left/right strafe.
       S.state.heading = S.state.yaw;
-      const fx = Math.sin(S.state.yaw);
-      const fz = Math.cos(S.state.yaw);
       const analog = S.stick.x || S.stick.y;
       // The touch joystick walks as far as it is pushed; keys walk full pace.
       const ahead = analog ? -S.stick.y : (S.keys.up ? 1 : 0) - (S.keys.down ? 1 : 0);
       const across = analog ? -S.stick.x : (S.keys.left ? 1 : 0) - (S.keys.right ? 1 : 0);
-      // Left of forward is (fz, -fx) with this module's heading convention.
-      let mx = fx * ahead + fz * across;
-      let mz = fz * ahead - fx * across;
+      // Left of forward is (fz, -fx): the rule every Roger shares (hero/walk.js).
+      const dir = aimDirection(S.state.yaw, ahead, across, walkDir);
+      let mx = dir.x;
+      let mz = dir.z;
       const len = Math.hypot(mx, mz);
       const pace = HERO.aimWalkSpeed * (analog ? Math.min(1, len) : 1);
       S.state.speed = len > 0 ? pace : 0;

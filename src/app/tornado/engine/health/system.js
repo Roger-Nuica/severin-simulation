@@ -163,7 +163,7 @@ export function createHealthSystem(ctx) {
   /**
    * The co-op registry entry of a player while this is a host in co-op.
    * @param {string} id Player id.
-   * @returns {{state: string, shield: number} | null} The entry, or null outside co-op.
+   * @returns {{state: string, shield: number, invincible?: boolean} | null} The entry, or null outside co-op.
    */
   const coopEntry = (id) => {
     const n = net();
@@ -215,6 +215,8 @@ export function createHealthSystem(ctx) {
     if (isRoger && !rogerVulnerable(!!request.pierce)) return { ...NOTHING, health: health('0') };
     const entry0 = coopEntry(event.targetId);
     if (isRoger ? isOut('0') : !isHittable(entry0)) return { ...NOTHING, health: health(event.targetId) };
+    // A guest's own Invincible (V), like Roger's: only a piercing hit gets through.
+    if (!isRoger && entry0 && /** @type {{invincible?: boolean}} */ (entry0).invincible && !request.pierce) return { ...NOTHING, health: health(event.targetId) };
     const before = stateOf(event.targetId);
     const after = applyDamage(before, event, HEALTH);
     if (after === before) return { applied: false, killed: false, health: before.value };

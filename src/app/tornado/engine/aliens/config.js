@@ -181,9 +181,12 @@ export const SHOTS = {
   ringSize: 1.4,           // how far its ring runs out
   nearRoger: 3,            // impacts this close to Roger share one brightness
   // The ships' tracking laser: a thin aiming line first, then the beam.
-  laserCore: 0.13,
-  laserGlow: 0.75,
-  laserFoot: 1.6
+  // A thick white-hot core, a wide glow and a faint outer halo (2026-10-05:
+  // the thin beam looked feeble).
+  laserCore: 0.45,
+  laserGlow: 1.9,
+  laserHalo: 4.2,
+  laserFoot: 2.8
 };
 
 export const UP = new THREE.Vector3(0, 1, 0);
