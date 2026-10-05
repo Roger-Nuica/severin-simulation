@@ -48,7 +48,7 @@ Most threats take health (alien rays, touches, ship lasers, homing missiles, HAV
 
 ### Co-op
 
-Two players can share a town (desktop only); each has a bar, a downed player can be revived, and the run ends when both are down.
+Two players can share a town (desktop only), each on their own computer. The host runs the world and is the only one who starts storms, disasters, enemies and modes; the guest's panel keeps only the sound settings and the Hero request. Each Roger plays exactly like the single-player one with its own keys, mouse and camera: on foot A and D turn, right-click raises the weapon and then the mouse looks. Each sees both health bars, both can be Invincible, they can hurt each other, and both can fight and wreck whatever the host has brought in. A downed player cannot move; the partner revives them by holding F beside them, with a countdown, and the run ends when both are down.
 
 ### On a phone or tablet
 
@@ -90,4 +90,5 @@ Short dated notes on how the game changed; the reasoning is in `PROJECT_HISTORY.
 - 2026-10-05 (morning): rubble and fallen buildings are solid; the jetpack flies on one press with no limit; Hank became a fightable boss; the T-Rex and Yeti aim at Roger; Patient Zero dimmed; Fujiwhara, the Final Boss and Doomsday usable in Hero Mode.
 - 2026-10-05 (later): the landing ship turns hunter with homing missiles and brings two more hunters, and never lands inside anything; the crew keep their distance; Roger always starts by the first plant; the Gravitron lifts everything and only the living explode; HAVOC got two minigun arms and a pair comes at one minute; the session clock replaced the install button; the jetpack is silent until its recording arrives.
 - 2026-10-05 (evening): the aliens' and ships' shots redrawn (flying bolts, lances, soft beams that fade near the camera, small impacts), their own sounds, and the tracking laser warns before it burns.
+- 2026-10-05 (night): co-op rebuilt around ownership: the guest's keys, mouse and camera drive only its own Roger, with the single-player controls; a downed Roger no longer reacts to input; the guest can revive a downed host; the guest has Invincible and a panel with only the sound settings.
 - Earlier tuning kept for reference: the mothership comes after 4 abductions (was 5); hunters after 90 s (was 150, then 120); the sombrero wave after 2 minutes; alien speed +30%; the Yeti 10.5 m; satellite funnels off; waterspouts only on request; Hank and the earthquake only from the panel.

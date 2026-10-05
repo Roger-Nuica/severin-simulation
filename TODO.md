@@ -31,6 +31,12 @@ send a file and it will be hooked up):
   laser's warning, hits on Roger): look and loudness at real speed, with
   sound on, in a crossfire of several aliens and ships.
 
+- Co-op on two real computers (host and guest, each with its own keyboard
+  and mouse): the guest's run, turn, aim and strafe feel like single-player
+  Roger, the camera never follows the other Roger, a downed Roger ignores the
+  mouse, F revives both ways, V works for both. Checked so far with two
+  headless browsers on one machine through the local relay.
+
 ## Feature backlog
 
 Ideas the owner liked (2026-10-02) and wants kept. Each one is a candidate,

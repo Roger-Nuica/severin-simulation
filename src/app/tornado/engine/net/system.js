@@ -7,6 +7,7 @@ import { createEventEmitter, createEventDeduper } from './events.js';
 import { createPlayerRegistry, REVIVE, FRIENDLY_FIRE } from './players.js';
 import { PROTOCOL_VERSION, LIMITS, WEAPONS } from './protocol.js';
 import { HERO } from '../hero/config.js';
+import { stepRun, aimDirection, wrapAngle } from '../hero/walk.js';
 import { HOLE } from '../player/blackHole.js';
 import { ENERGY } from '../player/energy.js';
 import { IMPACT_SCORE } from '../damage/config.js';
@@ -111,7 +112,7 @@ export function createNetSystem(ctx) {
     bypass: false,
     holdRevive: false,
     pendingWelcome: false,
-    /** @type {Map<string, {obj: any, cd: number, tpCd: number, lastAbil: number, lastUse: boolean, flame: {tick: number, shooter: string}, run: import('./rogerView.js').RunCycle, owned: import('../hero/rogerLook.js').Owned, limbs: any}>} */
+    /** @type {Map<string, {obj: any, cd: number, tpCd: number, speed: number, reviveLeft: number, lastAbil: number, lastUse: boolean, flame: {tick: number, shooter: string}, run: import('./rogerView.js').RunCycle, owned: import('../hero/rogerLook.js').Owned, limbs: any}>} */
     avatars: new Map(),
     /** @type {WeakMap<object, number>} */
     ids: new WeakMap(),
@@ -132,6 +133,8 @@ export function createNetSystem(ctx) {
     savedCam: null,
     /** Panel controls disabled for the peer, with what to put back. */
     lockedUi: /** @type {Map<HTMLElement, {disabled: boolean, title: string}>} */ (new Map()),
+    /** Panel parts hidden from the peer, with their own `hidden` to put back. */
+    hiddenUi: /** @type {Map<HTMLElement, boolean>} */ (new Map()),
     peerRow: /** @type {number[]|null} */ (null),
     /** Latest synced health per player id: value, seconds since last damage, receipt time (ms). */
     peerHp: /** @type {Map<number, {v: number, since: number, at: number}>} */ (new Map()),
@@ -152,6 +155,10 @@ export function createNetSystem(ctx) {
     buttons: { fire: false, aim: false, use: false },
     weapon: 0,
     abil: 0,
+    /** The pointer lock was taken for the guest's first person (losing it lowers the weapon, as Roger's). */
+    aimLocked: false,
+    /** Each player's Invincible as last announced by the host (guest HUD). */
+    peerInv: /** @type {Map<number, boolean>} */ (new Map()),
     savedControls: true,
     /** @type {HTMLDivElement|null} */
     panel: null,
@@ -171,6 +178,14 @@ export function createNetSystem(ctx) {
   // Scratch for the guest's flame (per instance, never module state).
   const aimVec = new THREE.Vector3();
   const muzzleVec = new THREE.Vector3();
+  // Scratch for the guests' walk (host) and the revive countdown.
+  const guestKeys = { up: false, down: false, left: false, right: false };
+  const walkDir = { x: 0, z: 0 };
+  const runState = { heading: 0, speed: 0 };
+  /** @type {Map<string, number>} Seconds of revive last shown, per downed player. */
+  const reviveShown = new Map();
+  /** @type {Map<number, number[]>} The partners' latest snapshot rows (guest HUD). */
+  const partnerRows = new Map();
   // Scratch for the peer camera.
   const camPose = newCameraPose();
   const camGoal = new THREE.Vector3();
@@ -252,6 +267,9 @@ export function createNetSystem(ctx) {
     S.peerScore = 0;
     S.peerRow = null;
     S.peerHp.clear();
+    S.peerInv.clear();
+    reviveShown.clear();
+    partnerRows.clear();
     S.hudHtml = '';
     S.peerMission = null;
     clearProxies();
@@ -412,7 +430,7 @@ export function createNetSystem(ctx) {
     const style = rogerStyle(id);
     dressAsRoger(obj.mesh, owned.keep, { tee: style.tee });
     Sim.three.scene.add(obj.mesh);
-    S.avatars.set(id, { obj, cd: 0, tpCd: 0, lastAbil: 0, lastUse: false, flame: { tick: 0, shooter: id }, run: newRunCycle(), owned, limbs: rogerLimbs(obj.mesh) });
+    S.avatars.set(id, { obj, cd: 0, tpCd: 0, speed: 0, reviveLeft: 0, lastAbil: 0, lastUse: false, flame: { tick: 0, shooter: id }, run: newRunCycle(), owned, limbs: rogerLimbs(obj.mesh) });
   }
 
   /** @param {string} id */
@@ -658,7 +676,11 @@ export function createNetSystem(ctx) {
       if (pose.driving && !roger.seat) players.enterSeat('0', CAR_ID, 0);
       else if (!pose.driving && roger.seat) ejectPassengers(players.leaveSeat('0'), pose);
     }
-    const heroOn = !!pose;
+    // The run is on while Roger is in play, and also while he lies down
+    // waiting for a revive (rogerPose is null then): the guest must still be
+    // able to walk over and revive him, and a guest going down too must still
+    // end the run.
+    const heroOn = !!pose || (!!roger && roger.state !== 'up' && !!ctx.Hero && ctx.Hero.active);
     // A new run (first start or a Restart, even within one frame): everyone up
     // again, guests dropped back beside the new spawn. The room stays.
     if (pose && pose.run !== S.lastRun) {
@@ -672,9 +694,11 @@ export function createNetSystem(ctx) {
       let a = S.avatars.get(p.id);
       if (!heroOn) { if (a) removeAvatar(p.id); continue; }
       if (!a) {
-        const nx = (pose.x) + (Number(p.id) % 2 ? 2 : -2);
-        spawnAvatar(p.id, nx, pose.z + 2);
-        p.x = nx; p.z = pose.z + 2;
+        const bx = pose ? pose.x : roger ? roger.x : 0;
+        const bz = pose ? pose.z : roger ? roger.z : 0;
+        const nx = bx + (Number(p.id) % 2 ? 2 : -2);
+        spawnAvatar(p.id, nx, bz + 2);
+        p.x = nx; p.z = bz + 2;
         // A guest dropping into a run in progress is as safe as Roger was at his start (R-035).
         p.shield = Math.max(p.shield, HERO.spawnShieldSeconds);
         a = /** @type {NonNullable<typeof a>} */ (S.avatars.get(p.id));
@@ -701,12 +725,22 @@ export function createNetSystem(ctx) {
       if (p.seat && car) { p.x = car.mesh.position.x; p.z = car.mesh.position.z; }
       else if (p.seat && !car) players.leaveSeat(p.id);
       if (input) {
-        p.heading = input.yaw;
-        p.weapon = input.weapon;
-        if (ctl.move && dt > 0) moveGuest(p, input, dt);
-        if (ctl.aim && input.fire) guestFire(p, a, input, dt);
         const edge = input.abil & ~a.lastAbil;
         a.lastAbil = input.abil;
+        // Bit 8: V, the guest's own Invincible, whenever they are in the run
+        // (down included, as Roger's V works while he is down).
+        if (edge & 8) setGuestInvincible(p, !p.invincible);
+        // Everything below drives the guest's body: only while that body is
+        // up. A downed or dead guest's input moves, turns and fires nothing.
+        if (p.state !== 'up') a.speed = 0;
+        else {
+          p.weapon = input.weapon;
+          // Aiming (first person) the body faces where the guest looks; on
+          // foot it turns with A and D (moveGuest), never with the mouse.
+          if (input.aim && ctl.aim) p.heading = wrapAngle(input.yaw);
+          if (ctl.move && dt > 0) moveGuest(p, a, input, dt);
+          if (ctl.aim && input.fire) guestFire(p, a, input, dt);
+        }
         // Bit 2: Teleport. Bits 1 and 4 (Time Slow, EMP) are host-only.
         if ((edge & 2) && a.tpCd <= 0 && ctl.move) {
           a.tpCd = TELEPORT.cooldown;
@@ -735,6 +769,7 @@ export function createNetSystem(ctx) {
       say(`Player ${id} revived.`);
     }
     for (const id of died) say(`Player ${id} bled out.`);
+    showReviveProgress();
     if (heroOn && players.list().length > 0 && players.gameOver()) gameOverNow();
   }
 
@@ -771,37 +806,94 @@ export function createNetSystem(ctx) {
     q.x = pose.x + 2.5; q.z = pose.z;
   }
 
-  /** @param {import('./players.js').Player} p @param {import('./protocol.js').PlayerInput} input @param {number} dt */
-  function moveGuest(p, input, dt) {
+  /**
+   * One frame of a guest's walk, by the same rules as Roger's own
+   * (hero/walk.js): on foot A and D turn and W and S run with his
+   * acceleration; aiming, W and S walk along the look and A and D strafe.
+   * Walls by heroMode.standable, each axis on its own so a wall slides.
+   * @param {import('./players.js').Player} p
+   * @param {{speed: number}} a The guest's avatar (keeps the run speed).
+   * @param {import('./protocol.js').PlayerInput} input
+   * @param {number} dt
+   * @returns {void}
+   */
+  function moveGuest(p, a, input, dt) {
     const h = hero();
-    const speed = (input.aim ? HERO.aimWalkSpeed : HERO.runSpeed) * (input.mz < 0 ? HERO.backSpeed / HERO.runSpeed : 1);
-    const mag = Math.hypot(input.mx, input.mz);
-    if (mag < 1e-3) return;
-    const k = Math.min(1, 1 / mag);
-    const fx = Math.sin(input.yaw), fz = Math.cos(input.yaw);
-    const rx = Math.cos(input.yaw), rz = -Math.sin(input.yaw);
-    const dx = (fx * input.mz + rx * input.mx) * k * speed * dt;
-    const dz = (fz * input.mz + rz * input.mx) * k * speed * dt;
-    // Each axis on its own, so a wall slides rather than sticks.
-    let nx = THREE.MathUtils.clamp(p.x + dx, -HERO.bound, HERO.bound);
+    guestKeys.up = input.mz > 0; guestKeys.down = input.mz < 0;
+    guestKeys.left = input.mx < 0; guestKeys.right = input.mx > 0;
+    let dx = 0, dz = 0;
+    if (input.aim) {
+      a.speed = 0;
+      const dir = aimDirection(p.heading, Math.sign(input.mz), -Math.sign(input.mx), walkDir);
+      const len = Math.hypot(dir.x, dir.z);
+      if (len < 1e-3) return;
+      dx = (dir.x / len) * HERO.aimWalkSpeed * dt;
+      dz = (dir.z / len) * HERO.aimWalkSpeed * dt;
+    } else {
+      runState.heading = p.heading;
+      runState.speed = a.speed;
+      stepRun(runState, guestKeys, dt);
+      p.heading = wrapAngle(runState.heading);
+      a.speed = runState.speed;
+      dx = Math.sin(p.heading) * a.speed * dt;
+      dz = Math.cos(p.heading) * a.speed * dt;
+    }
+    const nx = THREE.MathUtils.clamp(p.x + dx, -HERO.bound, HERO.bound);
     if (h.standable(nx, p.z)) p.x = nx;
+    else a.speed *= 0.5;
     const nz = THREE.MathUtils.clamp(p.z + dz, -HERO.bound, HERO.bound);
     if (h.standable(p.x, nz)) p.z = nz;
-    void nx;
+    else a.speed *= 0.5;
+  }
+
+  /**
+   * A guest's Invincible (V) on or off: the registry flag the health API
+   * reads, told to everyone in the room.
+   * @param {import('./players.js').Player} p
+   * @param {boolean} on
+   * @returns {void}
+   */
+  function setGuestInvincible(p, on) {
+    p.invincible = on;
+    sendEvent('invincible', { id: Number(p.id), on });
+    say(on ? `${rogerStyle(p.id).label}: INVINCIBLE` : `${rogerStyle(p.id).label}: Invincible off`);
+  }
+
+  /**
+   * A revive in progress, counted down for the two players involved (the
+   * one holding F and the one on the ground), once a second: the host on
+   * its toast, a guest by a notice.
+   * @returns {void}
+   */
+  function showReviveProgress() {
+    for (const p of players.list()) {
+      const left = p.state === 'down' && p.reviver ? Math.ceil(REVIVE.hold - p.reviveProgress) : 0;
+      const prev = reviveShown.get(p.id) || 0;
+      if (left === prev) continue;
+      reviveShown.set(p.id, left);
+      if (!left) continue;
+      const helper = /** @type {string} */ (p.reviver);
+      const tell = (/** @type {string} */ id, /** @type {string} */ text) => {
+        if (id === '0') say(text); else sendEvent('notice', { text }, id);
+      };
+      tell(helper, `Reviving ${attacker(p.id)}… keep holding F (${left} s)`);
+      tell(p.id, `${attacker(helper)} is reviving you… ${left} s`);
+    }
   }
 
   /**
    * The nearest enemy a ray from the guest's eyes crosses (a standing
    * cylinder: the kind's hitbox, else a person-sized default).
    * @param {import('./players.js').Player} p
-   * @param {import('./protocol.js').PlayerInput} input
+   * @param {number} yaw Aim yaw, radians.
+   * @param {number} pitch Aim pitch, radians.
    * @param {number} range
    * @returns {{e: any, kind: any, t: number}|null}
    */
-  function scan(p, input, range) {
+  function scan(p, yaw, pitch, range) {
     const ox = p.x, oy = EYE, oz = p.z;
-    const cp = Math.cos(input.pitch);
-    const dx = Math.sin(input.yaw) * cp, dy = Math.sin(input.pitch), dz = Math.cos(input.yaw) * cp;
+    const cp = Math.cos(pitch);
+    const dx = Math.sin(yaw) * cp, dy = Math.sin(pitch), dz = Math.cos(yaw) * cp;
     /** @type {{e: any, kind: any, t: number}|null} */
     let best = null;
     let bestT = range;
@@ -841,8 +933,12 @@ export function createNetSystem(ctx) {
   function guestFire(p, a, input, dt) {
     const name = WEAPONS[input.weapon];
     const ox = p.x, oz = p.z;
-    const cp = Math.cos(input.pitch);
-    const dx = Math.sin(input.yaw) * cp, dy = Math.sin(input.pitch), dz = Math.cos(input.yaw) * cp;
+    // Aiming, the shot goes where the guest looks; on foot (the Katana's
+    // cut), straight ahead of the body.
+    const yaw = input.aim ? input.yaw : p.heading;
+    const pitch = input.aim ? input.pitch : 0;
+    const cp = Math.cos(pitch);
+    const dx = Math.sin(yaw) * cp, dy = Math.sin(pitch), dz = Math.cos(yaw) * cp;
     if (name === 'fire') {
       // Held: the same flame, sound and burning as Roger's, from the guest.
       aimVec.set(dx, dy, dz);
@@ -854,7 +950,7 @@ export function createNetSystem(ctx) {
     if (name === 'rifle' || name === 'minigun' || name === 'railgun') {
       const w = /** @type {NonNullable<typeof GUEST_WEAPONS[keyof typeof GUEST_WEAPONS]>} */ (GUEST_WEAPONS[name]);
       a.cd = w.cooldown;
-      const hit = scan(p, input, w.range);
+      const hit = scan(p, yaw, pitch, w.range);
       if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: EYE + dy * hit.t, z: oz + dz * hit.t } })) credit(KILL_SCORE, p.id);
       // Friendly fire (D4): the partner in the line of fire, if nearer than the enemy hit.
       hurtRay(p.id, ox, EYE, oz, dx, dy, dz, hit ? hit.t : w.range, w.type);
@@ -868,7 +964,7 @@ export function createNetSystem(ctx) {
         const q = kind.position(e);
         const d = Math.hypot(q.x - ox, q.z - oz);
         if (d > bestD) return;
-        const off = Math.atan2(q.x - ox, q.z - oz) - input.yaw;
+        const off = Math.atan2(q.x - ox, q.z - oz) - yaw;
         if (Math.abs(Math.atan2(Math.sin(off), Math.cos(off))) > KATANA.halfAngle) return;
         target = { e, kind, q };
         bestD = d;
@@ -878,7 +974,7 @@ export function createNetSystem(ctx) {
         if (ctx.systems.enemies.hit(t.e, t.kind, { type: 'blade', amount: 1, at: { x: t.q.x, z: t.q.z } })) credit(KILL_SCORE, p.id);
       }
       // Friendly fire (D4): the other player inside the same arc.
-      hurtSector(p.id, ox, oz, Math.sin(input.yaw), Math.cos(input.yaw), KATANA.reach, Math.cos(KATANA.halfAngle), 0.05, 'blade', 'melee', 'Cut down by');
+      hurtSector(p.id, ox, oz, Math.sin(yaw), Math.cos(yaw), KATANA.reach, Math.cos(KATANA.halfAngle), 0.05, 'blade', 'melee', 'Cut down by');
       // People are not in the registry: the nearest standing civilian in the
       // same arc is killed through the people owner (as the host's blade
       // does) and credited at the person-kill value. `blade` is sent to no kind.
@@ -889,7 +985,7 @@ export function createNetSystem(ctx) {
         const q = c.mesh.position;
         const d = Math.hypot(q.x - ox, q.z - oz);
         if (d > bestPerson) return;
-        const off = Math.atan2(q.x - ox, q.z - oz) - input.yaw;
+        const off = Math.atan2(q.x - ox, q.z - oz) - yaw;
         if (Math.abs(Math.atan2(Math.sin(off), Math.cos(off))) > KATANA.halfAngle) return;
         person = c;
         bestPerson = d;
@@ -902,7 +998,7 @@ export function createNetSystem(ctx) {
       a.cd = HOLE_COOLDOWN;
       // Where the aim meets the ground, or the enemy it is on.
       let gx = 0, gz = 0, ok = false;
-      const hit = scan(p, input, 200);
+      const hit = scan(p, yaw, pitch, 200);
       if (hit) { const q = hit.kind.position(hit.e); gx = q.x; gz = q.z; ok = true; }
       else if (dy < -0.02) {
         const t = EYE / -dy;
@@ -1040,6 +1136,10 @@ export function createNetSystem(ctx) {
         }
         break;
       case 'gameOver': say('GAME OVER — everyone is down.'); break;
+      case 'invincible':
+        S.peerInv.set(Number(d.id), !!d.on);
+        if (Number(d.id) === Number(S.myId)) say(d.on ? 'INVINCIBLE · nothing can hurt you' : 'Invincible off');
+        break;
       case 'mission': S.peerMission = { id: String(d.id), value: Number(d.value), goal: Number(d.goal), left: Number(d.left) }; break;
       case 'score': if (Number(d.id) === Number(S.myId)) say(`+${Number(d.points) || 0}`); break;
       default:
@@ -1051,11 +1151,32 @@ export function createNetSystem(ctx) {
    * local simulation is idle, so Tornado, disasters, presets, storm, Reset,
    * Pause and the rest must not act on it. The click blocker in initNet is the
    * backstop if another system re-enables one.
+   *
+   * Each player plays on their own computer, so the guest is not shown what
+   * only the host can use: every part of the panel without a control the
+   * guest may touch is hidden (Presets, Storm, Missions, Crowd, Camera,
+   * Disasters, the mode buttons, Tornado / Pause / Reset, the town readouts),
+   * leaving the fold button, Sounds (this computer's own audio) and the Hero
+   * request.
    * @param {boolean} locked
    * @returns {void}
    */
   function setPeerUiLocked(locked) {
     if (locked) {
+      const body = document.getElementById('panel-body');
+      /** @param {Element} node @returns {boolean} it holds a control the guest may use */
+      const keeps = (node) => [...node.querySelectorAll('button, input, select, textarea')].some(PEER_UI_ALLOWED);
+      /** @param {Element} parent */
+      const hideOthers = (parent) => {
+        for (const child of [...parent.children]) {
+          const el = /** @type {HTMLElement} */ (child);
+          if (PEER_UI_ALLOWED(el)) continue;
+          if (!keeps(el)) {
+            if (!S.hiddenUi.has(el)) { S.hiddenUi.set(el, el.hidden); el.hidden = true; }
+          } else if (el.tagName !== 'DETAILS') hideOthers(el);
+        }
+      };
+      if (body) hideOthers(body);
       document.querySelectorAll('#ui-panel button, #ui-panel input, #ui-panel select, #ui-panel textarea').forEach((node) => {
         const el = /** @type {HTMLButtonElement} */ (node);
         if (PEER_UI_ALLOWED(el) || S.lockedUi.has(el)) return;
@@ -1070,6 +1191,8 @@ export function createNetSystem(ctx) {
       el.title = was.title;
     }
     S.lockedUi.clear();
+    for (const [el, was] of S.hiddenUi) el.hidden = was;
+    S.hiddenUi.clear();
   }
 
   /** @returns {void} */
@@ -1079,6 +1202,11 @@ export function createNetSystem(ctx) {
     S.savedCam = { pos: camera.position.clone(), target: controls.target.clone() };
     controls.enabled = false;
     setPeerUiLocked(true);
+    // The guest's keyboard and mouse: the very input pipeline Roger's own
+    // controls use (engine/player/input.js), read once a frame by
+    // readPeerInput. It is this client's only local input; nothing else in the
+    // peer's (idle) simulation reads it.
+    ctx.systems.playerInput.attachInput();
     if (!S.proxyRoot) { S.proxyRoot = new THREE.Group(); S.proxyRoot.name = 'coop_proxies'; Sim.three.scene.add(S.proxyRoot); }
     if (S.hud) S.hud.classList.add('visible');
   }
@@ -1087,8 +1215,12 @@ export function createNetSystem(ctx) {
   function restorePeerView() {
     const { controls, camera, renderer } = Sim.three;
     if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
+    // Let go of the input pipeline, unless a local Hero run holds it (it cannot
+    // while this is a peer, but leaving must never take Roger's keys away).
+    if (!(ctx.Hero && ctx.Hero.active)) ctx.systems.playerInput.detachInput();
     S.keys.up = S.keys.down = S.keys.left = S.keys.right = false;
     S.buttons.fire = S.buttons.aim = S.buttons.use = false;
+    S.aimLocked = false;
     S.abil = 0;
     S.look.yaw = 0;
     S.look.pitch = 0;
@@ -1176,10 +1308,137 @@ export function createNetSystem(ctx) {
     S.mats = [];
   }
 
+  /**
+   * Asks for the pointer lock (first person). The browser refuses a new lock
+   * for a moment after the old one is released, so a request waits out the
+   * cooldown and a rejection is handled instead of surfacing as an uncaught
+   * promise error.
+   * @returns {void}
+   */
+  function requestLock() {
+    const canvas = Sim.three.renderer.domElement;
+    if (!mayRequestLock(performance.now(), S.lockExitAt)) { say('Mouse look is cooling down: right-click again in a moment.'); return; }
+    try {
+      const request = /** @type {any} */ (canvas.requestPointerLock());
+      if (request && typeof request.catch === 'function') request.catch(() => { S.lockExitAt = performance.now(); });
+    } catch { /* unavailable (an embedding frame may forbid it): the mouse still looks */ }
+  }
+
+  /** @returns {boolean} the guest's own Roger is up (true until the first snapshot) */
+  const peerUp = () => !S.peerRow || S.peerRow[4] === 0;
+
+  /**
+   * Into the guest's first person, as Roger's enterAim: the look starts where
+   * the body faces, the crosshair shows and the pointer is locked.
+   * @returns {void}
+   */
+  function enterPeerAim() {
+    S.buttons.aim = true;
+    S.look.yaw = S.peerRow ? wrapAngle(S.peerRow[3]) : S.look.yaw;
+    S.look.pitch = 0.02;
+    requestLock();
+  }
+
+  /** Back to the follow camera, the weapon lowered (Roger's leaveAim). @returns {void} */
+  function leavePeerAim() {
+    S.buttons.aim = false;
+    S.buttons.fire = false;
+    S.aimLocked = false;
+    const canvas = Sim.three.renderer.domElement;
+    if (document.pointerLockElement === canvas) document.exitPointerLock();
+  }
+
+  /**
+   * The guest's keyboard and mouse for this frame, read from the shared input
+   * pipeline with Roger's own bindings (hero/input.js consumeInput): W A S D
+   * run (A and D turn on foot, strafe in first person), right-click raises and
+   * lowers the weapon, the mouse looks only while it is raised, click or Enter
+   * fires (the Katana cuts on foot too), the wheel switches weapon, E
+   * teleports, F revives, V is Invincible. While the guest is down or dead
+   * only V counts: the body is not theirs to move.
+   * @returns {void}
+   */
+  function readPeerInput() {
+    const input = ctx.systems.playerInput;
+    const up = peerUp();
+    const held = input.held;
+    S.keys.up = up && held.up;
+    S.keys.down = up && held.down;
+    S.keys.left = up && held.left;
+    S.keys.right = up && held.right;
+    for (const e of input.drain()) {
+      switch (e.type) {
+        case 'keydown': {
+          if (e.repeat) break;
+          if (e.code === 'KeyV') { S.abil |= 8; break; }
+          if (!up) break;
+          if (e.code === 'Enter' || e.code === 'NumpadEnter') {
+            if (S.buttons.aim) S.buttons.fire = true;
+            else say('RIGHT-CLICK to raise the weapon · ENTER to fire');
+          } else if (e.code === 'Escape' && S.buttons.aim) leavePeerAim();
+          else if (e.code === 'KeyQ') S.abil |= 1;
+          else if (e.code === 'KeyE') S.abil |= 2;
+          else if (e.code === 'KeyR') S.abil |= 4;
+          else if (e.code === 'KeyF') S.buttons.use = true;
+          break;
+        }
+        case 'keyup':
+          if (e.code === 'Enter' || e.code === 'NumpadEnter') S.buttons.fire = false;
+          else if (e.code === 'KeyQ') S.abil &= ~1;
+          else if (e.code === 'KeyE') S.abil &= ~2;
+          else if (e.code === 'KeyR') S.abil &= ~4;
+          else if (e.code === 'KeyV') S.abil &= ~8;
+          else if (e.code === 'KeyF') S.buttons.use = false;
+          break;
+        case 'mousedown':
+          if (!up || !(e.onCanvas || S.aimLocked)) break;
+          if (e.button === 2) { if (S.buttons.aim) leavePeerAim(); else enterPeerAim(); }
+          else if (e.button === 0 && (S.buttons.aim || WEAPONS[S.weapon] === 'katana')) S.buttons.fire = true;
+          break;
+        case 'mouseup':
+          if (e.button === 0) S.buttons.fire = false;
+          break;
+        case 'wheel': {
+          if (!up) break;
+          const fromKatana = WEAPONS[S.weapon] === 'katana';
+          S.weapon = (S.weapon + e.dir + WEAPONS.length) % WEAPONS.length;
+          S.buttons.fire = false;
+          // As Roger's: wheeling off or onto the Katana lowers first person.
+          if (S.buttons.aim && (fromKatana || WEAPONS[S.weapon] === 'katana')) leavePeerAim();
+          break;
+        }
+        case 'blur':
+          S.buttons.fire = S.buttons.use = false;
+          S.abil = 0;
+          break;
+        case 'pointerlock':
+          // Esc under the lock goes to the browser, which drops it: the way out of first person.
+          if (S.aimLocked && !e.locked && S.buttons.aim) leavePeerAim();
+          S.aimLocked = e.locked && S.buttons.aim;
+          break;
+        default:
+      }
+    }
+    const look = input.takeLook();
+    input.takeTurn();
+    if (!up) {
+      // Down or dead: the weapon drops and nothing is held.
+      if (S.buttons.aim) leavePeerAim();
+      S.buttons.fire = S.buttons.use = false;
+      S.abil &= 8;
+      return;
+    }
+    if (S.buttons.aim && (look.dx || look.dy)) {
+      S.look.yaw = wrapAngle(S.look.yaw - look.dx * HERO.lookSensitivity);
+      S.look.pitch = THREE.MathUtils.clamp(S.look.pitch - look.dy * HERO.lookSensitivity, HERO.pitchMin, HERO.pitchMax);
+    }
+  }
+
   /** @param {number} dt */
   function updatePeer(dt) {
     if (!S.peerReadyShown || !S.proxyRoot || !S.client) return;
     S.heroFlag = Math.max(0, S.heroFlag - dt);
+    readPeerInput();
     // Input at ~30 Hz.
     S.inputAcc += dt;
     if (S.inputAcc >= INPUT_INTERVAL) {
@@ -1221,16 +1480,21 @@ export function createNetSystem(ctx) {
           if (kind === 'terminators') obj.rotation.x = row[4] === 0 ? 0 : -Math.PI / 2 + 0.1;
         }
         if (mine) S.peerRow = row;
+        else if (kind === 'players') partnerRows.set(id, row);
       }
     }
     // Follow the avatar: over Roger's shoulder at the host's follow distances,
     // or at his eyes while aiming (rogerView.js `followCamera`; scratch only).
+    // On foot the camera sits behind the body's heading (host-authoritative,
+    // turned by A and D), as Roger's follow camera; aiming, it is at the eyes
+    // and turns with the guest's own mouse at once (no round trip).
     const me = s.kinds.players.get(Number(S.myId));
     if (me) {
       const cam = Sim.three.camera;
-      followCamera(camPose, me[1], me[2], S.look.yaw, S.look.pitch, S.buttons.aim, FOLLOW);
+      if (S.buttons.aim) followCamera(camPose, me[1], me[2], S.look.yaw, S.look.pitch, true, FOLLOW);
+      else followCamera(camPose, me[1], me[2], me[3], 0, false, FOLLOW);
       if (camPose.firstPerson) cam.position.set(camPose.px, camPose.py, camPose.pz);
-      else cam.position.lerp(camGoal.set(camPose.px, camPose.py, camPose.pz), Math.min(1, dt * 8));
+      else cam.position.lerp(camGoal.set(camPose.px, camPose.py, camPose.pz), Math.min(1, dt * 5));
       cam.lookAt(camPose.lx, camPose.ly, camPose.lz);
       const mine = S.proxies.get('players');
       const own = mine && mine.get(Number(S.myId));
@@ -1268,12 +1532,16 @@ export function createNetSystem(ctx) {
     const ms = S.peerMission;
     const me = Number(S.myId);
     const now = performance.now();
-    let bars = hpBar(me, 'HEALTH ', false, !!row && row[4] !== 0, now);
+    const inv = (/** @type {number} */ id) => (S.peerInv.get(id) ? ' 🛡' : '');
+    let bars = hpBar(me, `HEALTH${inv(me)} `, false, !!row && row[4] !== 0, now);
     for (const id of S.peerHp.keys()) {
-      if (id !== me) bars += hpBar(id, `${rogerStyle(id).label} `, true, false, now);
+      if (id === me) continue;
+      // The partner's bar reads DOWN while they are down (their snapshot row).
+      const prow = partnerRows.get(id);
+      bars += hpBar(id, `${rogerStyle(id).label}${inv(id)} `, true, !!prow && prow[4] !== 0, now);
     }
     if (S.cross) S.cross.classList.toggle('visible', S.buttons.aim && S.peerReadyShown);
-    const html = `<b style="color:${rogerStyle(S.myId).accent}">${rogerStyle(S.myId).label}</b> · ${state}${bars}${wheelHtml(S.weapon)}ENERGY ${row ? row[6] : 100}%<br>SCORE ${S.peerScore.toLocaleString()}${ms ? `<br>MISSION ${ms.id}: ${ms.value}/${ms.goal}` : ''}<br><small>WASD move · mouse look (click to lock) · click fire · wheel weapon · E teleport · F revive</small>`;
+    const html = `<b style="color:${rogerStyle(S.myId).accent}">${rogerStyle(S.myId).label}</b> · ${state}${bars}${wheelHtml(S.weapon)}ENERGY ${row ? row[6] : 100}%<br>SCORE ${S.peerScore.toLocaleString()}${ms ? `<br>MISSION ${ms.id}: ${ms.value}/${ms.goal}` : ''}<br><small>W S run · A D turn · right-click raise weapon (the mouse looks) · click or Enter fire · wheel weapon · E teleport · F revive · V invincible</small>`;
     // Written only on change, so the bar's glow animation is not restarted every frame.
     if (html !== S.hudHtml) { S.hudHtml = html; S.hud.innerHTML = html; }
   }
@@ -1326,49 +1594,26 @@ export function createNetSystem(ctx) {
     S.cross.innerHTML = '<i class="n"></i><i class="s"></i><i class="w"></i><i class="e"></i><b></b>';
     container.appendChild(S.cross);
 
-    // Peer input + host revive key; harmless when not in a session.
-    const keyMap = /** @type {Record<string, 'up'|'down'|'left'|'right'>} */ ({ KeyW: 'up', KeyS: 'down', KeyA: 'left', KeyD: 'right' });
+    // The host's revive key (F held next to a downed guest). The host's other
+    // keys are Roger's (engine/player/input.js); a guest's are read from that
+    // same pipeline by readPeerInput, so no player-control listener lives here.
     window.addEventListener('keydown', (e) => {
-      if (S.role === 'peer' && S.peerReadyShown) {
-        if (keyMap[e.code]) { S.keys[keyMap[e.code]] = true; e.preventDefault(); }
-        if (e.code === 'KeyF') S.buttons.use = true;
-        if (e.code === 'KeyQ') S.abil |= 1;
-        if (e.code === 'KeyE') S.abil |= 2;
-        if (e.code === 'KeyR') S.abil |= 4;
-        if (e.code === 'Enter') S.buttons.fire = true;
-      } else if (S.role === 'host' && e.code === 'KeyF') S.holdRevive = true;
+      if (S.role === 'host' && e.code === 'KeyF') S.holdRevive = true;
     }, opts);
     window.addEventListener('keyup', (e) => {
-      if (keyMap[e.code]) S.keys[keyMap[e.code]] = false;
-      if (e.code === 'KeyF') { S.buttons.use = false; S.holdRevive = false; }
-      if (e.code === 'KeyQ') S.abil &= ~1;
-      if (e.code === 'KeyE') S.abil &= ~2;
-      if (e.code === 'KeyR') S.abil &= ~4;
-      if (e.code === 'Enter') S.buttons.fire = false;
+      if (e.code === 'KeyF') S.holdRevive = false;
     }, opts);
-    window.addEventListener('blur', () => {
-      S.keys.up = S.keys.down = S.keys.left = S.keys.right = false;
-      S.buttons.fire = S.buttons.aim = S.buttons.use = false; S.abil = 0; S.holdRevive = false;
-    }, opts);
+    window.addEventListener('blur', () => { S.holdRevive = false; }, opts);
     const canvas = Sim.three.renderer.domElement;
 
-    // Pointer lock: the browser refuses a new lock for a moment after the old
-    // one is released, so a request waits out the cooldown and a rejection is
-    // handled instead of surfacing as an uncaught promise error.
+    // When a pointer lock last ended or failed: a new request waits out the
+    // browser's cooldown (requestLock).
     document.addEventListener('pointerlockchange', () => {
       const locked = document.pointerLockElement === canvas;
       if (S.wasLocked && !locked) S.lockExitAt = performance.now();
       S.wasLocked = locked;
     }, opts);
     document.addEventListener('pointerlockerror', () => { S.lockExitAt = performance.now(); }, opts);
-    /** @returns {void} */
-    const requestLock = () => {
-      if (!mayRequestLock(performance.now(), S.lockExitAt)) { say('Mouse look is cooling down: click again in a moment.'); return; }
-      try {
-        const request = /** @type {any} */ (canvas.requestPointerLock());
-        if (request && typeof request.catch === 'function') request.catch(() => { S.lockExitAt = performance.now(); });
-      } catch { /* unavailable (an embedding frame may forbid it) */ }
-    };
 
     // Peer panel: the Hero button is a request to the host; every other
     // world-affecting control is blocked (capture phase, before its own handler).
@@ -1393,27 +1638,6 @@ export function createNetSystem(ctx) {
       e.preventDefault();
     };
     for (const type of ['click', 'input', 'change']) document.addEventListener(type, guardPeerUi, { capture: true, signal: ctx.signal });
-
-    canvas.addEventListener('mousedown', (e) => {
-      if (S.role !== 'peer' || !S.peerReadyShown) return;
-      if (document.pointerLockElement !== canvas) { requestLock(); return; }
-      if (e.button === 0) S.buttons.fire = true;
-      if (e.button === 2) S.buttons.aim = true;
-    }, opts);
-    window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) S.buttons.fire = false;
-      if (e.button === 2) S.buttons.aim = false;
-    }, opts);
-    window.addEventListener('mousemove', (e) => {
-      if (S.role !== 'peer' || document.pointerLockElement !== canvas) return;
-      S.look.yaw -= e.movementX * HERO.lookSensitivity;
-      S.look.pitch = THREE.MathUtils.clamp(S.look.pitch - e.movementY * HERO.lookSensitivity, -1, 1);
-    }, opts);
-    canvas.addEventListener('wheel', (e) => {
-      if (S.role !== 'peer' || !S.peerReadyShown) return;
-      S.weapon = (S.weapon + (e.deltaY > 0 ? 1 : -1) + WEAPONS.length) % WEAPONS.length;
-    }, { signal: ctx.signal, passive: true });
-    canvas.addEventListener('contextmenu', (e) => { if (S.role === 'peer') e.preventDefault(); }, opts);
 
     // Replicate the host's headline events (cosmetic ones stay local).
     ctx.events.on('announce', ({ title, sub }) => sendEvent('announce', { title: String(title).slice(0, 80), sub: String(sub).slice(0, 120) }));

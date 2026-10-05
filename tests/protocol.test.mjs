@@ -7,7 +7,7 @@ const input = (o = {}) => ({ type: 'input', v: V, seq: 1, mx: 0, mz: 1, yaw: 0.5
 test('valid input is accepted and normalised', () => assert.equal(validateInput(input()).ok, true));
 
 test('input rejects bad fields', () => {
-  for (const bad of [{ mx: 2 }, { mz: NaN }, { seq: -1 }, { seq: 1.5 }, { weapon: 9 }, { abil: 8 }, { fire: 1 }, { pitch: 3 }, { v: 99 }, { x: 5 }, { score: 1e9 }, { position: [0, 0] }]) {
+  for (const bad of [{ mx: 2 }, { mz: NaN }, { seq: -1 }, { seq: 1.5 }, { weapon: 9 }, { abil: 16 }, { fire: 1 }, { pitch: 3 }, { v: 99 }, { x: 5 }, { score: 1e9 }, { position: [0, 0] }]) {
     assert.equal(validateInput(input(bad)).ok, false, JSON.stringify(bad));
   }
 });
