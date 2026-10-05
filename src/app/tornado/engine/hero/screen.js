@@ -4,6 +4,12 @@ import { HERO } from './config.js';
 import { ENERGY } from '../player/energy.js';
 import { HEALTH } from '../health/config.js';
 
+/** What the crosshair calls each kind of the shared enemy register. */
+const ENEMY_NAMES = {
+  trex: 'CYBER T-REX', yeti: 'CYBER YETI', gunner: 'HAVOC', patientZero: 'PATIENT ZERO',
+  patientZeroClone: 'REPLICATOR', pursuer: 'MACHINE', terminator: 'TERMINATOR', hunterShip: 'HUNTER SHIP'
+};
+
 /** Shortest real gap in milliseconds between two hit flashes, so the screen never flashes above about 3 Hz. */
 const FLASH_GAP_MS = 340;
 /** Real seconds the direction arrow stays up after a hit. */
@@ -162,8 +168,9 @@ export function createHeroScreen(ctx, S, api) {
     if (!S.Hero.active || !S.roger || S.state.phase === 'dying' || S.state.phase === 'won') return;
     // The spawn shield: nothing gets him in his first seconds.
     if (S.state.spawnShield > 0) return;
-    // Invincible (V): nothing gets him at all.
-    if (S.state.invincible) return;
+    // Invincible (V): nothing gets him at all -- but a piercing blow (Hank
+    // Granite's punch, R-040).
+    if (S.state.invincible && kind !== 'pierce') return;
     // Co-op: while a teammate is up Roger goes down, not out (engine/net/system.js).
     if (ctx.systems.net && ctx.systems.net.interceptRogerDeath(kind)) return;
     if (S.state.phase === 'aiming') api.leaveAim();
@@ -561,10 +568,14 @@ export function createHeroScreen(ctx, S, api) {
         || hit.kind === 'alien' || hit.kind === 'person' || hit.kind === 'ship' || hit.kind === 'tanker' || hit.kind === 'nuclear';
       S.crosshair.classList.toggle('on', hot);
       S.crosshair.style.setProperty('--gap', `${(5 + S.state.spread * 14 + (S.state.speed > 0 ? 4 : 0)).toFixed(1)}px`);
-      const label = hit.kind === 'ship' ? hit.obj.name : ({
-        terminator: 'TERMINATOR', unit: 'TERMINATOR', tornado: 'TORNADO', alien: 'ALIEN', person: 'CIVILIAN',
-        building: 'BUILDING', car: 'CAR', tanker: 'FUEL TANKER', nuclear: 'NUCLEAR PLANT', tree: '', ground: '', sky: ''
-      })[hit.kind];
+      // A registry enemy (engine/enemies.js) is named by its kind; anything
+      // without a name shows just the distance (it read "undefined" before).
+      const label = hit.kind === 'ship' ? hit.obj.name
+        : hit.kind === 'enemy' ? (ENEMY_NAMES[hit.obj?.kind?.kind] ?? 'ENEMY')
+          : (({
+            terminator: 'TERMINATOR', unit: 'TERMINATOR', tornado: 'TORNADO', alien: 'ALIEN', person: 'CIVILIAN',
+            building: 'BUILDING', car: 'CAR', tanker: 'FUEL TANKER', nuclear: 'NUCLEAR PLANT', samurai: 'SAMURAI', tree: '', ground: '', sky: ''
+          })[hit.kind] ?? '');
       S.crosshair.querySelector('.hero-target').textContent = hit.kind === 'sky' ? '' : `${label}${label ? ' · ' : ''}${Math.round(hit.t)} m`;
     }
   }

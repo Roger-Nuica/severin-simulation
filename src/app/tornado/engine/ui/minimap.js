@@ -367,6 +367,21 @@ export function createMinimapSystem(ctx) {
       g.fill();
     }
 
+    // HAVOC, the heavy gunner (engine/gunner.js): orange diamonds,
+    // rim-pinned too, so he is never lost behind the rubble.
+    const gunners = ctx.systems.gunner ? ctx.systems.gunner.positions() : [];
+    for (const gunner of gunners) {
+      const m = pinToRim(view, toMap(view, gunner.x, gunner.z));
+      g.fillStyle = 'rgba(255, 150, 40, 0.95)';
+      g.beginPath();
+      g.moveTo(m.x, m.y - 5);
+      g.lineTo(m.x + 4, m.y);
+      g.lineTo(m.x, m.y + 5);
+      g.lineTo(m.x - 4, m.y);
+      g.closePath();
+      g.fill();
+    }
+
     // The alien ship and its crew (engine/aliens.js): a green ring and
     // green dots.
     const alienMarks = ctx.systems.aliens ? ctx.systems.aliens.markers() : null;

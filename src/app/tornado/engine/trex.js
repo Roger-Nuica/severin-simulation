@@ -135,7 +135,7 @@ export function createTrexSystem(ctx) {
     rex = {
       rig, heading, hp: TREX.hp, phase: 'walking', timer: 0,
       breathCooldown: 2, stride: 0, igniteTimer: 0, burn: IDLE_DOT, retarget: 0, target: null,
-      shaken: new Set(), hitFlash: 0
+      shaken: new Set(), hitFlash: 0, pitch: 0
     };
     showBanner('CYBER T-REX!', 'Flames that set the town alight · plasma, minigun and an EMP stop it');
     ctx.systems.creatureSounds.play('trexRoar', rig.root.position, { size: SOUND_SIZE, shake: 0.45 });
@@ -312,6 +312,10 @@ export function createTrexSystem(ctx) {
     rig.legL.rotation.x = swing;
     rig.legR.rotation.x = -swing;
     rig.tail.rotation.y = Math.sin(r.stride * 0.5 + r.timer) * 0.22;
+    // The neck and head bow towards what it breathes on, and come back up.
+    if (r.phase !== 'breathing') r.pitch += (0 - r.pitch) * Math.min(1, dt * 2);
+    rig.neck.rotation.x = -0.5 + r.pitch * 0.45;
+    rig.head.rotation.x = 0.32 + r.pitch * 0.55;
     const open = r.phase === 'breathing' ? 0.55 : r.phase === 'stunned' ? 0.3 : 0.05;
     rig.jaw.rotation.x += (open - rig.jaw.rotation.x) * Math.min(1, dt * 8);
     rig.body.position.y = 8 + Math.abs(Math.sin(r.stride)) * 0.25;
@@ -502,8 +506,17 @@ export function createTrexSystem(ctx) {
         range = Math.min(range, dir.length());
         dir.normalize();
       } else {
-        dir.set(Math.sin(r.heading), -0.18, Math.cos(r.heading)).normalize();
+        // Straight at its target's chest (Roger's, wherever he is, up a roof
+        // or on the jetpack; a building's lower floors): it used to breathe
+        // along its heading, level, over the head of anyone near it.
+        const roger = !foe && ctx.systems.heroMode && ctx.systems.heroMode.rogerTarget();
+        const ty = roger ? ctx.systems.heroMode.rogerHeight() + 1.1 : 3;
+        dir.set(target.x - mouth.x, ty - mouth.y, target.z - mouth.z);
+        if (dir.lengthSq() < 1) dir.set(Math.sin(r.heading), -0.5, Math.cos(r.heading));
+        dir.normalize();
       }
+      // The head follows the breath down (pose).
+      r.pitch += (THREE.MathUtils.clamp(Math.asin(-dir.y), -0.3, 1.1) - r.pitch) * Math.min(1, dt * 4);
       flames.emit(mouth, dir, Math.round(TREX.flameRate * dt + Math.random()), wall ? toWall.subVectors(wall, mouth).length() : undefined);
       // The flame's roar, held while it breathes (sound/creatures.js).
       ctx.systems.creatureSounds.loop('trexFlame', mouth, 1);

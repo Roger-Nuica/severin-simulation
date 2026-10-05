@@ -58,7 +58,8 @@ export const ENEMY_HEALTH = Object.freeze({
   nuclearPlant: 5,
   mothership: 15,
   tornado: 20,
-  gunner: 24
+  gunner: 24,
+  hank: 60
 });
 
 /**
@@ -114,6 +115,9 @@ export const WEAPON_VS_ENEMY = Object.freeze({
   tornado: row(ENEMY_HEALTH.tornado, { mega: 20, blade: 0 }),
   // R-057: HAVOC, armoured: 24 minigun rounds (his own, sent back, count the same), plasma 6,
   // bolt/lightning 12, MEGA BEAM kills, fire 0.6 a tick, rocket 12, three katana blows, a thrown car 12; EMP stuns (chip).
+  // R-040: Hank Granite as a boss, 60 of stone: plasma 4, MEGA BEAM 30, minigun 0.5 a round,
+  // bolt/lightning 8, fire 0.6, Rocket Strike 20, Katana 5, a thrown car 12; EMP staggers (chip).
+  hank: row(ENEMY_HEALTH.hank, { plasma: 4, mega: 30, bullet: 0.5, bolt: 8, lightning: 8, fire: 0.6, rocket: 20, blade: 5, throw: 12 }),
   gunner: row(ENEMY_HEALTH.gunner, { plasma: 6, mega: 24, bullet: 1, bolt: 12, lightning: 12, fire: 0.6, rocket: 12, blade: 8, throw: 12 })
 });
 

@@ -46,6 +46,10 @@ const RUBBLE = {
   // How finely a route leg is sampled when testing it for blockage. Below the
   // smallest pile radius, so a pile cannot sit unnoticed between two samples.
   sampleStep: 3,
+  // As a solid for Roger and the enemies on foot (eachSolid): the heap's
+  // core, this fraction of its radius either side, this high.
+  solidFraction: 0.6,
+  solidTop: 1.4,
   colours: [0x6b6560, 0x5a5550, 0x7a736a, 0x4e4a46]
 };
 
@@ -64,6 +68,7 @@ const RUBBLE = {
  *   addPile: (x: number, z: number, radius: number) => void,
  *   blocksPoint: (x: number, z: number, clearance?: number) => boolean,
  *   blocksSegment: (ax: number, az: number, bx: number, bz: number, clearance?: number) => boolean,
+ *   eachSolid: (visit: (x: number, z: number, hw: number, hd: number, top: number) => boolean) => boolean,
  *   pileCount: () => number,
  *   resetRubble: () => void,
  *   disposeRubble: () => void
@@ -196,6 +201,20 @@ export function createRubbleSystem(ctx) {
     return false;
   }
 
+  /**
+   * Every pile as a low solid box (hero/movement.js someSolid): Roger and
+   * the ground enemies stop against it, Roger can climb onto it.
+   * @param {(x: number, z: number, hw: number, hd: number, top: number) => boolean} visit
+   * @returns {boolean} whether `visit` stopped it
+   */
+  function eachSolid(visit) {
+    for (const pile of piles) {
+      const half = pile.radius * RUBBLE.solidFraction;
+      if (visit(pile.x, pile.z, half, half, RUBBLE.solidTop)) return true;
+    }
+    return false;
+  }
+
   /** @returns {number} */
   function pileCount() {
     return piles.length;
@@ -223,6 +242,6 @@ export function createRubbleSystem(ctx) {
   }
 
   return {
-    initRubble, addPile, blocksPoint, blocksSegment, pileCount, resetRubble, disposeRubble
+    initRubble, addPile, blocksPoint, blocksSegment, eachSolid, pileCount, resetRubble, disposeRubble
   };
 }

@@ -49,7 +49,8 @@ export function buildGunnerKit() {
     housing: new THREE.BoxGeometry(0.28, 0.26, 0.6),
     handle: new THREE.BoxGeometry(0.06, 0.16, 0.26),
     flash: new THREE.PlaneGeometry(0.9, 0.9),
-    laser: new THREE.CylinderGeometry(0.012, 0.012, 1, 4, 1, true).translate(0, 0.5, 0).rotateX(Math.PI / 2)
+    laser: new THREE.CylinderGeometry(0.012, 0.012, 1, 4, 1, true).translate(0, 0.5, 0).rotateX(Math.PI / 2),
+    marker: new THREE.ConeGeometry(0.22, 0.42, 4).rotateX(Math.PI)
   };
   // The belt: a brass tube from the drum, over the shoulder, into the gun.
   const curve = new THREE.CatmullRomCurve3([
@@ -84,7 +85,7 @@ export function buildGunnerKit() {
  * One HAVOC.
  * @param {ReturnType<typeof buildGunnerKit>} kit
  * @returns {{root: THREE.Group, body: THREE.Group, legs: THREE.Object3D[], gun: THREE.Group, barrels: THREE.Group,
- *   flash: THREE.Mesh, laser: THREE.Mesh, muzzle: THREE.Object3D, heat: THREE.MeshStandardMaterial, visor: THREE.MeshBasicMaterial,
+ *   flash: THREE.Mesh, laser: THREE.Mesh, muzzle: THREE.Object3D, heat: THREE.MeshStandardMaterial, visor: THREE.MeshBasicMaterial, marker: THREE.Mesh,
  *   own: THREE.Material[]}}
  */
 export function buildGunner(kit) {
@@ -192,6 +193,15 @@ export function buildGunner(kit) {
     shoulder.rotation.z = sx > 0 ? 0.05 : 0.7;
     elbow.rotation.x = sx > 0 ? -0.9 : -0.7;
   }
+  // A marker over his head, drawn through anything in the way, so he can
+  // always be found (a downward chevron, orange, bobbing).
+  const markerMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(2.6, 1.1, 0.25), transparent: true, opacity: 0.9, depthTest: false, depthWrite: false, toneMapped: false
+  });
+  const marker = new THREE.Mesh(G.marker, markerMat);
+  marker.position.set(0, 3.05, 0);
+  marker.renderOrder = 10;
+  root.add(marker);
   root.scale.setScalar(GUNNER.height / 2.38);
-  return { root, body, legs, gun, barrels, flash, laser, muzzle, heat, visor, own: [heat, visor] };
+  return { root, body, legs, gun, barrels, flash, laser, muzzle, heat, visor, marker, own: [heat, visor, markerMat] };
 }

@@ -2,38 +2,43 @@
 import * as THREE from 'three';
 import { createSoftDotTexture } from '../utils/textures.js';
 import { createParticlePool, pointScaleFor, markPoolDirty, disposeParticlePool } from './particlePool.js';
-import { HANK, MOVES, moveAt, showLength, isRecord, throwScore } from './hank/moves.js';
+import { HANK, MOVES, moveAt, showLength, isRecord, throwScore, bossChoice } from './hank/moves.js';
 import { buildHank, buildBoulder } from './hank/model.js';
 
 /**
  * ===========================================================================
  * SECTION AH — Hank Granite, the Human Landslide (on his button only)
  * ===========================================================================
- * An original character on the unstoppable-action-hero archetype, now
- * literally a force of nature: a 3.2 m man of quarried granite held
- * together by magma, who kept his red bandana and dark glasses (redesigned
- * 2026-10-04, on request; R-040).
+ * An original character on the unstoppable-action-hero archetype, literally
+ * a force of nature: a 3.2 m man of quarried granite held together by
+ * magma, who kept his red bandana and dark glasses (R-040; redesigned
+ * 2026-10-04, the show and the fight reworked 2026-10-05, on request).
  *
- * The show (about 13.5 s, hank/moves.js), on real time while the world
- * slows to HANK.slowmo, the camera on him with black bars:
- *  1. A boulder drops out of the sky trailing dust and slams into the
- *     street: a shock ring of dust, the camera shakes. Magma glows through
- *     its cracks, it bursts into chunks and Hank rises out of the crater.
- *     HANK GRANITE · THE HUMAN LANDSLIDE.
- *  2. Five townspeople are drawn in front of him. Five moves, one each, the
- *     move's name slammed on screen as it lands, his magma flaring:
- *     JAB, HAYMAKER, UPPERCUT (straight up into the sky), HAMMER THROW (he
- *     grabs one and spins round once, like a hammer thrower, and lets go)
- *     and GROUND POUND (both fists into the street, a ring of rock spikes
- *     bursts up round him).
- *  3. Every one thrown flies in a tall arc with a live distance over it,
- *     counting up like a home run on TV; where they land a ring marks the
- *     spot with the final distance, and the longest of the run is a NEW
- *     RECORD. Each throw scores HANK.perVictim plus HANK.perMetre a metre.
- *     The camera eases back to keep the newest flight in frame.
- *  4. He crumbles into a pile of rubble that sinks into the street; the
- *     camera and the world's time are given back, and then the town has not
- *     quite got over him: moon gravity, the parked cars round him floating.
+ * The show (about 9.5 s, hank/moves.js), on real time while the world slows
+ * to HANK.slowmo, black bars, filmed from the front:
+ *  1. A boulder drops out of the sky and slams into the street: a shock ring
+ *     of dust, the camera shakes, it bursts into chunks and Hank rises out
+ *     of the crater facing the camera. HANK GRANITE · THE HUMAN LANDSLIDE.
+ *  2. Two townspeople walk up to him over about two seconds (they come on
+ *     their own feet; nobody is moved into place), stopping either side in
+ *     front of him.
+ *  3. One punch each, its name slammed on screen (HAYMAKER, KNOCKOUT), his
+ *     magma flaring: each flies a long way in a tall arc with its distance
+ *     counted live over it like a home run on TV, a ring where it lands and
+ *     NEW RECORD when it beats an earlier throw. The camera eases back to
+ *     keep the flight in frame.
+ *  4. Out of Hero Mode he crumbles into the street and the town is left in
+ *     moon gravity. In Hero Mode the camera goes back to Roger and Hank
+ *     comes for him: the fight.
+ *
+ * The fight (Hero Mode, in the shared enemy register as kind `hank`, 60
+ * health through the weapon table): he walks at Roger, flinging anyone in
+ * his way; close enough, he winds up (his fist and magma flaring) and
+ * punches, and a punch that lands kills Roger even through Invincible (a
+ * piercing hit, engine/health/system.js) -- dodge it, out of reach or up.
+ * Up on a roof or the jetpack, Roger is out of his reach and he throws rocks
+ * instead (HANK.boss.rockEvery, hankRock 25). An EMP staggers him. Brought
+ * down, he crumbles (+3000) and the low gravity follows.
  *
  * Only from his button (👊 Hank Granite). Not while Hero Mode is dead, the
  * landing cutscene or a replay has the camera. No lights added; one dust
@@ -41,19 +46,31 @@ import { buildHank, buildBoulder } from './hank/model.js';
  */
 
 const MARKERS = 6;
-const LABELS = 6;
+const LABELS = 8;
 
 /**
  * @typedef {Object} Victim
  * @property {any} person
- * @property {'waiting'|'held'|'flying'|'landed'|'gone'} state
+ * @property {'walking'|'waiting'|'flying'|'landed'|'gone'} state
  * @property {THREE.Vector3} vel
  * @property {THREE.Vector3} spin
  * @property {THREE.Vector3} from where it was thrown from
+ * @property {THREE.Vector3} spot where it walks to, in front of him
  * @property {number} t seconds in its current state
  * @property {number} metres
+ * @property {number} stride
  * @property {HTMLElement|null} label
  * @property {boolean} record
+ */
+
+/**
+ * @typedef {Object} Boss
+ * @property {'walk'|'wind'|'recover'|'throw'|'stagger'|'dying'} state
+ * @property {number} t
+ * @property {number} cooldown
+ * @property {number} rockTimer
+ * @property {number} stride
+ * @property {number} flinch
  */
 
 /**
@@ -71,17 +88,20 @@ const LABELS = 6;
 export function createActionHeroSystem(ctx) {
   const { Sim } = ctx;
   /** @type {{t: number, x: number, z: number, heading: number, victims: Victim[], next: number, landed: boolean, best: number,
-   *   saved: {pos: THREE.Vector3, target: THREE.Vector3, controls: boolean}, look: THREE.Vector3, camDist: number}|null} */
+   *   saved: {pos: THREE.Vector3, target: THREE.Vector3, controls: boolean}, look: THREE.Vector3, camDist: number, camRoom: number, crumble: number}|null} */
   let scene = null;
+  /** @type {Boss|null} the fight, after the show, in Hero Mode */
+  let boss = null;
+  /** Seconds into his crumbling into the street (out of Hero Mode, or brought down); -1 when not. */
+  let crumbling = -1;
   /** @type {ReturnType<typeof buildHank>|null} */
   let hank = null;
   /** @type {ReturnType<typeof buildBoulder>|null} */
   let rockfall = null;
   /** @type {{vel: THREE.Vector3, spin: THREE.Vector3, t: number}[]} */
   let chunkState = [];
-  /** @type {THREE.Mesh[]} */
-  let spikes = [];
-  let spikeT = -1;
+  /** A rock he throws at Roger up high: one of the boulder's chunks, re-used. */
+  const rock = { live: false, mesh: /** @type {THREE.Mesh|null} */ (null), vel: new THREE.Vector3(), t: 0 };
   /** @type {{mesh: THREE.Mesh, t: number}[]} */
   let markers = [];
   /** Thrown townspeople still in the air or lying where they landed (they outlive the show). */
@@ -103,6 +123,8 @@ export function createActionHeroSystem(ctx) {
   let lowGravityLeft = 0;
   /** The longest throw this run, metres. */
   let record = 0;
+  /** @type {Object|null} his entry in the enemy register */
+  let kind = null;
   /** @type {THREE.Material[]} */
   const ownMaterials = [];
   /** @type {THREE.BufferGeometry[]} */
@@ -111,8 +133,8 @@ export function createActionHeroSystem(ctx) {
   const v2 = new THREE.Vector3();
   const proj = new THREE.Vector3();
   // The pose he is easing towards, and the one he has.
-  const want = { s0x: 0, s1x: 0, e0x: 0, e1x: 0, ty: 0, tx: 0, drop: 0 };
-  const has = { s0x: 0, s1x: 0, e0x: 0, e1x: 0, ty: 0, tx: 0, drop: 0 };
+  const want = { s0x: 0, s1x: 0, e0x: 0, e1x: 0, ty: 0, tx: 0, drop: 0, legs: 0 };
+  const has = { s0x: 0, s1x: 0, e0x: 0, e1x: 0, ty: 0, tx: 0, drop: 0, legs: 0 };
 
   // ---------------------------------------------------------------------
   // Dust
@@ -185,27 +207,43 @@ export function createActionHeroSystem(ctx) {
 
   /** @returns {boolean} whether the show began */
   function start() {
-    if (scene || !hank || !rockfall) return false;
+    if (scene || boss || crumbling >= 0 || !hank || !rockfall) return false;
     const cam = Sim.three.camera;
     const roger = ctx.systems.heroMode && ctx.systems.heroMode.rogerTarget();
-    const target = roger ? new THREE.Vector3(roger.x + 16, 0, roger.z + 16) : Sim.three.controls.target.clone().setY(0);
+    const wanted = roger ? new THREE.Vector3(roger.x + 18, 0, roger.z + 18) : Sim.three.controls.target.clone().setY(0);
+    // Somewhere open: a crater in a street or a square, not a roof.
+    const target = openGround(wanted);
+    // Two who are near enough to walk up in a couple of seconds (and not
+    // already on top of the spot).
     const people = ctx.Environment.people
-      .filter((/** @type {any} */ p) => p.mesh.parent && p.captureState === 'grounded' && !p.heroName && !p.abducted && !p.statue && p.motion)
-      .sort((/** @type {any} */ a, /** @type {any} */ b) => a.mesh.position.distanceToSquared(target) - b.mesh.position.distanceToSquared(target))
-      .slice(0, MOVES.length);
-    if (people.length < 2) return false;
-    // He faces across the camera's view, so the throws fly across the frame.
-    const toCam = Math.atan2(cam.position.x - target.x, cam.position.z - target.z);
-    const heading = toCam + Math.PI / 2;
+      .filter((/** @type {any} */ p) => p.mesh.parent && p.captureState === 'grounded' && !p.heroName && !p.abducted && !p.statue && p.motion && p.motion.limbs)
+      .map((/** @type {any} */ p) => ({ p, d: Math.hypot(p.mesh.position.x - target.x, p.mesh.position.z - target.z) }))
+      .filter((/** @type {{d: number}} */ e) => e.d > 4)
+      .sort((/** @type {{d: number}} */ a, /** @type {{d: number}} */ b) => a.d - b.d)
+      .slice(0, MOVES.length)
+      .map((/** @type {{p: any}} */ e) => e.p);
+    if (people.length < 1) return false;
+    // He faces the camera (the show is filmed from the front), turned to
+    // where the lens has a clear line to him.
+    const heading = clearHeading(target, Math.atan2(cam.position.x - target.x, cam.position.z - target.z));
+    const fx = Math.sin(heading);
+    const fz = Math.cos(heading);
     scene = {
-      t: 0, x: target.x, z: target.z, heading, next: 0, landed: false, best: 0,
-      victims: people.map((/** @type {any} */ person) => ({
-        person, state: /** @type {'waiting'} */ ('waiting'), vel: new THREE.Vector3(), spin: new THREE.Vector3(),
-        from: new THREE.Vector3(), t: 0, metres: 0, label: null, record: false
-      })),
+      t: 0, x: target.x, z: target.z, heading, next: 0, landed: false, best: 0, crumble: 0,
+      victims: people.map((/** @type {any} */ person, /** @type {number} */ i) => {
+        // Where each stops: in front of him, one to each side, clear of the lens.
+        const side = i === 0 ? -1 : 1;
+        return {
+          person, state: /** @type {'walking'} */ ('walking'), vel: new THREE.Vector3(), spin: new THREE.Vector3(),
+          from: new THREE.Vector3(), t: 0, metres: 0, stride: Math.random() * 6, label: null, record: false,
+          spot: new THREE.Vector3(target.x + fx * 2.3 + fz * side * 1.5, 0, target.z + fz * 2.3 - fx * side * 1.5)
+        };
+      }),
       saved: { pos: cam.position.clone(), target: Sim.three.controls.target.clone(), controls: Sim.three.controls.enabled },
       look: new THREE.Vector3(target.x, 6, target.z),
-      camDist: 20
+      camDist: 12,
+      // How far back the lens can go along its line before a wall.
+      camRoom: clearRoom(target, heading + 0.28)
     };
     for (const v of scene.victims) v.person.motion.active = false;
     hank.group.position.set(scene.x, -HANK.height * 1.1, scene.z);
@@ -221,37 +259,101 @@ export function createActionHeroSystem(ctx) {
   }
 
   /**
-   * The show over: the camera and the world's time back.
-   * @param {boolean} [ended] played to its end (not cut short): then the low gravity
+   * Whether nothing solid stands at (x, z) or round it at radius r.
+   * @param {number} x @param {number} z @param {number} r
+   * @returns {boolean}
+   */
+  function clearAt(x, z, r) {
+    const hero = ctx.systems.heroMode;
+    if (!hero || !hero.standable) return true;
+    if (!hero.standable(x, z)) return false;
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      if (!hero.standable(x + Math.cos(a) * r, z + Math.sin(a) * r)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * The open spot nearest to `wanted` (spiralling out), for the boulder.
+   * @param {THREE.Vector3} wanted
+   * @returns {THREE.Vector3}
+   */
+  function openGround(wanted) {
+    if (clearAt(wanted.x, wanted.z, 6)) return wanted;
+    for (let ring = 1; ring <= 8; ring++) {
+      for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * Math.PI * 2;
+        const x = wanted.x + Math.cos(a) * ring * 5;
+        const z = wanted.z + Math.sin(a) * ring * 5;
+        if (clearAt(x, z, 6)) return new THREE.Vector3(x, 0, z);
+      }
+    }
+    return wanted;
+  }
+
+  /**
+   * A heading for him, as near `preferred` as it can be, with a clear line
+   * out to where the front camera stands (no wall in front of the lens).
+   * @param {THREE.Vector3} at
+   * @param {number} preferred
+   * @returns {number}
+   */
+  function clearHeading(at, preferred) {
+    for (let k = 0; k < 24; k++) {
+      const h = preferred + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 12);
+      const a = h + 0.28;
+      let ok = true;
+      for (const d of [3, 6, 9.5, 13]) {
+        if (!clearAt(at.x + Math.sin(a) * d, at.z + Math.cos(a) * d, 1.5)) { ok = false; break; }
+      }
+      if (ok) return h;
+    }
+    return preferred;
+  }
+
+  /**
+   * How far out along a line from `at` the ground is clear (up to 60 m).
+   * @param {THREE.Vector3} at
+   * @param {number} a heading of the line
+   * @returns {number}
+   */
+  function clearRoom(at, a) {
+    for (let d = 3; d <= 60; d += 2) {
+      if (!clearAt(at.x + Math.sin(a) * d, at.z + Math.cos(a) * d, 1.2)) return Math.max(8, d - 2);
+    }
+    return 60;
+  }
+
+  /**
+   * The show over: the camera and the world's time back; then either the
+   * fight (Hero Mode) or his crumbling away.
+   * @param {boolean} [ended] played to its end (not cut short)
    */
   function finish(ended = false) {
     if (!scene) return;
-    if (ended && hank) {
-      startLowGravity(hank.group.position);
-      ctx.systems.creatureSounds.play('poof', hank.group.position, { size: 1.6 });
-      const thrown = scene.victims.filter((v) => v.state !== 'waiting').length;
-      ctx.events.emit('announce', {
-        title: 'HANK GRANITE',
-        sub: `${thrown} thrown · the longest ${Math.round(Math.max(scene.best, 0))} m${scene.best >= record && scene.best > 0 ? ' · a new record' : ''}`
-      });
-    }
     ctx.systems.time.release('actionHero');
     Sim.three.camera.position.copy(scene.saved.pos);
     Sim.three.controls.target.copy(scene.saved.target);
     Sim.three.controls.enabled = scene.saved.controls;
     for (const v of scene.victims) {
-      if (v.state === 'waiting') v.person.motion.active = true;
-      if (v.state === 'held') launch(v, 2);
+      if (v.state === 'walking' || v.state === 'waiting') v.person.motion.active = true;
     }
     scene = null;
-    if (hank) {
-      hank.group.visible = false;
-      hank.magma.emissiveIntensity = 1.2;
-    }
-    if (rockfall) rockfall.boulder.visible = false;
     bars?.classList.remove('visible');
     title?.classList.remove('visible');
     moveCall?.classList.remove('visible');
+    if (!ended || !hank) {
+      if (hank) hank.group.visible = false;
+      if (rockfall) rockfall.boulder.visible = false;
+      return;
+    }
+    if (ctx.Hero && ctx.Hero.active) {
+      boss = { state: 'walk', t: 0, cooldown: 1, rockTimer: 1.5, stride: 0, flinch: 0 };
+      ctx.events.emit('announce', { title: 'HANK GRANITE', sub: 'He is coming for you. One punch is the end, Invincible or not. Stay out of reach.' });
+    } else {
+      crumbling = 0;
+    }
   }
 
   /**
@@ -279,6 +381,30 @@ export function createActionHeroSystem(ctx) {
     const LG = HANK.lowGravity;
     const ease = Math.min(1, lowGravityLeft / (LG.seconds / 3));
     ctx.systems.physics.gravity.scale = 1 - (1 - LG.scale) * ease;
+  }
+
+  /**
+   * He crumbles into the street (the show's end out of Hero Mode, or
+   * brought down in the fight), then the low gravity.
+   * @param {number} rawDt
+   */
+  function stepCrumble(rawDt) {
+    if (crumbling < 0 || !hank) return;
+    crumbling += rawDt;
+    const k = Math.min(1, crumbling / HANK.outro);
+    const g = hank.group;
+    if (k > 0.3) {
+      g.position.y = -HANK.height * 1.15 * ((k - 0.3) / 0.7) ** 2;
+      if (Math.random() < 0.5) puff(scratch.set(g.position.x, 0.4, g.position.z), 6, 5, 2, 1);
+    }
+    hank.magma.emissiveIntensity = Math.max(0.2, 1.2 * (1 - k));
+    if (k >= 1) {
+      crumbling = -1;
+      g.visible = false;
+      hank.magma.emissiveIntensity = 1.2;
+      ctx.systems.creatureSounds.play('poof', g.position, { size: 1.6 });
+      startLowGravity(g.position);
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -325,13 +451,12 @@ export function createActionHeroSystem(ctx) {
   /**
    * Off it goes.
    * @param {Victim} v
-   * @param {number} m which move threw it
+   * @param {{speed: number, angle: number}} move
+   * @param {number} heading which way, flat
    */
-  function launch(v, m) {
+  function launch(v, move, heading) {
     if (!hank || !v.person.mesh.parent) return;
-    const move = MOVES[m];
     const p = v.person.mesh.position;
-    const heading = hank.group.rotation.y + (Math.random() - 0.5) * 0.25;
     v.state = 'flying';
     v.t = 0;
     p.y = Math.max(p.y, 1.2);
@@ -363,7 +488,6 @@ export function createActionHeroSystem(ctx) {
       record = v.metres;
     }
     if (scene) scene.best = Math.max(scene.best, v.metres);
-    // The ring where it landed.
     const mk = markers.find((x) => x.t >= 1) || markers[0];
     mk.t = 0;
     mk.mesh.position.set(p.x, 0.12, p.z);
@@ -383,7 +507,7 @@ export function createActionHeroSystem(ctx) {
     const h = window.innerHeight;
     for (const v of flyers) {
       const mesh = v.person.mesh;
-      if (v.state === 'held' || v.state === 'gone') continue;
+      if (v.state === 'gone') continue;
       v.t += rawDt;
       const p = mesh.position;
       if (v.state === 'flying') {
@@ -399,7 +523,6 @@ export function createActionHeroSystem(ctx) {
         removeVictim(v);
         continue;
       }
-      // The label over it, on screen.
       if (v.label) {
         proj.set(p.x, p.y + 2.4, p.z).project(Sim.three.camera);
         const on = proj.z < 1 && Math.abs(proj.x) < 1.15 && Math.abs(proj.y) < 1.15;
@@ -443,6 +566,7 @@ export function createActionHeroSystem(ctx) {
     ctx.systems.creatureSounds.play('hankArrive', at, { size: 1.8 });
     ctx.systems.creatureSounds.play('punch', at, { size: 1.8, pitch: 0.5 });
     rockfall.chunks.forEach((c, i) => {
+      if (c === rock.mesh) return;
       const a = (i / rockfall.chunks.length) * Math.PI * 2 + Math.random() * 0.3;
       const s = 6 + Math.random() * 8;
       c.position.set(scene.x + Math.cos(a) * 1.2, 1.2 + Math.random(), scene.z + Math.sin(a) * 1.2);
@@ -464,7 +588,7 @@ export function createActionHeroSystem(ctx) {
   function stepChunks(rawDt) {
     if (!rockfall) return;
     rockfall.chunks.forEach((c, i) => {
-      if (!c.visible) return;
+      if (!c.visible || c === rock.mesh) return;
       const s = chunkState[i];
       s.t += rawDt;
       s.vel.y -= 14 * rawDt;
@@ -482,45 +606,45 @@ export function createActionHeroSystem(ctx) {
     });
   }
 
-  /** @param {number} rawDt */
-  function stepSpikes(rawDt) {
-    if (spikeT < 0) return;
-    spikeT += rawDt;
-    const up = spikeT < 0.14 ? spikeT / 0.14 : spikeT < 1.1 ? 1 : Math.max(0, 1 - (spikeT - 1.1) / 0.7);
-    for (const s of spikes) s.position.y = -2.6 + up * 2.6 * (s.userData.h || 1);
-    if (spikeT > 1.9) {
-      spikeT = -1;
-      for (const s of spikes) s.visible = false;
+  /**
+   * A townsperson walking (their legs and arms swinging, on their own
+   * limbs) towards `to`; true once there.
+   * @param {Victim} v
+   * @param {THREE.Vector3} to
+   * @param {number} speed m/s
+   * @param {number} rawDt
+   * @returns {boolean}
+   */
+  function walkTo(v, to, speed, rawDt) {
+    const p = v.person.mesh.position;
+    const dx = to.x - p.x;
+    const dz = to.z - p.z;
+    const d = Math.hypot(dx, dz);
+    const limbs = v.person.motion.limbs;
+    if (d < 0.15) {
+      limbs.legL.rotation.x = limbs.legR.rotation.x = 0;
+      limbs.armL.rotation.x = limbs.armR.rotation.x = 0;
+      return true;
     }
-  }
-
-  /** The ground pound's ring of rock spikes, round where he stands. */
-  function raiseSpikes() {
-    if (!scene || !hank) return;
-    const c = hank.group.position;
-    spikes.forEach((s, i) => {
-      const a = (i / spikes.length) * Math.PI * 2;
-      const r = HANK.spikeRing * (0.85 + (i % 2) * 0.35);
-      s.position.set(c.x + Math.cos(a) * r, -2.6, c.z + Math.sin(a) * r);
-      s.rotation.set((Math.random() - 0.5) * 0.5, Math.random() * 3, (Math.random() - 0.5) * 0.5);
-      s.userData.h = 0.8 + Math.random() * 0.5;
-      s.visible = true;
-    });
-    spikeT = 0;
-    puff(scratch.set(c.x, 0.3, c.z), 160, 18, 2, 1);
+    const step = Math.min(d, speed * rawDt);
+    p.x += (dx / d) * step;
+    p.z += (dz / d) * step;
+    v.person.mesh.rotation.y = Math.atan2(dx, dz);
+    v.stride += step * 3.2;
+    const swing = Math.sin(v.stride) * (speed > 3 ? 0.8 : 0.5);
+    limbs.legL.rotation.x = swing;
+    limbs.legR.rotation.x = -swing;
+    limbs.armL.rotation.x = -swing * 0.8;
+    limbs.armR.rotation.x = swing * 0.8;
+    return false;
   }
 
   /**
    * The pose for this moment of the show.
    * @param {number} t seconds into it
    */
-  function choosePose(t) {
-    // Standing: arms a little out, breathing.
-    want.s0x = want.s1x = -0.1 + Math.sin(t * 2) * 0.04;
-    want.e0x = want.e1x = -0.35;
-    want.ty = 0;
-    want.tx = 0.05;
-    want.drop = 0;
+  function showPose(t) {
+    restPose(t);
     if (!scene) return;
     const i = scene.next;
     if (i >= MOVES.length) return;
@@ -529,24 +653,30 @@ export function createActionHeroSystem(ctx) {
     const winding = lt > -m.wind && lt < 0;
     const after = lt >= 0 && lt < 0.6;
     if (!winding && !after) return;
-    const k = winding ? 1 + lt / m.wind : 0;
-    if (m.name === 'JAB') {
-      if (winding) { want.s0x = 0.4; want.e0x = -1.7; want.ty = 0.25; }
-      else { want.s0x = -1.55; want.e0x = 0; want.ty = -0.15; }
-    } else if (m.name === 'HAYMAKER') {
-      if (winding) { want.ty = 0.8 * k; want.s0x = -1.1; want.e0x = -0.6; }
-      else { want.ty = -0.6; want.s0x = -1.5; want.e0x = -0.25; }
-    } else if (m.name === 'UPPERCUT') {
-      if (winding) { want.drop = -0.35 * k; want.tx = 0.3 * k; want.s0x = 0.5; want.e0x = -1.9; }
-      else { want.drop = 0.12; want.tx = -0.15; want.s0x = -2.9; want.e0x = -0.4; }
-    } else if (m.name === 'HAMMER THROW') {
-      want.s0x = want.s1x = -1.45;
-      want.e0x = want.e1x = -0.1;
-      want.tx = -0.1;
-    } else if (m.name === 'GROUND POUND') {
-      if (winding) { want.s0x = want.s1x = -3.0; want.e0x = want.e1x = -0.6; want.tx = -0.2; }
-      else { want.s0x = want.s1x = -0.7; want.e0x = want.e1x = -0.2; want.tx = 0.5; want.drop = -0.4; }
+    // The side the one he hits stands: the right fist for the left one.
+    const arm = i === 0 ? 0 : 1;
+    if (winding) {
+      setArm(arm, 0.5, -1.8);
+      want.ty = (arm === 0 ? 1 : -1) * 0.7 * (1 + lt / m.wind);
+    } else {
+      setArm(arm, -1.55, -0.1);
+      want.ty = (arm === 0 ? -1 : 1) * 0.45;
     }
+  }
+
+  /** @param {number} t */
+  function restPose(t) {
+    want.s0x = want.s1x = -0.1 + Math.sin(t * 2) * 0.04;
+    want.e0x = want.e1x = -0.35;
+    want.ty = 0;
+    want.tx = 0.05;
+    want.drop = 0;
+    want.legs = 0;
+  }
+
+  /** @param {number} arm 0 or 1 @param {number} shoulder @param {number} elbow */
+  function setArm(arm, shoulder, elbow) {
+    if (arm === 0) { want.s0x = shoulder; want.e0x = elbow; } else { want.s1x = shoulder; want.e1x = elbow; }
   }
 
   /** @param {number} rawDt */
@@ -561,21 +691,13 @@ export function createActionHeroSystem(ctx) {
     hank.torso.rotation.y = has.ty;
     hank.torso.rotation.x = has.tx;
     hank.torso.position.y = 1.45 + has.drop;
+    hank.hips[0].rotation.x = has.legs;
+    hank.hips[1].rotation.x = -has.legs;
   }
 
-  /**
-   * @param {number} dt simulation seconds
-   * @param {number} rawDt real seconds: the show runs on real time
-   */
-  function updateActionHero(dt, rawDt) {
-    if (dt > 0) stepLowGravity(dt);
-    if (rawDt > 0) {
-      stepDust(rawDt);
-      stepFlyers(rawDt);
-      stepChunks(rawDt);
-      stepSpikes(rawDt);
-    }
-    if (!scene || !hank || !rockfall || rawDt <= 0) return;
+  /** @param {number} rawDt */
+  function stepShow(rawDt) {
+    if (!scene || !hank || !rockfall) return;
     scene.t += rawDt;
     const t = scene.t;
     const g = hank.group;
@@ -596,81 +718,55 @@ export function createActionHeroSystem(ctx) {
     const rise = Math.min(1, (t - HANK.fall) / HANK.rise);
     g.position.y = -HANK.height * 1.1 * (1 - rise) * (1 - rise);
     if (title && t > HANK.fall + 2.4) title.classList.remove('visible');
-    // His rage: the magma breathing, flaring on every blow.
     hank.magma.emissiveIntensity = Math.max(1 + Math.sin(t * 5) * 0.35, hank.magma.emissiveIntensity - rawDt * 6);
 
-    // The ones still waiting, drawn into an arc in front of him.
-    const fx = Math.sin(scene.heading);
-    const fz = Math.cos(scene.heading);
-    scene.victims.forEach((v, i) => {
-      if (v.state !== 'waiting' || !v.person.mesh.parent) return;
-      const turn = i === scene.next;
-      const off = turn ? 0 : (i - scene.next) * 1.4 * (i % 2 ? 1 : -1);
-      const ahead = turn ? 2.1 : 3.4;
-      const tx = g.position.x + fx * ahead + fz * off;
-      const tz = g.position.z + fz * ahead - fx * off;
-      const p = v.person.mesh.position;
-      p.x += (tx - p.x) * Math.min(1, rawDt * 3);
-      p.z += (tz - p.z) * Math.min(1, rawDt * 3);
-      v.person.mesh.rotation.y = scene.heading + Math.PI;
-    });
+    // 3. The two walk up once he is standing, over about HANK.approach.
+    const walkFrom = HANK.fall + HANK.rise;
+    if (t > walkFrom) {
+      for (const v of scene.victims) {
+        if (v.state !== 'walking') continue;
+        if (!v.person.mesh.parent) { v.state = 'gone'; continue; }
+        const left = Math.max(0.4, walkFrom + HANK.approach - t);
+        const d = Math.hypot(v.spot.x - v.person.mesh.position.x, v.spot.z - v.person.mesh.position.z);
+        if (walkTo(v, v.spot, Math.min(8, Math.max(2.2, d / left)), rawDt)) {
+          v.state = 'waiting';
+          v.person.mesh.rotation.y = Math.atan2(g.position.x - v.person.mesh.position.x, g.position.z - v.person.mesh.position.z);
+        }
+      }
+    }
 
-    // 3. The moves.
-    choosePose(t);
+    // 4. The punches: each lands once its time has come and the one it is
+    // for has arrived (or has had a second longer to).
+    showPose(t);
     if (scene.next < MOVES.length) {
       const i = scene.next;
       const m = MOVES[i];
-      const at = moveAt(i);
       const v = scene.victims[i];
-      // The hammer throw: he takes hold and spins round once with it.
-      if (m.name === 'HAMMER THROW' && v && t > at - m.wind && t < at) {
-        if (v.state === 'waiting') v.state = 'held';
-        const k = (t - (at - m.wind)) / m.wind;
-        g.rotation.y = scene.heading + k * k * Math.PI * 2;
-        hank.fists[0].getWorldPosition(scratch);
-        v2.copy(scratch).sub(g.position).setY(0).normalize();
-        const p = v.person.mesh.position;
-        p.set(scratch.x + v2.x * 1.1, 1.6 + k * 0.6, scratch.z + v2.z * 1.1);
-        v.person.mesh.rotation.set(Math.PI / 2 * k, g.rotation.y, 0);
-      }
-      if (t >= at) {
-        g.rotation.y = scene.heading;
+      const due = t >= moveAt(i) && (!v || v.state !== 'walking' || t >= moveAt(i) + 1);
+      if (due) {
         scene.next++;
         hank.magma.emissiveIntensity = 6;
         callMove(m.name);
         ctx.systems.creatureSounds.play('hankGrunt', g.position, { size: 1.6, pitch: 0.75 + Math.random() * 0.1 });
-        ctx.systems.gamefeel.addShake(m.name === 'GROUND POUND' ? 1.2 : 0.6, 0.3);
-        if (m.name === 'GROUND POUND') {
-          raiseSpikes();
-          ctx.systems.creatureSounds.play('punch', g.position, { size: 2, pitch: 0.45 });
-          // Whoever is still standing in front of him goes too.
-          for (const w of scene.victims) if (w.state === 'waiting' || w.state === 'held') launch(w, i);
-        } else if (v && (v.state === 'waiting' || v.state === 'held')) {
+        ctx.systems.gamefeel.addShake(0.7, 0.3);
+        if (v && v.person.mesh.parent && (v.state === 'waiting' || v.state === 'walking')) {
           const p = v.person.mesh.position;
           ctx.systems.creatureSounds.play('punch', p, { size: 1.4 });
           ctx.systems.explosions.spawnImpactBurst(scratch.set(p.x, 1.5, p.z), 0.35);
-          launch(v, i);
+          // Away from him, past the side it stood on: across the frame.
+          const away = Math.atan2(p.x - g.position.x, p.z - g.position.z);
+          launch(v, m, away + (i === 0 ? -0.5 : 0.5));
         }
       }
     }
     applyPose(rawDt);
-
-    // 4. The bow, then he crumbles into the street.
-    const end = showLength();
-    if (t > end - HANK.outro) {
-      const k = (t - (end - HANK.outro)) / HANK.outro;
-      if (k > 0.35) {
-        g.position.y = -HANK.height * 1.15 * ((k - 0.35) / 0.65) ** 2;
-        if (Math.random() < 0.5) puff(scratch.set(g.position.x, 0.4, g.position.z), 6, 5, 2, 1);
-      }
-      hank.magma.emissiveIntensity = Math.max(0.2, 1.2 * (1 - k));
-    }
-    if (t > end) finish(true);
+    if (t > showLength()) finish(true);
   }
 
   /**
-   * The camera on him (after Hero Mode's camera, before the shake): side
-   * on, easing back and along to keep the newest flight in frame.
+   * The camera on him (after Hero Mode's camera, before the shake): from
+   * the front, a little to one side, easing back to keep the newest flight
+   * in frame.
    * @param {number} rawDt
    */
   function placeCamera(rawDt) {
@@ -678,17 +774,16 @@ export function createActionHeroSystem(ctx) {
     const cam = Sim.three.camera;
     const fx = Math.sin(scene.heading);
     const fz = Math.cos(scene.heading);
-    const base = hank.group.position;
-    // What to look at: the falling boulder; him, close; or between him and
-    // the newest one in the air, further back as it goes.
-    let lx = scene.x + fx * 1.5;
+    let lx = scene.x;
     let ly = 2.2;
-    let lz = scene.z + fz * 1.5;
+    let lz = scene.z;
     let dist = 9.5;
     if (scene.t < HANK.fall && rockfall) {
       ly = THREE.MathUtils.clamp(rockfall.boulder.position.y * 0.55, 3, 32);
       dist = 20;
     }
+    // Following a flight: the look leans toward it and the lens backs off
+    // and rises (never further back than the clear ground behind it).
     const flying = flyers.length ? flyers[flyers.length - 1] : null;
     if (flying && flying.state === 'flying') {
       const p = flying.person.mesh.position;
@@ -701,21 +796,242 @@ export function createActionHeroSystem(ctx) {
     scene.look.x += (lx - scene.look.x) * ease;
     scene.look.y += (ly - scene.look.y) * ease;
     scene.look.z += (lz - scene.look.z) * ease;
-    scene.camDist += (dist - scene.camDist) * Math.min(1, rawDt * 1.5);
-    // Side on: off his right hand, a little behind.
+    scene.camDist += (Math.min(dist, scene.camRoom) - scene.camDist) * Math.min(1, rawDt * 1.5);
+    // In front of him (the way he faces), turned a touch to one side.
+    const a = scene.heading + 0.28;
+    // Anchored on where he stands (the line checked clear by clearRoom).
     cam.position.set(
-      scene.look.x + fz * scene.camDist - fx * scene.camDist * 0.15,
-      Math.max(3.4, scene.look.y * 0.5 + 2.4 + scene.camDist * 0.12),
-      scene.look.z - fx * scene.camDist - fz * scene.camDist * 0.15
+      scene.x + Math.sin(a) * scene.camDist,
+      Math.max(2.6, scene.look.y * 0.5 + 1.9 + scene.camDist * 0.1),
+      scene.z + Math.cos(a) * scene.camDist
     );
-    void base;
+    void fx;
+    void fz;
     cam.lookAt(scene.look);
     Sim.three.controls.target.copy(scene.look);
   }
 
   // ---------------------------------------------------------------------
-  // Lifecycle
+  // The fight
   // ---------------------------------------------------------------------
+
+  /** Brought down: he crumbles (+score), and the low gravity follows. */
+  function bossDown() {
+    if (!boss || !hank) return;
+    boss = null;
+    rock.live = false;
+    if (rock.mesh) rock.mesh.visible = false;
+    ctx.systems.damage.addDamageScore(HANK.boss.score);
+    ctx.events.emit('announce', { title: 'HANK GRANITE DOWN', sub: `The landslide is rubble · +${HANK.boss.score}` });
+    ctx.systems.explosions.spawnImpactBurst(scratch.copy(hank.group.position).setY(2), 1.2);
+    crumbling = 0;
+  }
+
+  /**
+   * One frame of the fight, on the world's clock (Time Slow slows him).
+   * @param {number} dt
+   */
+  function stepBoss(dt) {
+    if (!boss || !hank || dt <= 0) return;
+    const B = HANK.boss;
+    const hero = ctx.systems.heroMode;
+    const r = ctx.Hero && ctx.Hero.active && hero ? hero.rogerTarget() : null;
+    if (!r) {
+      // Roger gone (Hero Mode over): he goes too.
+      boss = null;
+      crumbling = 0;
+      return;
+    }
+    const g = hank.group;
+    const p = g.position;
+    const dx = r.x - p.x;
+    const dz = r.z - p.z;
+    const dist = Math.hypot(dx, dz);
+    const alt = hero.rogerHeight();
+    boss.t += dt;
+    boss.cooldown -= dt;
+    boss.rockTimer -= dt;
+    if (boss.flinch > 0) boss.flinch -= dt;
+    restPose(boss.t);
+    hank.magma.emissiveIntensity = Math.max(1 + Math.sin(boss.t * 4) * 0.3, hank.magma.emissiveIntensity - dt * 4);
+    if (ctx.systems.enemies.getState(boss, 'frozen')) { applyPose(dt); return; }
+    const face = Math.atan2(dx, dz);
+    if (boss.state === 'stagger') {
+      want.tx = 0.35;
+      want.drop = -0.2;
+      if (boss.t > B.stagger) { boss.state = 'walk'; boss.t = 0; }
+    } else if (boss.state === 'wind') {
+      // The wind-up: the right fist back, the magma flaring; dodge now.
+      g.rotation.y = turnTo(g.rotation.y, face, 3 * dt);
+      setArm(0, 0.6, -1.9);
+      want.ty = 0.8;
+      want.drop = -0.15;
+      hank.magma.emissiveIntensity = 2 + boss.t * 8;
+      if (boss.t >= B.windUp) {
+        // The punch.
+        callPunch();
+        const inFront = Math.cos(face - g.rotation.y) > 0.5;
+        if (dist <= B.hit && alt <= B.highAbove && inFront) {
+          ctx.systems.health.damagePlayer({
+            source: 'hankPunch', pierce: true, title: 'KNOCKED INTO ORBIT', sub: 'One punch from Hank Granite',
+            position: { x: p.x, y: 1.6, z: p.z }
+          });
+        }
+        boss.state = 'recover';
+        boss.t = 0;
+        boss.cooldown = B.recover;
+      }
+    } else if (boss.state === 'recover') {
+      setArm(0, -1.55, -0.1);
+      want.ty = -0.45;
+      if (boss.t > 0.5) { boss.state = 'walk'; boss.t = 0; }
+    } else if (boss.state === 'throw') {
+      setArm(1, -2.6, -0.3);
+      if (boss.t > 0.5) { boss.state = 'walk'; boss.t = 0; }
+    } else {
+      const choice = bossChoice({ dist, rogerAlt: alt, cooldown: boss.cooldown, rockTimer: boss.rockTimer });
+      g.rotation.y = turnTo(g.rotation.y, face, 2.5 * dt);
+      if (choice === 'punch') {
+        boss.state = 'wind';
+        boss.t = 0;
+        ctx.systems.creatureSounds.play('hankGrunt', p, { size: 1.6, pitch: 0.7 });
+      } else if (choice === 'rock') {
+        throwRock(r.x, alt + 1.1, r.z);
+        boss.rockTimer = B.rockEvery;
+        boss.state = 'throw';
+        boss.t = 0;
+      } else if (choice === 'walk') {
+        const step = B.speed * dt;
+        const nx = p.x + (dx / (dist || 1)) * step;
+        const nz = p.z + (dz / (dist || 1)) * step;
+        if (!hero.standable || hero.standable(nx, nz)) {
+          p.x = nx;
+          p.z = nz;
+        } else {
+          p.x += (dz / (dist || 1)) * step;
+          p.z -= (dx / (dist || 1)) * step;
+        }
+        boss.stride += step * 1.4;
+        want.legs = Math.sin(boss.stride) * 0.5;
+        want.s0x = -Math.sin(boss.stride) * 0.4;
+        want.s1x = Math.sin(boss.stride) * 0.4;
+        if (Math.floor((boss.stride - step * 1.4) / Math.PI) !== Math.floor(boss.stride / Math.PI)) {
+          ctx.systems.creatureSounds.play('footstep', p, { size: 1.6 });
+          ctx.systems.gamefeel.addShake(0.12, 0.12);
+        }
+        flingNear();
+      }
+    }
+    if (boss.flinch > 0) want.tx -= boss.flinch * 1.2;
+    applyPose(dt);
+    stepRock(dt, r, alt);
+  }
+
+  /** @param {number} from @param {number} to @param {number} max @returns {number} */
+  function turnTo(from, to, max) {
+    const d = Math.atan2(Math.sin(to - from), Math.cos(to - from));
+    return from + THREE.MathUtils.clamp(d, -max, max);
+  }
+
+  function callPunch() {
+    if (!hank) return;
+    hank.magma.emissiveIntensity = 6;
+    ctx.systems.creatureSounds.play('punch', hank.group.position, { size: 1.8, pitch: 0.6 });
+    ctx.systems.gamefeel.addShake(0.6, 0.25);
+    hank.fists[0].getWorldPosition(scratch);
+    puff(scratch, 30, 8, 2);
+  }
+
+  /** Anyone in his way while he walks is flung. */
+  function flingNear() {
+    if (!hank) return;
+    const p = hank.group.position;
+    for (const person of ctx.Environment.people) {
+      if (!person.mesh.parent || person.captureState !== 'grounded' || person.heroName || !person.motion) continue;
+      const q = person.mesh.position;
+      if (Math.abs(q.x - p.x) > HANK.boss.flingRadius || Math.abs(q.z - p.z) > HANK.boss.flingRadius) continue;
+      if (Math.hypot(q.x - p.x, q.z - p.z) > HANK.boss.flingRadius) continue;
+      person.motion.active = false;
+      /** @type {Victim} */
+      const v = {
+        person, state: 'waiting', vel: new THREE.Vector3(), spin: new THREE.Vector3(), from: new THREE.Vector3(),
+        spot: new THREE.Vector3(), t: 0, metres: 0, stride: 0, label: null, record: false
+      };
+      ctx.systems.creatureSounds.play('punch', q, { size: 1.2 });
+      launch(v, MOVES[0], Math.atan2(q.x - p.x, q.z - p.z));
+    }
+  }
+
+  /**
+   * A rock at Roger up high, led a little.
+   * @param {number} x @param {number} y @param {number} z
+   */
+  function throwRock(x, y, z) {
+    if (!hank || !rock.mesh) return;
+    hank.fists[1].getWorldPosition(scratch);
+    rock.mesh.position.copy(scratch);
+    rock.mesh.scale.setScalar(1.1);
+    rock.mesh.visible = true;
+    const d = Math.hypot(x - scratch.x, z - scratch.z);
+    const t = Math.max(0.4, d / HANK.boss.rockSpeed);
+    // Up enough to arc onto him.
+    rock.vel.set((x - scratch.x) / t, (y - scratch.y) / t + 0.5 * 14 * t, (z - scratch.z) / t);
+    rock.t = 0;
+    rock.live = true;
+    ctx.systems.creatureSounds.play('hankGrunt', hank.group.position, { size: 1.4, pitch: 0.9 });
+  }
+
+  /**
+   * @param {number} dt
+   * @param {{x: number, z: number}} r
+   * @param {number} alt
+   */
+  function stepRock(dt, r, alt) {
+    if (!rock.live || !rock.mesh) return;
+    rock.t += dt;
+    rock.vel.y -= 14 * dt;
+    rock.mesh.position.addScaledVector(rock.vel, dt);
+    rock.mesh.rotation.x += dt * 6;
+    rock.mesh.rotation.z += dt * 4;
+    const m = rock.mesh.position;
+    if (Math.hypot(m.x - r.x, m.y - (alt + 1), m.z - r.z) < 1.4) {
+      ctx.systems.health.damagePlayer({
+        source: 'hankRock', type: 'blast', title: 'STONED', sub: 'A rock from Hank Granite',
+        position: { x: m.x, y: m.y, z: m.z }
+      });
+      endRock();
+    } else if (m.y < 0.3 || rock.t > 5) {
+      endRock();
+    }
+  }
+
+  function endRock() {
+    if (!rock.mesh) return;
+    rock.live = false;
+    puff(scratch.copy(rock.mesh.position).setY(Math.max(0.5, rock.mesh.position.y)), 30, 6, 2);
+    ctx.systems.explosions.spawnImpactBurst(scratch, 0.5);
+    rock.mesh.visible = false;
+  }
+
+  // ---------------------------------------------------------------------
+  // The frame and the lifecycle
+  // ---------------------------------------------------------------------
+
+  /**
+   * @param {number} dt simulation seconds
+   * @param {number} rawDt real seconds: the show runs on real time
+   */
+  function updateActionHero(dt, rawDt) {
+    if (dt > 0) stepLowGravity(dt);
+    if (rawDt > 0) {
+      stepDust(rawDt);
+      stepFlyers(rawDt);
+      stepChunks(rawDt);
+      stepCrumble(rawDt);
+      stepShow(rawDt);
+    }
+    if (boss) stepBoss(dt);
+  }
 
   /** @returns {void} */
   function initActionHero() {
@@ -727,20 +1043,8 @@ export function createActionHeroSystem(ctx) {
     Sim.three.scene.add(rockfall.boulder);
     chunkState = rockfall.chunks.map(() => ({ vel: new THREE.Vector3(), spin: new THREE.Vector3(), t: 0 }));
     for (const c of rockfall.chunks) Sim.three.scene.add(c);
-    // The ground pound's spikes: faceted stone cones.
-    const spikeGeo = new THREE.ConeGeometry(0.55, 2.6, 5);
-    spikeGeo.translate(0, 1.3, 0);
-    const spikeMat = new THREE.MeshStandardMaterial({ color: 0x77716a, roughness: 0.95, flatShading: true });
-    ownGeometries.push(spikeGeo);
-    ownMaterials.push(spikeMat);
-    spikes = [];
-    for (let i = 0; i < HANK.spikes; i++) {
-      const s = new THREE.Mesh(spikeGeo, spikeMat);
-      s.castShadow = true;
-      s.visible = false;
-      Sim.three.scene.add(s);
-      spikes.push(s);
-    }
+    // The last chunk is kept back as the rock he throws.
+    rock.mesh = rockfall.chunks[rockfall.chunks.length - 1];
     // The rings where the thrown land.
     const ringGeo = new THREE.RingGeometry(1.4, 1.75, 40);
     ringGeo.rotateX(-Math.PI / 2);
@@ -776,24 +1080,59 @@ export function createActionHeroSystem(ctx) {
       labelBox.appendChild(el);
       labelPool.push(el);
     }
-    // Straight on the game's container: they cover the whole view.
     ctx.container.append(bars, title, moveCall, labelBox);
     const button = document.getElementById('btn-hank');
     button?.addEventListener('click', () => {
       if (start()) ctx.systems.camera.easeIntoMode();
     }, { signal: ctx.signal });
+
+    // The fight: in the shared enemy register (engine/enemies.js), so every
+    // weapon of Roger's finds him and takes the table's damage (R-054).
+    kind = {
+      kind: 'hank',
+      list: () => (boss && hank ? [boss] : []),
+      position: () => (hank ? hank.group.position : scratch),
+      hitbox: () => ({ x: hank ? hank.group.position.x : 0, z: hank ? hank.group.position.z : 0, radius: 1.2, top: HANK.height }),
+      // An EMP staggers him; the rest is the table's.
+      accepts: ['emp'],
+      damage: () => {
+        if (boss) { boss.state = 'stagger'; boss.t = 0; }
+        return false;
+      },
+      defeat: () => {
+        bossDown();
+        return true;
+      },
+      wounded: () => {
+        if (!boss || !hank) return;
+        boss.flinch = 0.2;
+        hank.magma.emissiveIntensity = Math.max(hank.magma.emissiveIntensity, 3);
+      },
+      // The black hole takes him whole.
+      consume: () => {
+        boss = null;
+        rock.live = false;
+        if (rock.mesh) rock.mesh.visible = false;
+        if (hank) hank.group.visible = false;
+      },
+      object: () => (hank ? hank.group : null),
+      size: () => HANK.height
+    };
+    ctx.systems.enemies.registerKind(kind);
   }
 
   /** @returns {void} */
   function resetActionHero() {
     if (scene) finish();
+    boss = null;
+    crumbling = -1;
+    rock.live = false;
+    if (hank) hank.group.visible = false;
     for (const v of flyers) if (v.state !== 'gone') removeVictim(v);
     flyers = [];
     record = 0;
     lowGravityLeft = 0;
     ctx.systems.physics.gravity.scale = 1;
-    spikeT = -1;
-    for (const s of spikes) s.visible = false;
     for (const mk of markers) {
       mk.t = 1;
       mk.mesh.visible = false;
@@ -811,6 +1150,7 @@ export function createActionHeroSystem(ctx) {
   /** @returns {void} */
   function disposeActionHero() {
     if (scene) finish();
+    boss = null;
     flyers = [];
     if (hank) {
       hank.group.removeFromParent();
@@ -825,8 +1165,7 @@ export function createActionHeroSystem(ctx) {
       for (const m of rockfall.materials) m.dispose();
     }
     rockfall = null;
-    for (const s of spikes) s.removeFromParent();
-    spikes = [];
+    rock.mesh = null;
     for (const mk of markers) mk.mesh.removeFromParent();
     markers = [];
     for (const g of ownGeometries) g.dispose();

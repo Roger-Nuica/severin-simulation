@@ -69,7 +69,7 @@ const FALLING = 4;
 /**
  * @param {Object} ctx
  * @returns {{initGunners: () => void, updateGunners: (dt: number, rawDt: number) => void, resetGunners: () => void,
- *   disposeGunners: () => void, send: () => boolean, count: () => number, caughtCount: () => number, returnedHits: () => number, debug: () => Object[]}}
+ *   disposeGunners: () => void, send: () => boolean, count: () => number, caughtCount: () => number, positions: () => THREE.Vector3[], returnedHits: () => number, debug: () => Object[]}}
  */
 export function createGunnerSystem(ctx) {
   const { Sim } = ctx;
@@ -375,6 +375,7 @@ export function createGunnerSystem(ctx) {
     if (u.dying) return;
     u.dying = true;
     u.dead = 0;
+    u.look.marker.visible = false;
     u.look.laser.visible = false;
     u.look.flash.visible = false;
     ctx.systems.explosions.spawnImpactBurst(v1.copy(u.look.root.position).setY(1.4), 1.1);
@@ -625,6 +626,14 @@ export function createGunnerSystem(ctx) {
     const firing = u.phase === 'firing' || u.phase === 'spinning';
     u.yaw = turnToward(u.yaw, wantYaw, (firing ? THREE.MathUtils.degToRad(GUNNER.traverse) : 2.5) * dt);
     u.timer += dt;
+    // Buried (a building came down on him): he climbs out toward Roger,
+    // whatever is in the way, until he stands clear.
+    if (ctx.systems.heroMode?.standable && !ctx.systems.heroMode.standable(p.x, p.z)) {
+      p.x += (dx / (dist || 1)) * GUNNER.walkSpeed * 1.5 * dt;
+      p.z += (dz / (dist || 1)) * GUNNER.walkSpeed * 1.5 * dt;
+      u.stride += dt * 7;
+      return;
+    }
     if (u.phase === 'walking') {
       // To the middle of his range, round anything in the way.
       const goal = (GUNNER.range[0] + GUNNER.range[1]) / 2;
@@ -710,6 +719,8 @@ export function createGunnerSystem(ctx) {
   function animate(u, dt, r) {
     const L = u.look;
     L.root.rotation.y = u.yaw;
+    L.marker.position.y = 3.05 + Math.sin(clock * 4) * 0.12;
+    L.marker.rotation.y += dt * 2;
     L.barrels.rotation.z += u.spin * dt;
     // The heat: dark steel to dull red to bright orange.
     L.heat.emissive.setRGB(u.heat * 2.2, u.heat * u.heat * 0.9, u.heat * u.heat * u.heat * 0.2);
@@ -894,6 +905,8 @@ export function createGunnerSystem(ctx) {
   return {
     initGunners, updateGunners, resetGunners, disposeGunners, send,
     count: () => units.filter((u) => !u.dying && !u.gone).length,
+    /** Where each HAVOC still up is (the minimap, ui/minimap.js). */
+    positions: () => units.filter((u) => !u.dying && !u.gone).map((u) => u.look.root.position),
     caughtCount: () => caughtNow,
     /** What each HAVOC is doing (for testing from the console). */
     returnedHits: () => returnedHits,

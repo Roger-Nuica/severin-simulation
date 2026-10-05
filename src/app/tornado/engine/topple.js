@@ -177,6 +177,7 @@ export function createToppleSystem(ctx) {
     // top of the building along +dir (see the note at the top of the file).
     const axis = new THREE.Vector3(dir.z, 0, -dir.x);
 
+    root.userData.lying = null;
     falling.push({
       obj, root, dir, axis, pivot,
       origin: base.clone(),
@@ -322,8 +323,42 @@ export function createToppleSystem(ctx) {
       fall.root.quaternion.copy(scratchQuat).multiply(fall.baseQuat);
 
       if (!fall.struck && progress >= TOPPLE.strikeAt) strike(fall);
-      if (progress >= 1) falling.splice(i, 1);
+      if (progress >= 1) {
+        lie(fall);
+        falling.splice(i, 1);
+      }
     }
+  }
+
+  /**
+   * The building down: where it lies, as solid boxes on the ground that Roger
+   * and the ground enemies stop against and Roger can stand on
+   * (hero/movement.js someSolid), in root.userData.lying. It lies along the
+   * fall line from the pivot edge for its height, as wide as it was across
+   * the fall and as tall as it was deep along it. A diagonal fall is covered
+   * by a row of axis-aligned boxes, each a little larger than the strip.
+   * @param {Fall} fall
+   * @returns {void}
+   */
+  function lie(fall) {
+    const fp = fall.root.userData.footprint;
+    if (!fp) return;
+    const across = Math.max(1, fall.halfWidth - TOPPLE.spread);
+    const thick = extentAlong(fp, fall.dir.x, fall.dir.z) * 2 * Math.sin(TOPPLE.finalAngle);
+    const step = Math.max(3, Math.min(across * 2, 8));
+    const boxes = [];
+    for (let s = 0; s < fall.height; s += step) {
+      const len = Math.min(step, fall.height - s);
+      const mid = s + len / 2;
+      boxes.push({
+        x: fall.pivot.x + fall.dir.x * mid,
+        z: fall.pivot.z + fall.dir.z * mid,
+        hw: Math.abs(fall.dir.x) * len / 2 + Math.abs(fall.axis.x) * across,
+        hd: Math.abs(fall.dir.z) * len / 2 + Math.abs(fall.axis.z) * across,
+        top: thick
+      });
+    }
+    fall.root.userData.lying = boxes;
   }
 
   /** @returns {number} */

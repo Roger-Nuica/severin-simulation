@@ -30,6 +30,9 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 
 export const REPLICATOR = {
   height: 2.1,
+  // Every glow on it (veins, eyes, the crown) at half what it was: it
+  // read as a light source (on request, 2026-10-05).
+  glowScale: 0.5,
   metal: 0x262c34,
   green: new THREE.Color(0.12, 1.5, 0.3),
   greenHot: new THREE.Color(0.35, 2.4, 0.55),
@@ -66,7 +69,7 @@ export function glowMaterial(glow = 1) {
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;');
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform float uGlow;\nuniform vec3 uTint;\nvarying vec3 vGlow;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vGlow * uTint * uGlow;');
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\ntotalEmissiveRadiance += vGlow * uTint * uGlow * ${REPLICATOR.glowScale.toFixed(3)};`);
   };
   material.customProgramCacheKey = () => 'replicatorGlow';
   return material;

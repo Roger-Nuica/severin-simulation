@@ -150,7 +150,7 @@ export function createYetiSystem(ctx) {
     return {
       rig, root: rig.root,
       heading: 0, hp: YETI.hp, phase: 'walking', timer: 0, stride: 0, tick: 0, gunTick: 0,
-      exposure: 0, gunExposure: 0, swing: 0, aim: 0, firing: false
+      exposure: 0, gunExposure: 0, swing: 0, aim: 0, firing: false, pitch: 0
     };
   }
 
@@ -527,9 +527,16 @@ export function createYetiSystem(ctx) {
         range = Math.min(range, aimDir.length());
         aimDir.normalize();
       } else {
-        const flat = Math.max(1, dist - YETI.reach);
-        aimDir.set(Math.sin(y.heading), (ty - muzzle.y) / flat, Math.cos(y.heading)).normalize();
+        // Straight at what it aims at: Roger's chest wherever he is (on a
+        // roof, in the air), a person's. It used to fire along its heading
+        // with a guessed dip, which sent the beam over anyone close.
+        const aimY = roger ? hero.rogerHeight() + 1.1 : ty;
+        aimDir.set(tx - muzzle.x, aimY - muzzle.y, tz - muzzle.z);
+        if (aimDir.lengthSq() < 1) aimDir.set(Math.sin(y.heading), -0.5, Math.cos(y.heading));
+        aimDir.normalize();
       }
+      // The gun arm tips down (or up) to the beam (pose).
+      y.pitch += (THREE.MathUtils.clamp(Math.asin(-aimDir.y), -0.8, 1.2) - y.pitch) * Math.min(1, dt * 6);
       gun.fire(muzzle, aimDir, range, YETI.gunHalfAngle, dt);
       // Its hiss, held while it fires (sound/creatures.js).
       ctx.systems.creatureSounds.loop('yetiGun', muzzle, 1);
@@ -563,7 +570,8 @@ export function createYetiSystem(ctx) {
     rig.legR.rotation.x = -s * 0.5;
     rig.armL.rotation.x = -s * 0.4 - (y.swing > 0 ? 1.8 : 0);
     // The gun arm: carried low, raised straight out to fire.
-    rig.armR.rotation.x = THREE.MathUtils.lerp(-0.35 + s * 0.15, -Math.PI / 2 + Math.sin(y.timer * 9) * 0.02, y.aim);
+    // Raised to the beam's own angle: down at someone close, level far off.
+    rig.armR.rotation.x = THREE.MathUtils.lerp(-0.35 + s * 0.15, -Math.PI / 2 + y.pitch + Math.sin(y.timer * 9) * 0.02, y.aim);
     const pulse = 0.75 + 0.25 * Math.sin(y.timer * (y.firing ? 18 : 3));
     rig.coolantMat.color.setRGB(0.5 * pulse, 2.2 * pulse, 3 * pulse);
   }
