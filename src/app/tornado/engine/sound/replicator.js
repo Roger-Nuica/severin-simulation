@@ -1,5 +1,6 @@
 // @ts-check
 import { createShortNoiseBuffer } from './thunder.js';
+import { loadSample, playOnce } from './samples.js';
 
 /**
  * ===========================================================================
@@ -7,7 +8,10 @@ import { createShortNoiseBuffer } from './thunder.js';
  * ===========================================================================
  * Procedural, built on first use, quieter with distance from the camera:
  *
- *  - **assemble**: a clone building itself -- a glitching square wave
+ *  - **assemble**: a clone building itself -- the first CLONE_SECONDS of
+ *    the recording public/sounds/patient-zero.mp3 (on request, 2026-10-05),
+ *    one at a time; until that file is there (or if it fails to load), the
+ *    procedural cue: a glitching square wave
  *    stepping up through random notes, a storm of metallic ticks (the blocks
  *    landing), and a low whoomph as it stands up complete;
  *  - **shatter**: a clone falling apart -- ticks scattering down and a
@@ -22,6 +26,9 @@ import { createShortNoiseBuffer } from './thunder.js';
  */
 
 const BUS_LEVEL = 0.85;
+/** The clone's recording, and how much of its start is played. */
+const CLONE_URL = '/sounds/patient-zero.mp3';
+const CLONE_SECONDS = 2;
 const HEAR = 160; // metres: silent beyond
 
 /**
@@ -39,6 +46,12 @@ const HEAR = 160; // metres: silent beyond
 export function createReplicatorSoundSystem(engineCtx) {
   /** @type {{ctx: AudioContext, bus: GainNode, noise: AudioBuffer}|null} */
   let graph = null;
+  /** @type {'idle'|'loading'|'ready'|'missing'} */
+  let cloneState = 'idle';
+  /** @type {import('./samples.js').Sample|null} */
+  let cloneSample = null;
+  /** AudioContext time the playing clone recording ends (one at a time). */
+  let cloneUntil = 0;
 
   /** @returns {{ctx: AudioContext, bus: GainNode, noise: AudioBuffer}|null} */
   function ensureGraph() {
@@ -51,6 +64,14 @@ export function createReplicatorSoundSystem(engineCtx) {
     bus.gain.value = BUS_LEVEL;
     bus.connect(SoundSystem.effectsGain);
     graph = { ctx, bus, noise: createShortNoiseBuffer(ctx, 1) };
+    // The clone recording, fetched once; a missing file just leaves the
+    // procedural cue in place.
+    if (cloneState === 'idle') {
+      cloneState = 'loading';
+      loadSample(ctx, CLONE_URL)
+        .then((sample) => { cloneSample = sample; cloneState = 'ready'; })
+        .catch(() => { cloneState = 'missing'; });
+    }
     return graph;
   }
 
@@ -139,6 +160,13 @@ export function createReplicatorSoundSystem(engineCtx) {
     const g = ensureGraph();
     const level = near(x, z) * (big ? 1.4 : 1);
     if (!g || level <= 0.01) return;
+    // A clone: the recording's first seconds, one at a time.
+    if (!big && cloneState === 'ready' && cloneSample) {
+      if (g.ctx.currentTime < cloneUntil) return;
+      cloneUntil = g.ctx.currentTime + CLONE_SECONDS;
+      playOnce(g.ctx, cloneSample, { gain: Math.min(1, level), destination: g.bus, fadeIn: 0.01, fadeOut: 0.3, maxDuration: CLONE_SECONDS });
+      return;
+    }
     const length = big ? 2 : 1.3;
     // The glitch: random notes stepping up.
     tone(g, 'square', 0.12 * level, 0, length, (f, t) => {

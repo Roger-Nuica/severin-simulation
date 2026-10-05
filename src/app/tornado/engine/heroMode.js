@@ -174,6 +174,7 @@ export { SHIP_DAMAGE } from './hero/config.js';
  *   solidAlong: (x: number, z: number, dx: number, dz: number, max: number) => number,
  *   rogerFrozen: () => boolean,
  *   rogerShielded: () => boolean,
+ *   rogerSpawnShielded: () => boolean,
  *   rogerPhase: () => string,
  *   killRoger: (title: string, sub: string, kind?: string) => void,
  *   hitArea: (x: number, z: number, radius: number, title: string, sub: string, source?: string) => void,
@@ -463,7 +464,7 @@ export function createHeroModeSystem(ctx) {
       <div class="hero-row hero-door">🚗 ENTER — get in the car</div>
       <div class="hero-row hero-drive">🚗 DRIVING · E / Q / Esc — get out</div>
       <div class="hero-msg"></div>
-      <div class="hero-keys">W A S D run · Space jump (again in the air: JETPACK) · Right-click raise / lower weapon · Wheel switch weapon<br>Click or Enter fire · rifle: hold 2 s for a MEGA BEAM · Q time slow (bullet time with the minigun) · E teleport · R EMP · G grappling hook · C telekinesis (C again or click to throw) · V invincible<br>T Landing Support (then R samurai · T rocket · Esc cancel) · Enter at a car's glowing door to drive</div>`;
+      <div class="hero-keys">W A S D run · Space JETPACK (hold to climb, no limit) · Right-click raise / lower weapon · Wheel switch weapon<br>Click or Enter fire · rifle: hold 2 s for a MEGA BEAM · Q time slow (bullet time with the minigun) · E teleport · R EMP · G grappling hook · C telekinesis (C again or click to throw) · V invincible<br>T Landing Support (then R samurai · T rocket · Esc cancel) · Enter at a car's glowing door to drive</div>`;
     container.appendChild(S.hud);
 
     S.over = document.createElement('div');
@@ -876,7 +877,7 @@ export function createHeroModeSystem(ctx) {
       p.x += dx;
       p.z += dz;
       api.pushOut(p, HERO.pad * 0.5, S.state.alt);
-    }, rogerHeight: () => (S.roger ? S.roger.mesh.position.y : 0), rogerShielded: () => S.state.spawnShield > 0 || S.state.invincible, rogerPhase: () => S.state.phase, killRoger: api.killRoger, hitArea: api.hitArea, chipTornado: api.chipTornado,
+    }, rogerHeight: () => (S.roger ? S.roger.mesh.position.y : 0), rogerShielded: () => S.state.spawnShield > 0 || S.state.invincible, rogerSpawnShielded: () => S.state.spawnShield > 0, rogerPhase: () => S.state.phase, killRoger: api.killRoger, hitArea: api.hitArea, chipTornado: api.chipTornado,
     resetHero, disposeHero,
     // Co-op (engine/net/system.js): Roger's pose for the shared snapshot, and
     // the down-not-dead state while a teammate can still revive him.

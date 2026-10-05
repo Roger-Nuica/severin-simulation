@@ -52,7 +52,15 @@ export function createHeroMovement(ctx, S, api) {
    */
   function someSolid(visit) {
     for (const building of ctx.Environment.buildings) {
-      if (building.damageState === 'collapsed') continue;
+      if (building.damageState === 'collapsed') {
+        // A building that went over lies across the street, solid
+        // (topple.js lie): walk round it or climb onto it.
+        const lying = building.mesh && building.mesh.userData.lying;
+        if (lying) {
+          for (const b of lying) if (visit(b.x, b.z, b.hw, b.hd, b.top)) return true;
+        }
+        continue;
+      }
       const fp = building.mesh.userData.footprint;
       if (!fp) continue;
       const b = building.mesh.position;
@@ -62,6 +70,8 @@ export function createHeroMovement(ctx, S, api) {
     for (const block of backdrop ? backdrop.solidBlocks() : []) {
       if (block.state === 0 && visit(block.x, block.z, block.hw, block.hd, block.h)) return true;
     }
+    // Rubble heaps (rubble.js), low but solid.
+    if (ctx.systems.rubble && ctx.systems.rubble.eachSolid(visit)) return true;
     const flood = ctx.systems.flood;
     for (const wall of flood ? flood.damSolids() : []) {
       if (visit(wall.x, wall.z, wall.hw, wall.hd, Infinity)) return true;

@@ -135,9 +135,9 @@ export function createHeroTouch(ctx, S, api) {
       abilityBox.appendChild(el);
       return { code: a.code, el };
     });
-    // Jump, and again in the air the jetpack, held to climb (hero/jetpack.js):
+    // The jetpack, lit at once and held to climb (hero/jetpack.js):
     // Space down while the thumb is on it, up when it lifts.
-    const jump = button('ht-ability', '<b>🚀</b><span>Jump</span><i></i>', 'Jump · again in the air: jetpack, hold to climb');
+    const jump = button('ht-ability', '<b>🚀</b><span>Fly</span><i></i>', 'Jetpack · hold to climb, let go to sink');
     abilityBox.appendChild(jump);
     root.append(base, abilityBox, weapon, aim, car, fire, havoc, bots, exit);
     container.appendChild(root);

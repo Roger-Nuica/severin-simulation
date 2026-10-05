@@ -134,6 +134,10 @@ export const HERO = {
 
 export const UP = new THREE.Vector3(0, 1, 0);
 export const Z_AXIS = new THREE.Vector3(0, 0, 1);
-export const EXCLUSIVE_BUTTONS = ['preset-fujiwhara', 'btn-wedge', 'btn-doomsday', 'btn-chase', 'btn-possess', 'btn-cinematic', 'btn-strike'];
+// Panel buttons off while Roger is out. Fujiwhara, the Final Boss wedge and
+// Doomsday used to be here too; on request (2026-10-05) they work in Hero
+// Mode (Roger is never killed by a funnel, R-001), so only the modes that take
+// the camera or the funnel away from him stay off.
+export const EXCLUSIVE_BUTTONS = ['btn-chase', 'btn-possess', 'btn-cinematic', 'btn-strike'];
 export const STREETS_ALONG_X = [-20, -8, 8, 20];
 export const STREETS_ALONG_Z = [-30, 30];

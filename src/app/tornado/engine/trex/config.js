@@ -27,8 +27,8 @@ export const TREX = {
   // (90 m would reach across half the town): 60 m.
   flameRange: 60,            // metres
   flameHalfAngle: 0.3,       // radians either side of straight ahead
-  flameSeconds: 2.6,
-  flameEvery: [5, 8],        // seconds between two breaths
+  flameSeconds: 3.2,         // (2.6 until 2026-10-05)
+  flameEvery: [2, 3.5],      // seconds between two breaths (5-8 until 2026-10-05: more often, on request)
   flameAim: 52,              // it breathes once its target is within this
   igniteEvery: 0.25,         // seconds between two checks of what the cone reaches
   flameRate: 320,            // particles a second while breathing

@@ -29,6 +29,8 @@ import { TREX } from './config.js';
  * @property {THREE.Object3D} tail
  * @property {THREE.Object3D} jaw
  * @property {THREE.Object3D} mouth where the flames leave
+ * @property {THREE.Object3D} neck tilted down to aim the breath (trex.js pose)
+ * @property {THREE.Object3D} head
  * @property {THREE.Object3D} body
  * @property {THREE.MeshBasicMaterial} eyeMat
  * @property {THREE.MeshBasicMaterial} ventMat
@@ -157,7 +159,7 @@ export function createTrexModel() {
     }
 
     return {
-      root, legL, legR, tail, jaw, mouth, body, eyeMat, ventMat,
+      root, legL, legR, tail, jaw, mouth, body, neck, head, eyeMat, ventMat,
       materials: [skin, belly, metal, eyeMat, ventMat]
     };
   }

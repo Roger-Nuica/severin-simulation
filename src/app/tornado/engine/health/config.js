@@ -118,6 +118,9 @@ export const HEALTH = deepFreeze({
     ice: hit(0),                  // freeze only
     replicatorShard: hit(8),      // a Replicator clone's thrown shard (patientZero/encircle.js)
     gunnerRound: hit(3),          // one of HAVOC's minigun rounds (engine/gunner.js, R-057)
+    hankRock: hit(25),            // a rock Hank Granite throws at Roger up high (engine/actionHero.js, R-040)
+    // Hank Granite's punch: through Invincible too (R-040, on request 2026-10-05).
+    hankPunch: kill('Knocked into orbit by Hank Granite'),
     mothershipBeam: kill('Vaporised by the mothership'),
     yeti: kill('Pulverised by the Yeti'),
     blackHole: kill('Swallowed by the black hole'),

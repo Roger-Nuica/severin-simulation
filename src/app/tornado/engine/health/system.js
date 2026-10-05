@@ -50,6 +50,7 @@ import { applyDamage, createHealthState, glowLevel, isHittable, isInstantKill as
  * @property {string} [title] Death title; defaults to `KILLED`.
  * @property {string} [sub] Death sub-title; defaults to the source's configured message.
  * @property {''|'fall'} [kind] Death kind forwarded to `killRoger` (the chasm uses `'fall'`).
+ * @property {boolean} [pierce] Goes through Invincible (never the spawn shield): Hank Granite's punch.
  */
 
 /** @type {DamageResult} */
@@ -146,11 +147,14 @@ export function createHealthSystem(ctx) {
    * or won, and the spawn shield (R-035) is down.
    * @returns {boolean} True when damage may land on Roger.
    */
-  const rogerVulnerable = () => {
+  const rogerVulnerable = (pierce = false) => {
     const h = hero();
     if (!ctx.Hero || !ctx.Hero.active || !h) return false;
     const phase = h.rogerPhase();
-    return phase !== 'dying' && phase !== 'won' && !h.rogerShielded();
+    if (phase === 'dying' || phase === 'won') return false;
+    // A piercing hit (Hank Granite's punch) goes through Invincible, never
+    // through the spawn shield.
+    return pierce ? !h.rogerSpawnShielded() : !h.rogerShielded();
   };
 
   /** @returns {any} The co-op system, looked up lazily (null when absent). */
@@ -208,7 +212,7 @@ export function createHealthSystem(ctx) {
   const damagePlayer = (request) => {
     const event = toEvent(request);
     const isRoger = event.targetId === '0';
-    if (isRoger && !rogerVulnerable()) return { ...NOTHING, health: health('0') };
+    if (isRoger && !rogerVulnerable(!!request.pierce)) return { ...NOTHING, health: health('0') };
     const entry0 = coopEntry(event.targetId);
     if (isRoger ? isOut('0') : !isHittable(entry0)) return { ...NOTHING, health: health(event.targetId) };
     const before = stateOf(event.targetId);
@@ -218,7 +222,7 @@ export function createHealthSystem(ctx) {
     const killed = isInstant(event, HEALTH) || after.value <= 0;
     if (killed && isRoger) {
       const entry = /** @type {Record<string, import('./config.js').DamageEntry>} */ (HEALTH.damage)[event.source];
-      hero().killRoger(request.title ?? 'KILLED', request.sub ?? (entry && entry.message) ?? '', request.kind ?? '');
+      hero().killRoger(request.title ?? 'KILLED', request.sub ?? (entry && entry.message) ?? '', request.pierce ? 'pierce' : (request.kind ?? ''));
     }
     if (killed && !isRoger) {
       const entry = /** @type {Record<string, import('./config.js').DamageEntry>} */ (HEALTH.damage)[event.source];

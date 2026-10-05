@@ -853,7 +853,7 @@ export function createPatientZeroSystem(ctx) {
     geo = buildReplicatorGeometry();
     evolvedGeo = buildEvolvedGeometry();
     const shardGeo = new THREE.ConeGeometry(0.035, 0.32, 3);
-    const shardMat = new THREE.MeshBasicMaterial({ color: PZ.halo });
+    const shardMat = new THREE.MeshBasicMaterial({ color: PZ.halo.clone().multiplyScalar(REPLICATOR.glowScale) });
     const blockGeo = withGlow(new THREE.BoxGeometry(0.055, 0.055, 0.055), REPLICATOR.green.clone().multiplyScalar(0.5));
     extraGeos.push(shardGeo, blockGeo);
     extraMats.push(shardMat);

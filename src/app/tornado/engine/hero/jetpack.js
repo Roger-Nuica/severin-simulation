@@ -10,19 +10,18 @@ import { createSoftDotTexture } from '../../utils/textures.js';
  * Roger leaves the ground for the first time (BACKLOG.md "Jetpack / double
  * jump", on request):
  *
- *  - **Space on the ground**: a plain jump, about a metre, free.
- *  - **Space again in the air**: the jetpack fires for JETPACK.burnSeconds,
- *    and flies the way the one in San Andreas does (on request, 2026-10-04):
- *    **Space held climbs** (up to JETPACK.climbSpeed), **let go it hovers**
- *    (sinking JETPACK.hoverSink), and W A S D fly him about at up to
- *    JETPACK.flySpeed (the way he faces on foot, the way he looks in first
- *    person) -- no keys, he holds his place in the air. Two flames from the
- *    thrusters at his hips, longer as he climbs, smoke and a roar
- *    (sound/grappleJet.js). Once a flight, for one energy segment
- *    (engine/player/abilities.js, its HUD slot "Space JETPACK") and a
- *    cooldown. It runs dry and he comes down under gravity, carried on by
- *    the speed he has, steering a little.
- *
+ *  - **Space** (on the ground or in the air) lights the jetpack at once
+ *    (one press, on request 2026-10-05: it used to be a jump first and Space
+ *    again in the air). It flies the way the one in San Andreas does:
+ *    **Space held climbs** (up to JETPACK.climbSpeed), **let go it sinks
+ *    gently** (JETPACK.hoverSink) so he comes down when he wants, and W A S D
+ *    fly him about at up to JETPACK.flySpeed (the way he faces on foot, the
+ *    way he looks in first person) -- no keys, he holds his place in the air.
+ *    No fuel and no energy: he flies as long as he likes (also on request);
+ *    it goes out when he lands. Two flames from the thrusters at his hips,
+ *    longer as he climbs, smoke and a roar (sound/grappleJet.js). Its HUD
+ *    slot is "Space JETPACK" (engine/player/abilities.js), free.
+
  * The pack is the San Andreas kind, fitted to the Storm Ranger suit: two
  * slim fuel tanks either side of the Storm Core on his back, a yoke round
  * to two thrusters at his hips with bell nozzles, and a control arm from
@@ -49,11 +48,11 @@ export const JETPACK = {
   jumpSpeed: 6.2,       // m/s up, the plain jump (about a metre)
   gravity: 18,          // m/s^2, a game's gravity rather than 9.8: snappier
   maxFall: 32,          // m/s, terminal
-  cost: 1,              // energy segments (10%)
-  cooldown: 3,          // seconds, after the burn
-  burnSeconds: 4,       // the fuel: how long it fires (1.5 before the San Andreas pack)
+  cost: 0,              // energy segments: free (1 until 2026-10-05)
+  cooldown: 0,          // seconds (3 until 2026-10-05)
+  burnSeconds: Infinity, // no fuel: it fires until he lands (4 s until 2026-10-05)
   climbSpeed: 11,       // m/s up with Space held
-  hoverSink: 0.6,       // m/s down with Space let go: a hover
+  hoverSink: 1.6,       // m/s down with Space let go: a slow, steerable descent
   lift: 30,             // m/s^2 towards climbSpeed / the hover
   flySpeed: 12,         // m/s about with W A S D while it burns
   thrust: 16,           // m/s^2 towards flySpeed (and to a stop with no keys)
@@ -117,10 +116,9 @@ export function createHeroJetpack(ctx, S, api) {
     // Already burning: Space held is the climb (S.keys.jump), nothing more.
     if (st.jetBurn > 0) return;
     if (!st.airborne) {
+      // Off the ground with the speed he has, and the pack lit at once.
       st.vy = JETPACK.jumpSpeed;
       st.airborne = true;
-      st.jetUsed = false;
-      // Off the ground with the speed he has.
       if (st.phase === 'running') {
         st.airVx = Math.sin(st.heading) * st.speed;
         st.airVz = Math.cos(st.heading) * st.speed;
@@ -130,9 +128,8 @@ export function createHeroJetpack(ctx, S, api) {
       }
       const sfx = sound();
       if (sfx) sfx.playJump();
-      return;
     }
-    ctx.systems.abilities.press(JETPACK.key);
+    ignite();
   }
 
   /**
@@ -141,6 +138,7 @@ export function createHeroJetpack(ctx, S, api) {
    */
   function ignite() {
     const st = S.state;
+    if (st.jetBurn > 0) return;
     st.jetBurn = JETPACK.burnSeconds;
     st.jetUsed = true;
     if (st.vy < 0) st.vy *= 0.3;
@@ -556,16 +554,7 @@ export function createHeroJetpack(ctx, S, api) {
       id: 'jetpack', name: 'JETPACK', keys: [JETPACK.key], cost: JETPACK.cost, seconds: 0, cooldown: JETPACK.cooldown,
       canStart: () => {
         const st = S.state;
-        if (!st.airborne) {
-          ctx.events.emit('notice', { text: 'JETPACK · jump first (SPACE), then SPACE again' });
-          return false;
-        }
-        if (st.jetUsed) {
-          ctx.events.emit('notice', { text: 'JETPACK · once a flight' });
-          return false;
-        }
-        if (st.phase !== 'running' && st.phase !== 'aiming') return false;
-        return true;
+        return st.jetBurn <= 0 && (st.phase === 'running' || st.phase === 'aiming');
       },
       start: ignite
     });

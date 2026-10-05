@@ -7,8 +7,7 @@ import { TOUCH } from './touchMath.js';
  * ===========================================================================
  * SECTION HM.3 — The controls
  * ===========================================================================
- * W A S D to run, Space to jump (and again in the air, the jetpack:
- * hero/jetpack.js), right-click to raise the weapon into first person (the Katana included),
+ * W A S D to run, Space for the jetpack (hero/jetpack.js), right-click to raise the weapon into first person (the Katana included),
  * click or Enter to fire,
  * the mouse wheel to switch weapon, Q E R G C for the abilities, Enter at a
  * car's door to drive.
@@ -66,7 +65,7 @@ export function createHeroInput(ctx, S, api) {
    *  - Esc: the weapon down;
    *  - mouse wheel: the next or the previous weapon;
    *  - V: Invincible on / off (hero/screen.js toggleInvincible);
-   *  - Space: jump; again in the air, the jetpack (hero/jetpack.js);
+   *  - Space: the jetpack, at once (hero/jetpack.js);
  *  - Q E R G C: the abilities (engine/player/abilities.js) -- Time Slow (Bullet
    *    Time with the minigun), Teleport, EMP, the grappling hook
    *    (engine/player/grapple.js), telekinesis (engine/player/telekinesis.js) -- not while dying, safe or
@@ -133,9 +132,9 @@ export function createHeroInput(ctx, S, api) {
             // Esc ends Blade Mode (in first person it has already lowered the view above).
             S.weapons.katanaCancel();
           } else if (code === 'Space') {
-            // Space: a jump on the ground, the jetpack in the air
-            // (hero/jetpack.js); not dazed or frozen. Held, the lit jetpack
-            // climbs; let go, it hovers.
+            // Space: the jetpack, lit at once on the ground or in the air
+            // (hero/jetpack.js); not dazed or frozen. Held, it climbs; let
+            // go, he sinks gently.
             S.keys.jump = true;
             if ((phase() === 'running' || phase() === 'aiming') && !(S.state.frozen > 0)) api.pressJump();
           } else if ((phase() === 'running' || phase() === 'aiming' || phase() === 'dazed') && !(S.state.frozen > 0)) {
