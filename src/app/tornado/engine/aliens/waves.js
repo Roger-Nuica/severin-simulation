@@ -300,14 +300,21 @@ export function createAlienWaves(ctx, S, api) {
   // ---------------------------------------------------------------------
 
   /**
-   * Two of them, at opposite ends of town.
+   * Hunter ships, spread round town: the first two at ALIENS.huntersAt, and
+   * two more when the landing ship turns hunter (ship.js liftOff).
+   * @param {number} [count]
+   * @param {string} [title]
+   * @param {string} [sub]
    * @returns {void}
    */
-  function sendHunters() {
-    S.state.huntersSent = true;
+  function sendHunters(count = ALIENS.hunterCount, title = 'HUNTER SHIPS INBOUND', sub = 'Two more ships · they kill on sight') {
+    if (count === ALIENS.hunterCount && title === 'HUNTER SHIPS INBOUND') S.state.huntersSent = true;
     const base = Math.random() * Math.PI * 2;
-    for (let i = 0; i < ALIENS.hunterCount; i++) {
-      const a = base + (i / ALIENS.hunterCount) * Math.PI * 2;
+    for (let i = 0; i < count; i++) {
+      // One tracking laser each, from the pool made in initAliens.
+      const tracker = S.hunterTrackers.find((/** @type {Object} */ tr) => !S.hunters.some((/** @type {Object} */ h) => h.tracker === tr && h.phase !== 'dead'));
+      if (!tracker) break;
+      const a = base + (i / count) * Math.PI * 2;
       const saucer = buildSaucer();
       saucer.group.name = 'alien_hunter';
       for (const leg of saucer.legs) leg.visible = false;
@@ -320,11 +327,11 @@ export function createAlienWaves(ctx, S, api) {
       S.hunters.push({
         group: saucer.group, glow: saucer.glow, phase: 'arriving', timer: 0,
         hull: ALIENS.hunterHull, damage: 0, target: null, retarget: 0,
-        shotTimer: api.between(ALIENS.hunterShotEvery), tracker: S.hunterTrackers[i], spin: 0
+        shotTimer: api.between(ALIENS.hunterShotEvery), tracker, spin: 0
       });
-      S.hunterTrackers[i].cooldown = api.between(ALIENS.laserEvery);
+      tracker.cooldown = api.between(ALIENS.laserEvery);
     }
-    api.showBanner('HUNTER SHIPS INBOUND', 'Two more ships · they kill on sight');
+    api.showBanner(title, sub);
   }
 
   /**
@@ -385,6 +392,11 @@ export function createAlienWaves(ctx, S, api) {
       return;
     }
     if (h.phase !== 'hunting') return;
+    // Held up by a gravity rift (engine/gravityRift.js): it moves it.
+    if (ctx.systems.enemies.getState(h, 'frozen')) {
+      api.updateTracker(h.tracker, S.trackerFrom.set(g.position.x, g.position.y + 0.4, g.position.z), false, dt);
+      return;
+    }
     // Smoke off it once it has been holed.
     if (h.damage > 0 && Math.random() < dt * 4) {
       ctx.systems.explosions.spawnImpactBurst(S.scratch.copy(g.position).add(new THREE.Vector3((Math.random() - 0.5) * 7, 2.5, (Math.random() - 0.5) * 7)), 0.7);

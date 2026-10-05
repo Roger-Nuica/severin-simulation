@@ -59,7 +59,8 @@ import { createKatanaBladeCut } from './hero/katana/bladeCut.js';
  *  - **Gravitron**: aimed the same way; a ring on the ground shows the
  *    rift's circle, and the trigger opens a gravity rift there
  *    (engine/gravityRift.js) at RIFT.cost energy segments: everything
- *    inside floats up, then slams down and explodes. One at a time.
+ *    inside floats up, then is slammed down; people and enemies explode,
+ *    the rest just lands. One at a time.
  *
  * Meshes are made through heroMode.js's keepGeo/keepMat, so they go with
  * the rest of a run's resources when Hero Mode ends.
@@ -611,7 +612,7 @@ export function createHeroWeapons(ctx, hero) {
       : w === 'railgun' ? ' · click to call a bolt down'
         : w === 'fire' ? ' · hold to burn · the only thing the Yeti fears'
           : w === 'blackhole' ? ` · ${HOLE.cost * 10}% energy a shot`
-            : w === 'gravitron' ? ` · ${RIFT.cost * 10}% energy a shot · everything in the circle floats up, then falls and explodes`
+            : w === 'gravitron' ? ` · ${RIFT.cost * 10}% energy a shot · everything in the circle floats up and is slammed down · people and enemies explode`
             : w === 'katana' ? ' · drawn · RIGHT-CLICK for first person · hold the left button and drag a line to cut along it' : '';
     hero.flashMessage(`${WEAPON_NAMES[w]}${extra}`);
   }

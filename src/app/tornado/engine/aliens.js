@@ -9,6 +9,7 @@ import { createAlienAbduction } from './aliens/abduction.js';
 import { createAlienCrew } from './aliens/crew.js';
 import { createAlienWeapons } from './aliens/weapons.js';
 import { createAlienWaves } from './aliens/waves.js';
+import { createAlienMissiles } from './aliens/missiles.js';
 export { ALIEN_SKIN_GLOW } from './aliens/config.js';
 
 /**
@@ -63,9 +64,11 @@ export { ALIEN_SKIN_GLOW } from './aliens/config.js';
  * is there to take it to, and shoot at it once it is gone, to no effect.
  *
  * Roger (engine/heroMode.js) is a target and a threat. Crew within
- * ALIENS.rogerSight of him on foot go after him: they close in to grab him
- * (within HEALTH.melee.contactReach one touch costs him 34) and shoot at where he stood when the
- * gun came up -- moving dodges a ray, standing still does not. The ship, and
+ * STAND_OFF.sight of him on foot go after him (aliens/standOff.js): they
+ * keep their distance, circling him at about 40 m and shooting from there
+ * (on request, 2026-10-05; they used to close in to grab him). They shoot
+ * at where he stood when the gun came up -- moving dodges a ray, standing
+ * still does not; one he runs into still costs him a touch of 34. The ship, and
  * the hunters below, lock a tracking laser on him within ALIENS.laserRange:
  * its foot starts off to one side and crawls after him slower than he can
  * run, and it kills him, car or no car, if it catches him. His plasma rifle
@@ -159,7 +162,7 @@ export function createAliensSystem(ctx) {
   // reads and writes it as S.
   const S = {
     state: {
-      /** @type {'idle'|'arriving'|'deploying'|'hovering'|'wrecked'|'gone'} */
+      /** @type {'idle'|'arriving'|'deploying'|'hovering'|'lifting'|'hunting'|'wrecked'|'gone'} */
       phase: 'idle',
       timer: 0,
       // Seconds of the abduction window used, and until the next one.
@@ -183,6 +186,13 @@ export function createAliensSystem(ctx) {
       // Seconds since the ship first arrived, for the hunters.
       clock: 0,
       huntersSent: false,
+      // The landing ship turned hunter (liftOff): its missiles' clock, the
+      // second of a pair still owed, and where round Roger it is circling.
+      missileTimer: 0,
+      // Seconds a gravity rift still holds the ship (riftHold).
+      held: 0,
+      pairOwed: 0,
+      circle: 0,
       // Seconds until the landing ship next shoots at a nuclear plant.
       plantTimer: 0,
       bannerTimer: 0
@@ -285,6 +295,7 @@ export function createAliensSystem(ctx) {
     createAlienCrew(ctx, S, api),
     createAlienWeapons(ctx, S, api),
     createAlienWaves(ctx, S, api),
+    createAlienMissiles(ctx, S, api),
     { showBanner, between, heroTarget }
   );
 
@@ -471,7 +482,8 @@ export function createAliensSystem(ctx) {
     };
     S.shipTracker = tracker('green');
     S.hunterTrackers = [];
-    for (let i = 0; i < ALIENS.hunterCount; i++) S.hunterTrackers.push(tracker('red'));
+    for (let i = 0; i < ALIENS.hunterCount + ALIENS.extraHunters; i++) S.hunterTrackers.push(tracker('red'));
+    api.initMissiles();
 
     S.banner = document.createElement('div');
     S.banner.className = 'downburst-banner alert';
@@ -576,7 +588,13 @@ export function createAliensSystem(ctx) {
     api.updateWave(dt);
     soundCrew();
 
-    if (S.ship && S.state.phase !== 'wrecked') {
+    // Held up by a gravity rift (engine/gravityRift.js riftHold): the rift
+    // moves it; it does nothing of its own.
+    if (S.state.held > 0) S.state.held -= dt;
+    if (S.ship && S.state.phase !== 'wrecked' && S.state.held > 0) {
+      api.stopTracker(S.shipTracker);
+      S.ship.group.rotation.y += dt * 0.6;
+    } else if (S.ship && S.state.phase !== 'wrecked') {
       const g = S.ship.group;
       if (S.state.damage > 0 && Math.random() < dt * 3 * S.state.damage) {
         ctx.systems.explosions.spawnImpactBurst(S.scratch.copy(g.position).add(new THREE.Vector3((Math.random() - 0.5) * 22, 3, (Math.random() - 0.5) * 22)), 0.9);
@@ -590,6 +608,8 @@ export function createAliensSystem(ctx) {
           S.state.phase = 'deploying';
           S.state.timer = 0;
         }
+      } else if (S.state.phase === 'lifting' || S.state.phase === 'hunting') {
+        api.updateShipHunt(dt, jammed);
       } else {
         // A slow bob and turn while it hangs there; jammed, it sags and rocks.
         const jam = S.frame.jam;
@@ -637,7 +657,10 @@ export function createAliensSystem(ctx) {
           // there is no crew left at all, when the glow does it alone.
           const crewFree = S.aliens.some(alien => alien.phase === 'patrol');
           const crewLeft = S.state.spawned < ALIENS.count || S.aliens.some(alien => alien.phase !== 'dead' && alien.phase !== 'burning');
-          if (S.state.nextAbduct <= 0 && (crewFree || !crewLeft) && !S.frame.peace && !jammed) {
+          // No more once it has its four (with those on their way in): then it
+          // lifts off and hunts (liftOff).
+          const owed = S.state.abducted + S.abductees.length < ALIENS.mothershipAfter;
+          if (owed && S.state.nextAbduct <= 0 && (crewFree || !crewLeft) && !S.frame.peace && !jammed) {
             S.state.nextAbduct = ALIENS.abductEvery;
             const victim = api.pickVictim();
             if (victim) api.abduct(victim);
@@ -663,14 +686,18 @@ export function createAliensSystem(ctx) {
           S.state.mothershipCalled = true;
           ctx.systems.mothership.summon();
         }
+        // Its four taken and aboard: the ramp comes in and it turns hunter.
+        if (S.state.abducted >= ALIENS.mothershipAfter && !S.abductees.length
+          && !S.aliens.some(alien => alien.phase === 'exiting' && !alien.exitTop)) api.liftOff();
         if (api.funnelAtShip()) api.wreck();
-      }
+      } else if (S.state.phase === 'hunting' && api.funnelAtShip()) api.wreck();
     }
     if (S.state.phase === 'wrecked' && S.ship) api.updateWreck(dt);
     api.updateAbductees(dt);
     api.updateMutants(dt);
     for (const alien of S.aliens) api.updateAlien(alien, dt);
     api.updateRays(dt);
+    api.updateMissiles(dt);
   }
 
   /** @returns {Alien[]} the crew still on their feet, for Roger's sights (heroMode.js) */
@@ -692,6 +719,40 @@ export function createAliensSystem(ctx) {
     for (const alien of S.aliens) {
       if (alien.phase === 'patrol' || alien.phase === 'escort' || alien.phase === 'exiting') visit(alien, alienKind);
     }
+  }
+
+  /**
+   * A gravity rift (engine/gravityRift.js) at (x, z): the landing ship, if it
+   * hangs inside it, for the rift to lift.
+   * @param {number} x
+   * @param {number} z
+   * @param {number} radius
+   * @returns {THREE.Group|null}
+   */
+  function riftShip(x, z, radius) {
+    if (!S.ship || !['deploying', 'hovering', 'lifting', 'hunting'].includes(S.state.phase)) return null;
+    const p = S.ship.group.position;
+    return Math.hypot(p.x - x, p.z - z) < radius ? S.ship.group : null;
+  }
+
+  /**
+   * The rift holds the ship for `seconds` more: none of its own moves.
+   * @param {number} seconds
+   * @returns {THREE.Group|null} the ship, or null if it is gone
+   */
+  function riftHold(seconds) {
+    if (!S.ship || S.state.phase === 'wrecked' || S.state.phase === 'gone') return null;
+    S.state.held = seconds;
+    return S.ship.group;
+  }
+
+  /** The rift's slam: the ship is downed and falls burning. @returns {void} */
+  function riftDown() {
+    S.state.held = 0;
+    if (!S.ship || S.state.phase === 'wrecked' || S.state.phase === 'gone') return;
+    S.state.x = S.ship.group.position.x;
+    S.state.z = S.ship.group.position.z;
+    api.hitShip(S.state.hull, S.ship.group.position);
   }
 
   /** @returns {number} people taken through the hatch this run */
@@ -750,6 +811,11 @@ export function createAliensSystem(ctx) {
     S.mutated = 0;
     api.stopTracker(S.shipTracker);
     for (const tr of S.hunterTrackers) api.stopTracker(tr);
+    api.resetMissiles();
+    S.state.missileTimer = 0;
+    S.state.held = 0;
+    S.state.pairOwed = 0;
+    S.state.circle = 0;
     S.state.phase = 'idle';
     S.planned = null;
     S.state.mothershipCalled = false;
@@ -796,12 +862,20 @@ export function createAliensSystem(ctx) {
     S.hunterTrackers = [];
     for (const geo of S.trackerGeos) geo.dispose();
     S.trackerGeos = [];
+    api.disposeMissiles();
     if (S.banner && S.banner.parentNode) S.banner.parentNode.removeChild(S.banner);
     S.banner = null;
   }
 
   return {
-    initAliens, updateAliens, abductedCount, markers, nearestAlien: api.nearestAlien, strikeAlien: api.strikeAlien, targets, eachCuttable,
+    initAliens, updateAliens, abductedCount, markers, riftShip, riftHold, riftDown,
+    /** For testing from the console: the ship's phase; a count of people taken set by hand, and its lift-off forced. */
+    debugShip: (/** @type {number|undefined} */ taken, /** @type {boolean|undefined} */ lift) => {
+      if (taken !== undefined) S.state.abducted = taken;
+      if (lift && S.state.phase === 'hovering') api.liftOff();
+      return { phase: S.state.phase, x: Math.round(S.state.x), z: Math.round(S.state.z), y: S.ship ? +S.ship.group.position.y.toFixed(1) : null,
+        hunters: S.hunters.length, missiles: api.missilesOut(), hull: S.state.hull };
+    }, nearestAlien: api.nearestAlien, strikeAlien: api.strikeAlien, targets, eachCuttable,
     shipTargets: api.shipTargets, huntersPresent: api.huntersPresent, plannedSpot: api.plannedSpot, frameLanding: api.frameLanding, plasmaKill: api.plasmaKill, boltKill: api.boltKill,
     sendSecondWave: api.sendSecondWave, mutate: api.mutate, mutatedCount: api.mutatedCount, instanceSources,
     resetAliens, disposeAliens

@@ -51,6 +51,7 @@ import { buildGunnerKit, buildGunner } from './gunner/model.js';
  * @property {number} flinch
  * @property {number} flashHit
  * @property {number} side which way he steps on cool-down
+ * @property {number} alt which of his two guns fired last (gunner/model.js guns)
  * @property {boolean} dying
  * @property {number} dead seconds since he went down
  * @property {boolean} gone
@@ -116,6 +117,8 @@ export function createGunnerSystem(ctx) {
   let caughtHinted = false;
   let whizzQuiet = 0;
   let clock = 0;
+  /** Whether this game's pair (GUNNER.autoAt) has come. */
+  let autoSent = false;
   let frameNo = 0;
   /** Rounds sent back that landed on him, this run (for testing). */
   let returnedHits = 0;
@@ -221,8 +224,7 @@ export function createGunnerSystem(ctx) {
       accepts: ['emp'],
       damage: (/** @type {Unit} */ u) => {
         u.stun = GUNNER.stun;
-        u.look.laser.visible = false;
-        u.look.flash.visible = false;
+        for (const g of u.look.guns) g.laser.visible = g.flash.visible = false;
         u.phase = 'cooling';
         u.timer = 0;
         return false;
@@ -334,7 +336,7 @@ export function createGunnerSystem(ctx) {
   // ---------------------------------------------------------------------
 
   /** @returns {boolean} whether one came */
-  function send() {
+  function send(offset = 0) {
     if (!kit) return false;
     const r = roger();
     if (!r) {
@@ -349,7 +351,7 @@ export function createGunnerSystem(ctx) {
     let x = r.x;
     let z = r.z;
     for (let k = 0; k < 16; k++) {
-      const a = facing + (k % 2 ? 1 : -1) * (0.35 + Math.ceil(k / 2) * 0.3);
+      const a = facing + offset + (k % 2 ? 1 : -1) * (0.35 + Math.ceil(k / 2) * 0.3);
       x = r.x + Math.sin(a) * GUNNER.spawnDistance;
       z = r.z + Math.cos(a) * GUNNER.spawnDistance;
       if (!ctx.systems.heroMode?.standable || ctx.systems.heroMode.standable(x, z)) break;
@@ -360,7 +362,7 @@ export function createGunnerSystem(ctx) {
     /** @type {Unit} */
     const u = {
       look, phase: 'walking', timer: 0, yaw: Math.atan2(r.x - x, r.z - z), spin: 0, heat: 0, owed: 0, stride: 0,
-      stun: 0, flinch: 0, flashHit: 0, side: Math.random() < 0.5 ? -1 : 1, dying: false, dead: 0, gone: false
+      stun: 0, flinch: 0, flashHit: 0, side: Math.random() < 0.5 ? -1 : 1, dying: false, dead: 0, gone: false, alt: 0
     };
     units.push(u);
     // He arrives in a cloud of dust and sparks.
@@ -376,8 +378,7 @@ export function createGunnerSystem(ctx) {
     u.dying = true;
     u.dead = 0;
     u.look.marker.visible = false;
-    u.look.laser.visible = false;
-    u.look.flash.visible = false;
+    for (const g of u.look.guns) g.laser.visible = g.flash.visible = false;
     ctx.systems.explosions.spawnImpactBurst(v1.copy(u.look.root.position).setY(1.4), 1.1);
     ctx.systems.damage.addDamageScore(GUNNER.score);
     notice(`💥 HAVOC DOWN · +${GUNNER.score}`);
@@ -662,7 +663,9 @@ export function createGunnerSystem(ctx) {
       u.owed += dt * GUNNER.rate;
       while (u.owed >= 1) {
         u.owed -= 1;
-        L.muzzle.getWorldPosition(v1);
+        // The two guns in turn (gunner/model.js).
+        u.alt = (u.alt + 1) % L.guns.length;
+        L.guns[u.alt].muzzle.getWorldPosition(v1);
         const ty = rogerBase() + 1.2;
         const flat = Math.hypot(aim.x - v1.x, aim.z - v1.z);
         v2.set(Math.sin(u.yaw), (ty - v1.y) / Math.max(1, flat), Math.cos(u.yaw));
@@ -685,7 +688,7 @@ export function createGunnerSystem(ctx) {
         u.stride += dt * 4;
       }
       if (Math.random() < dt * 6 * u.heat) {
-        L.muzzle.getWorldPosition(v1);
+        L.guns[Math.random() < 0.5 ? 0 : 1].muzzle.getWorldPosition(v1);
         spray(v1, 1, 1.5, 0.6, 0.6, 0.65);
       }
       if (u.timer >= GUNNER.coolDown) {
@@ -721,7 +724,7 @@ export function createGunnerSystem(ctx) {
     L.root.rotation.y = u.yaw;
     L.marker.position.y = 3.05 + Math.sin(clock * 4) * 0.12;
     L.marker.rotation.y += dt * 2;
-    L.barrels.rotation.z += u.spin * dt;
+    for (const g of L.guns) g.barrels.rotation.z += u.spin * dt * (g === L.guns[0] ? 1 : -1);
     // The heat: dark steel to dull red to bright orange.
     L.heat.emissive.setRGB(u.heat * 2.2, u.heat * u.heat * 0.9, u.heat * u.heat * u.heat * 0.2);
     // The legs stride while he moves; braced while he fires.
@@ -738,22 +741,30 @@ export function createGunnerSystem(ctx) {
       L.visor.color.setRGB(3.2, 0.15, 0.1);
     }
     const firing = u.phase === 'firing' && u.stun <= 0;
-    L.flash.visible = firing && Math.random() < 0.75;
-    if (L.flash.visible) {
-      L.flash.rotation.z = Math.random() * Math.PI;
-      L.flash.scale.setScalar(0.6 + Math.random() * 0.7);
-    }
-    // The laser sight on Roger while he spins up and fires.
+    // The laser sights on Roger while he spins up and fires, one per gun,
+    // and each gun tilted to Roger's chest so its laser lands on him.
     const laserOn = (u.phase === 'spinning' || firing) && u.stun <= 0 && !!r;
-    L.laser.visible = laserOn;
-    if (laserOn && r) {
-      L.muzzle.getWorldPosition(v1);
-      const d = Math.hypot(r.x - v1.x, r.z - v1.z);
-      L.laser.scale.set(1, 1, d);
-      // Tilt the gun to Roger's chest so the laser lands on him.
-      L.gun.rotation.x = -Math.atan2(rogerBase() + 1.2 - v1.y, d);
-      /** @type {THREE.MeshBasicMaterial} */ (L.laser.material).opacity = u.phase === 'spinning' ? 0.35 + 0.35 * Math.sin(clock * 30) : 0.55;
+    for (let k = 0; k < L.guns.length; k++) {
+      const g = L.guns[k];
+      // The flash on the gun that just fired, and now and then the other.
+      g.flash.visible = firing && (k === u.alt ? Math.random() < 0.85 : Math.random() < 0.3);
+      if (g.flash.visible) {
+        g.flash.rotation.z = Math.random() * Math.PI;
+        g.flash.scale.setScalar(0.6 + Math.random() * 0.7);
+      }
+      g.laser.visible = laserOn;
+      if (laserOn && r) {
+        g.muzzle.getWorldPosition(v1);
+        const d = Math.hypot(r.x - v1.x, r.z - v1.z);
+        g.laser.scale.set(1, 1, d);
+        g.gun.rotation.x = -Math.atan2(rogerBase() + 1.2 - v1.y, d);
+        /** @type {THREE.MeshBasicMaterial} */ (g.laser.material).opacity = u.phase === 'spinning' ? 0.35 + 0.35 * Math.sin(clock * 30) : 0.55;
+      }
     }
+    // The gun arms recoil back and forth while they fire.
+    const kick = firing ? Math.sin(clock * 55) * 0.03 : 0;
+    L.guns[0].gun.position.z = 0.02 + kick;
+    L.guns[1].gun.position.z = 0.02 - kick;
   }
 
   /** @param {Unit} u @param {number} dt */
@@ -764,7 +775,7 @@ export function createGunnerSystem(ctx) {
     L.body.rotation.x = -k * k * 1.45;
     L.body.position.z = -k * 0.4;
     u.spin *= Math.max(0, 1 - dt * 3);
-    L.barrels.rotation.z += u.spin * dt;
+    for (const g of L.guns) g.barrels.rotation.z += u.spin * dt;
     // The drum cooking off.
     if (u.dead < 2.4 && Math.random() < dt * 10) {
       v1.copy(L.root.position);
@@ -794,6 +805,16 @@ export function createGunnerSystem(ctx) {
       if (any) resetGunners();
       if (button) button.classList.remove('on');
       return;
+    }
+    // A minute into the game, a pair comes by itself (GUNNER.autoAt); a
+    // Reset starts the clock, and so the wait, again.
+    const session = ctx.systems.sessionClock ? ctx.systems.sessionClock.seconds() : clock;
+    if (session < GUNNER.autoAt) autoSent = false;
+    else if (!autoSent) {
+      autoSent = true;
+      let sent = 0;
+      for (let i = 0; i < GUNNER.autoCount; i++) if (send((i - (GUNNER.autoCount - 1) / 2) * 1.4)) sent++;
+      if (sent) ctx.events.emit('announce', { title: `HAVOC ×${sent}`, sub: 'Heavy gunners inbound · Q stops their bullets' });
     }
     // Roger's velocity, for the lead.
     if (rogerKnown && dt > 0) {

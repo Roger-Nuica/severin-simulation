@@ -21,9 +21,10 @@ import { loadSample, playOnce } from './samples.js';
  *    (bandpassed noise through a ringing filter) for as long as it flies,
  *    then a **clank** where it bites;
  *  - **jump**: a short whoosh; **land**: a thud, as heavy as the fall;
- *  - **jet**: the jetpack's burn (hero/jetpack.js), a looped roar of
- *    lowpassed noise, a crackle on top and a low rumble, swelling as it
- *    climbs, faded out when it burns out.
+ *  - **jet**: the jetpack's burn (hero/jetpack.js): the recording
+ *    public/sounds/jetpack.mp3 looped, opening up as he climbs, faded out
+ *    when the burn ends. Silent until the owner adds the file (on request,
+ *    2026-10-05; it used to be a synthesised roar).
  *
  * The speech is not part of the Web Audio graph: it follows the master
  * mute and volume when it starts.
@@ -33,6 +34,8 @@ const BUS_LEVEL = 0.9;
 const GROWL_LEVEL = 0.32;
 const CHAIN_LEVEL = 0.28;
 const JET_LEVEL = 0.75;
+/** The jetpack's burn, looped (not in the repo yet: the owner will add it, TODO.md). */
+const JET_URL = '/sounds/jetpack.mp3';
 const SHOUT_LINE = 'Get over here!';
 /** @type {string|null} a recorded shout (public/sounds/...), when there is one */
 const SHOUT_SAMPLE_URL = null;
@@ -63,6 +66,10 @@ export function createGrappleJetSoundSystem(engineCtx) {
   let graph = null;
   /** @type {{nodes: AudioNode[], sources: AudioScheduledSourceNode[], gain: GainNode, roar: BiquadFilterNode}|null} */
   let jet = null;
+  /** @type {'idle'|'loading'|'ready'|'missing'} */
+  let jetState = 'idle';
+  /** @type {import('./samples.js').Sample|null} */
+  let jetSample = null;
   /** @type {Object|null} */
   let shoutSample = null;
   let shoutRequested = false;
@@ -88,6 +95,13 @@ export function createGrappleJetSoundSystem(engineCtx) {
       curve[i] = Math.tanh(x * 6);
     }
     graph = { ctx, bus, noise: createShortNoiseBuffer(ctx, 1), curve };
+    // The jetpack's recording, fetched ahead of the first burn (startJet).
+    if (jetState === 'idle') {
+      jetState = 'loading';
+      loadSample(ctx, JET_URL)
+        .then((sample) => { jetSample = sample; jetState = 'ready'; })
+        .catch(() => { jetState = 'missing'; });
+    }
     return graph;
   }
 
@@ -368,69 +382,34 @@ export function createGrappleJetSoundSystem(engineCtx) {
   }
 
   /**
-   * The burn's loop: lowpassed noise (the roar), highpassed noise chopped
-   * fast (the crackle) and a low rumble, under one gain.
+   * The burn's loop: the recording public/sounds/jetpack.mp3, looped while
+   * he burns (on request, 2026-10-05: the synthesised roar is gone and the
+   * owner will provide the sound). Until the file is there the jetpack is
+   * silent: no roar, no ignition pop, and no error.
    * @returns {void}
    */
   function startJet() {
     const g = ensureGraph();
     if (!g) return;
     stopJet();
-    const { ctx, bus, noise } = g;
+    if (jetState !== 'ready' || !jetSample) return;
+    const { ctx, bus } = g;
     const now = ctx.currentTime;
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, now);
     gain.gain.exponentialRampToValueAtTime(JET_LEVEL, now + 0.08);
     gain.connect(bus);
-
-    const roarSource = ctx.createBufferSource();
-    roarSource.buffer = noise;
-    roarSource.loop = true;
+    const loop = ctx.createBufferSource();
+    loop.buffer = jetSample.buffer;
+    loop.loop = true;
+    // Opened up as he climbs (updateJet).
     const roar = ctx.createBiquadFilter();
     roar.type = 'lowpass';
-    roar.frequency.value = 900;
-    roar.Q.value = 1.4;
-    roarSource.connect(roar);
+    roar.frequency.value = 2400;
+    loop.connect(roar);
     roar.connect(gain);
-
-    const crackleSource = ctx.createBufferSource();
-    crackleSource.buffer = noise;
-    crackleSource.loop = true;
-    crackleSource.playbackRate.value = 1.3;
-    const crackleFilter = ctx.createBiquadFilter();
-    crackleFilter.type = 'highpass';
-    crackleFilter.frequency.value = 2500;
-    const crackleGain = ctx.createGain();
-    crackleGain.gain.value = 0.12;
-    const chop = ctx.createOscillator();
-    chop.type = 'square';
-    chop.frequency.value = 31;
-    const chopDepth = ctx.createGain();
-    chopDepth.gain.value = 0.1;
-    chop.connect(chopDepth);
-    chopDepth.connect(crackleGain.gain);
-    crackleSource.connect(crackleFilter);
-    crackleFilter.connect(crackleGain);
-    crackleGain.connect(gain);
-
-    const rumble = ctx.createOscillator();
-    rumble.type = 'triangle';
-    rumble.frequency.value = 52;
-    const rumbleGain = ctx.createGain();
-    rumbleGain.gain.value = 0.35;
-    rumble.connect(rumbleGain);
-    rumbleGain.connect(gain);
-
-    // The ignition: a pop.
-    noiseBurst(g, 'lowpass', 1600, 0.8, 0.7, 0.003, 0.2);
-
-    for (const s of [roarSource, crackleSource, chop, rumble]) s.start(now);
-    jet = {
-      nodes: [roar, crackleFilter, crackleGain, chopDepth, rumbleGain, gain],
-      sources: [roarSource, crackleSource, chop, rumble],
-      gain,
-      roar
-    };
+    loop.start(now);
+    jet = { nodes: [roar, gain], sources: [loop], gain, roar };
   }
 
   /**
@@ -442,7 +421,7 @@ export function createGrappleJetSoundSystem(engineCtx) {
     if (!jet || !graph) return;
     const now = graph.ctx.currentTime;
     jet.gain.gain.setTargetAtTime(Math.max(0.0001, JET_LEVEL * level), now, 0.05);
-    jet.roar.frequency.setTargetAtTime(700 + 1300 * climb, now, 0.08);
+    jet.roar.frequency.setTargetAtTime(2400 + 9000 * climb, now, 0.08);
   }
 
   /** @returns {void} the burn faded out and let go */

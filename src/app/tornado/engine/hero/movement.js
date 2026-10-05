@@ -162,11 +162,37 @@ export function createHeroMovement(ctx, S, api) {
   }
 
   /**
+   * Roger's spawn point (on request, 2026-10-05): always beside the first
+   * nuclear plant, on the town side of it, HERO.spawnFromPlant out from its
+   * middle. The first clear spot on that ring nearest the town side is used
+   * (a building, the chasm or a funnel can be in the way); only if the whole
+   * ring is blocked is a street picked at random (randomSpawn).
+   * @returns {{x: number, z: number}}
+   */
+  function pickSpawn() {
+    const nuclear = ctx.systems.nuclear;
+    const plant = (nuclear && nuclear.markers().plants[0]) || HERO.spawnPlant;
+    const toTown = Math.atan2(-plant.z, -plant.x);
+    for (const r of [HERO.spawnFromPlant, HERO.spawnFromPlant + 8, HERO.spawnFromPlant + 16]) {
+      for (let k = 0; k < 12; k++) {
+        // 0, +15°, -15°, +30°, ... away from straight at the town.
+        const off = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 12);
+        const x = plant.x + Math.cos(toTown + off) * r;
+        const z = plant.z + Math.sin(toTown + off) * r;
+        if (blockedAt(x, z, 2)) continue;
+        if (ctx.tornadoes.active.some(({ Vortex }) => Math.hypot(x - Vortex.center.x, z - Vortex.center.z) < HERO.spawnFunnelClearance)) continue;
+        return { x, z };
+      }
+    }
+    return randomSpawn();
+  }
+
+  /**
    * A pavement spot on one of the streets, clear of buildings and well away
    * from every funnel.
    * @returns {{x: number, z: number}}
    */
-  function pickSpawn() {
+  function randomSpawn() {
     let fallback = { x: 0, z: -8 };
     for (let i = 0; i < 40; i++) {
       const alongX = Math.random() < 0.67;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { danceAlien } from '../dance.js';
+import { STAND_OFF, standOffStep } from './standOff.js';
 import { ALIENS } from './config.js';
 import { HEALTH } from '../health/config.js';
 import { touchAttempt } from '../health/melee.js';
@@ -146,7 +147,7 @@ export function createAlienCrew(ctx, S, api) {
     }
     if (alien.phase === 'aboard') {
       alien.timer += dt;
-      if (alien.timer >= ALIENS.aboardSeconds && S.ship && S.state.phase !== 'wrecked') {
+      if (alien.timer >= ALIENS.aboardSeconds && S.ship && S.state.phase === 'hovering') {
         alien.phase = 'exiting';
         alien.timer = 0;
         alien.root.visible = true;
@@ -198,7 +199,7 @@ export function createAlienCrew(ctx, S, api) {
 
     // With no ship to guard -- or brought by the transport, which leaves --
     // they go through town after people.
-    if (!S.ship || S.state.phase === 'wrecked' || alien.wave) {
+    if (!S.ship || S.state.phase === 'wrecked' || S.state.phase === 'lifting' || S.state.phase === 'hunting' || alien.wave) {
       rampage(alien, dt);
       checkFirenado(alien);
       return;
@@ -549,28 +550,36 @@ export function createAlienCrew(ctx, S, api) {
   function huntRoger(alien, hero, dt) {
     const p = alien.root.position;
     const d = Math.hypot(hero.x - p.x, hero.z - p.z);
-    if (d > ALIENS.rogerSight || !hero.onFoot) {
+    if (d > STAND_OFF.sight || !hero.onFoot) {
       alien.locked = false;
       return false;
     }
-    const want = Math.atan2(hero.x - p.x, hero.z - p.z);
-    let turn = Math.atan2(Math.sin(want - alien.heading), Math.cos(want - alien.heading));
-    turn = THREE.MathUtils.clamp(turn, -ALIENS.turnRate * 2 * dt, ALIENS.turnRate * 2 * dt);
-    alien.heading += turn;
-    let speed = 0;
-    if (d > HEALTH.melee.contactReach * 0.6) {
-      speed = ALIENS.huntSpeed;
-      const nx = p.x + Math.sin(alien.heading) * speed * dt;
-      const nz = p.z + Math.cos(alien.heading) * speed * dt;
-      if (!insideBuilding(nx, nz)) {
-        p.x = nx;
-        p.z = nz;
-      } else {
-        alien.heading += 1.2 * dt * 4;
-      }
-      alien.cycle += speed * dt * 3;
+    // Never up close (on request): in while he is far, then round him at
+    // STAND_OFF.ring, shooting from there, always on the move (standOff.js).
+    alien.flip = (alien.flip ?? api.between(STAND_OFF.flip)) - dt;
+    if (alien.flip <= 0 || !alien.circle) {
+      alien.flip = api.between(STAND_OFF.flip);
+      alien.circle = alien.circle ? -alien.circle : (Math.random() < 0.5 ? -1 : 1);
     }
-    alien.root.rotation.y = alien.heading;
+    const step = standOffStep(hero.x - p.x, hero.z - p.z, alien.circle);
+    const want = Math.atan2(step.x, step.z);
+    let turn = Math.atan2(Math.sin(want - alien.heading), Math.cos(want - alien.heading));
+    turn = THREE.MathUtils.clamp(turn, -ALIENS.turnRate * 3 * dt, ALIENS.turnRate * 3 * dt);
+    alien.heading += turn;
+    const speed = ALIENS.huntSpeed;
+    const nx = p.x + Math.sin(alien.heading) * speed * dt;
+    const nz = p.z + Math.cos(alien.heading) * speed * dt;
+    if (!insideBuilding(nx, nz)) {
+      p.x = nx;
+      p.z = nz;
+    } else {
+      // A wall: the other way round him.
+      alien.circle = -alien.circle;
+      alien.heading += Math.PI * 0.5 * alien.circle;
+    }
+    alien.cycle += speed * dt * 3;
+    // Facing the way it walks, or him while the gun is up.
+    alien.root.rotation.y = alien.locked || alien.aim > 0 ? Math.atan2(hero.x - p.x, hero.z - p.z) : alien.heading;
     poseWalk(alien, speed);
     if (alien.aim > 0) alien.aim -= dt;
     // Melee: one touch of 34 per 3 s of world time per alien (health/melee.js).
@@ -583,7 +592,6 @@ export function createAlienCrew(ctx, S, api) {
         position: { x: p.x, y: p.y, z: p.z }
       });
     }
-    if (d < HEALTH.melee.contactReach) return true;
     // The shot: aimed where he is as the gun comes up, and fired there.
     alien.rayTimer -= dt;
     if (!alien.locked && alien.rayTimer < ALIENS.aimLead) {

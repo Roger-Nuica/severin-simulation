@@ -715,7 +715,7 @@ export function createPatientZeroSystem(ctx) {
     const wide = 1 + (1 - grown) * 0.5 + glitch;
     euler.set(pose.lean, w.heading, pose.roll, 'YXZ');
     q.setFromEuler(euler);
-    out.compose(p.set(w.pos.x + glitch * 0.3, pose.lift * grown, w.pos.z), q, sc.set(size * wide, size * grown, size * wide));
+    out.compose(p.set(w.pos.x + glitch * 0.3, pose.lift * grown + (w.pos.y || 0), w.pos.z), q, sc.set(size * wide, size * grown, size * wide));
   }
 
   /** @returns {void} the clones' instances, from their walkers */
@@ -754,7 +754,8 @@ export function createPatientZeroSystem(ctx) {
     // Budding: arms out, core flaring.
     const attack = Math.max(o.attack, o.budding > 0 ? 0.8 : 0);
     poseReplicator(pose, o.bob, o.pace, attack, o.twitch);
-    o.root.position.set(o.pos.x, 0, o.pos.z);
+    // pos.y is 0 but while a gravity rift holds it up (engine/gravityRift.js).
+    o.root.position.set(o.pos.x, o.pos.y || 0, o.pos.z);
     const fig = /** @type {THREE.Object3D} */ (o.parts.figure);
     const grown = o.form < 1 ? Math.max(0.02, 1 - Math.pow(1 - o.form, 2.2)) : 1;
     const glitch = grown < 1 ? (Math.random() - 0.5) * 0.2 * (1 - grown) : 0;

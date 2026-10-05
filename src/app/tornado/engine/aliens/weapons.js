@@ -88,8 +88,8 @@ export function createAlienWeapons(ctx, S, api) {
       ray.life -= dt;
       const k = Math.max(0, ray.life / ALIENS.rayLife);
       const flicker = 0.85 + 0.15 * Math.random();
-      ray.core.material.opacity = k * flicker;
-      ray.glow.material.opacity = 0.55 * k * flicker;
+      ray.core.material.opacity = 0.8 * k * flicker;
+      ray.glow.material.opacity = 0.35 * k * flicker;
       ray.flare.material.opacity = k * k;
       ray.flare.scale.setScalar(0.6 + (1 - k) * 1.6);
       ray.splash.material.opacity = 0.9 * k;
@@ -151,9 +151,10 @@ export function createAlienWeapons(ctx, S, api) {
     tr.group.position.copy(from);
     tr.group.quaternion.setFromUnitVectors(UP, dir.divideScalar(length || 1));
     tr.group.scale.set(1, length, 1);
+    // Softer than it was (on request, 2026-10-05: the lasers read as too bright).
     const flicker = 0.8 + 0.2 * Math.random();
-    tr.core.material.opacity = flicker;
-    tr.glow.material.opacity = 0.45 * flicker;
+    tr.core.material.opacity = 0.6 * flicker;
+    tr.glow.material.opacity = 0.22 * flicker;
     tr.foot.position.set(tr.fx, 0.12, tr.fz);
     tr.foot.material.opacity = 0.7 * flicker;
     tr.foot.scale.setScalar(0.8 + 0.3 * Math.random());

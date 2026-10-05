@@ -46,6 +46,18 @@ Hunter ships are the registry kind `hunterShip` (`engine/aliens.js`; it has no `
 
 Rocket Strike still damages hunters only through its existing ship path. The Black Hole Gun pulls hunters like any registry enemy within 100 m and consumes them. Hits below 1 point (minigun, fire) give a light spark and a quiet cue; the full burst is for plasma or the downing hit.
 
+## The landing ship turned hunter
+
+After its fourth abduction the landing ship (`aliens/ship.js` `liftOff`, `updateShipHunt`) pulls its ramp in, climbs and hunts Roger with homing missiles (`aliens/missiles.js`: a pool of 6, `stepMissile` is pure and tested in `tests/alienMissiles.test.mjs`; a hit is `damagePlayer` source `alienMissile`). It stays the same `ufo`/`shipTargets` target with its 6 hull. `sendHunters(count)` brings two more hunter ships with it; the tracking-laser pool holds `hunterCount + extraHunters`.
+
+## The crew keep their distance
+
+`aliens/standOff.js` `standOffStep` (pure, `tests/alienStandOff.test.mjs`) steers every alien that has Roger in sight (80 m): in while far, round him at 40 m, out inside 32 m, never standing still; `crew.js` `huntRoger` walks it and shoots from there.
+
+## The Gravity Rift and enemies
+
+`engine/gravityRift.js` lifts every registry kind but `samurai` (and handles `alien` on its own): each is held `frozen` and moved through `kind.object(e).position` (or `kind.position(e)`), then killed through `kind.defeat` where it lands. A `hunterShip` is downed through `defeat` at the slam and falls on its own; the landing ship goes through `aliens.riftShip`, `riftHold`, `riftDown`. An owner that moves its enemy while frozen would fight the lift: keep the `frozen` check in any new owner's update.
+
 ## HAVOC, the heavy gunner
 
 `engine/gunner.js` (R-057) registers kind `gunner` with a hitbox (so the rifle, minigun, railgun, Fire Gun and Katana all find him), `accepts: ['emp']` (a stun; the damage is the table's chip), `defeat` (topples, +800), `wounded` (visor flash, flinch) and `consume` (the black hole). His rounds are his own projectiles (`gunner.js` stepRounds, instanced), not `hero/bullets.js`: they run on the world's clock, hurt Roger through `health.damagePlayer({source: 'gunnerRound'})`, stop at buildings, and while Time Slow is active stop inside `GUNNER.catchRadius` of Roger. On Time Slow's end they go back at their owner and land as `{type: 'bullet'}` hits through `enemies.hit`, so the table decides the damage (1 of 24).

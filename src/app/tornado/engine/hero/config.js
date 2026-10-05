@@ -31,6 +31,10 @@ export const HERO = {
   // the backdrop's buildings in plain view beyond it.
   bound: 288,
   spawnFunnelClearance: 60,
+  // Roger always starts beside NUCLEAR PLANT ONE (nuclear.js NUCLEAR.sites[0]),
+  // this far out from its middle on the town side (the site is 24 across).
+  spawnPlant: { x: -100, z: 100 },
+  spawnFromPlant: 34,
   // The camera, over his shoulder at a life-size man's distance.
   followBack: PERSON.height * 3.4,
   followHeight: PERSON.height * 1.8,
