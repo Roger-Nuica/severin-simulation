@@ -181,8 +181,10 @@ export function createAlienWeapons(ctx, S, api) {
       group.name = 'alien_laser';
       const core = mesh(tube, softMaterial(SOFT_FRAGMENT, c.core, 1.1, LASER_FADE));
       const glow = mesh(tube, softMaterial(SOFT_FRAGMENT, c.glow, 2.4, LASER_FADE));
-      core.visible = glow.visible = true;
-      group.add(core, glow);
+      // The outer halo: wide and faint, with bright bands running down it.
+      const halo = mesh(tube, softMaterial(SOFT_FRAGMENT, c.glow, 4, LASER_FADE));
+      core.visible = glow.visible = halo.visible = true;
+      group.add(core, glow, halo);
       group.visible = false;
       const foot = mesh(disc, softMaterial(DISC_FRAGMENT, c.splash, 2.2));
       const aim = mesh(reticle, new THREE.MeshBasicMaterial({
@@ -191,7 +193,7 @@ export function createAlienWeapons(ctx, S, api) {
       scene.add(group, foot, aim);
       // `source` keys the health damage table; `struck` is the once-per-burst re-arm flag.
       return {
-        group, core, glow, foot, aim, colour, active: false, timer: 0, cooldown: 2, fx: 0, fz: 0,
+        group, core, glow, halo, foot, aim, colour, active: false, timer: 0, cooldown: 2, fx: 0, fz: 0,
         source: colour === 'green' ? 'ufoTracker' : 'hunterTracker', struck: false
       };
     };
@@ -481,6 +483,7 @@ export function createAlienWeapons(ctx, S, api) {
     tr.group.scale.set(1, length, 1);
     const coreU = tr.core.material.uniforms;
     const glowU = tr.glow.material.uniforms;
+    const haloU = tr.halo.material.uniforms;
     const footU = tr.foot.material.uniforms;
     tr.aim.position.set(tr.fx, 0.14, tr.fz);
     if (!burning) {
@@ -489,6 +492,7 @@ export function createAlienWeapons(ctx, S, api) {
       tr.core.scale.set(SHOTS.laserCore * 0.3, 1, SHOTS.laserCore * 0.3);
       coreU.uOpacity.value = 0.45 * (0.6 + 0.4 * Math.sin(tr.timer * 60));
       glowU.uOpacity.value = 0;
+      haloU.uOpacity.value = 0;
       footU.uOpacity.value = 0;
       tr.aim.scale.setScalar(SHOTS.laserFoot * (2.6 - 1.6 * w));
       tr.aim.rotation.y = tr.timer * 3;
@@ -500,16 +504,28 @@ export function createAlienWeapons(ctx, S, api) {
       const end = Math.min(1, (ALIENS.laserSeconds - tr.timer) / 0.25);
       const flicker = 0.85 + 0.15 * Math.sin(tr.timer * 47);
       const w = Math.max(0.05, end);
-      tr.core.scale.set(SHOTS.laserCore * w * flicker, 1, SHOTS.laserCore * w * flicker);
-      tr.glow.scale.set(SHOTS.laserGlow * w, 1, SHOTS.laserGlow * w);
-      coreU.uOpacity.value = 0.9;
-      glowU.uOpacity.value = 0.45 * flicker;
+      // The glow breathes against the core's flicker; the halo swells
+      // slowly, so the beam reads as a column of energy, not a stick.
+      const breathe = 1 + 0.12 * Math.sin(tr.timer * 13);
+      const swell = 1 + 0.18 * Math.sin(tr.timer * 5.5);
+      // Ignition: the beam opens from the aiming line over its first 0.12 s.
+      const open = Math.min(1, (tr.timer - ALIENS.laserWarm) / 0.12);
+      const wo = w * (0.35 + 0.65 * open);
+      tr.core.scale.set(SHOTS.laserCore * wo * flicker, 1, SHOTS.laserCore * wo * flicker);
+      tr.glow.scale.set(SHOTS.laserGlow * wo * breathe, 1, SHOTS.laserGlow * wo * breathe);
+      tr.halo.scale.set(SHOTS.laserHalo * wo * swell, 1, SHOTS.laserHalo * wo * swell);
+      coreU.uOpacity.value = 0.95;
+      glowU.uOpacity.value = 0.5 * flicker;
       glowU.uPulse.value = 0.45;
       glowU.uLen.value = length;
       glowU.uTime.value = tr.timer;
+      haloU.uOpacity.value = 0.3 * w * (1.6 - 0.6 * open);
+      haloU.uPulse.value = 0.7;
+      haloU.uLen.value = length * 0.5;
+      haloU.uTime.value = tr.timer * 0.6;
       tr.foot.position.set(tr.fx, 0.13, tr.fz);
       tr.foot.scale.setScalar(SHOTS.laserFoot * (0.9 + 0.15 * flicker));
-      footU.uOpacity.value = 0.6 * w;
+      footU.uOpacity.value = 0.7 * w;
       tr.foot.visible = true;
       tr.aim.scale.setScalar(SHOTS.laserFoot * (1.1 + 0.1 * Math.sin(tr.timer * 9)));
       tr.aim.rotation.y = tr.timer * 3;
@@ -554,7 +570,7 @@ export function createAlienWeapons(ctx, S, api) {
     for (const tr of [S.shipTracker, ...S.hunterTrackers]) {
       if (!tr) continue;
       scene.remove(tr.group, tr.foot, tr.aim);
-      for (const m of [tr.core, tr.glow, tr.foot, tr.aim]) m.material.dispose();
+      for (const m of [tr.core, tr.glow, tr.halo, tr.foot, tr.aim]) m.material.dispose();
     }
     S.shipTracker = null;
     S.hunterTrackers = [];
