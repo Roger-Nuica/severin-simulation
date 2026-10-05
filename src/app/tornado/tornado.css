@@ -2430,3 +2430,8 @@ body.hero-touch-on .explainer-help { display: none; }
 @media (max-width: 700px), (max-height: 520px) {
   .session-clock { font-size: 12px; padding: 4px 8px; }
 }
+
+/* Co-op guest: the panel parts only the host can use are hidden with the
+   `hidden` attribute (net/system.js setPeerUiLocked); a part styled with its
+   own display would otherwise stay on screen. */
+#ui-panel [hidden] { display: none !important; }

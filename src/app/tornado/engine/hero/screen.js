@@ -498,12 +498,13 @@ export function createHeroScreen(ctx, S, api) {
     const partner = net && net.coopActive() ? net.players.get('1') : null;
     const partnerRow = /** @type {HTMLElement} */ (S.hud.querySelector('.hero-partner'));
     const partnerHp = partner && health ? (partner.state === 'up' ? Math.ceil(health.state('1').value) : 0) : -1;
-    if (S.hud.dataset.partner !== String(partnerHp)) {
-      S.hud.dataset.partner = String(partnerHp);
+    const partnerKey = `${partnerHp}${partner && partner.invincible ? 'i' : ''}`;
+    if (S.hud.dataset.partner !== partnerKey) {
+      S.hud.dataset.partner = partnerKey;
       partnerRow.hidden = partnerHp < 0;
       if (partnerHp >= 0) {
         /** @type {HTMLElement} */ (partnerRow.querySelector('.hero-pbar i')).style.width = `${((partnerHp / HEALTH.max) * 100).toFixed(0)}%`;
-        partnerRow.querySelector('.hero-ppct').textContent = partner.state === 'up' ? `${partnerHp}%` : 'DOWN';
+        partnerRow.querySelector('.hero-ppct').textContent = (partner.state === 'up' ? `${partnerHp}%` : 'DOWN') + (partner.invincible ? ' 🛡' : '');
         partnerRow.classList.toggle('low', partnerHp <= HEALTH.max * HEALTH.lowThreshold);
       }
     }

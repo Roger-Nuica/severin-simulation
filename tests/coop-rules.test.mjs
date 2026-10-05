@@ -5,7 +5,7 @@ import { createSnapshotBuffer } from '../src/app/tornado/engine/net/interp.js';
 import { createEventEmitter, createEventDeduper } from '../src/app/tornado/engine/net/events.js';
 import { createPlayerRegistry, REVIVE } from '../src/app/tornado/engine/net/players.js';
 
-const input = (o = {}) => ({ type: 'input', v: 2, seq: 1, mx: 0, mz: 1, yaw: 0, pitch: 0, fire: false, aim: false, weapon: 0, abil: 0, use: false, hero: false, ...o });
+const input = (o = {}) => ({ type: 'input', v: 3, seq: 1, mx: 0, mz: 1, yaw: 0, pitch: 0, fire: false, aim: false, weapon: 0, abil: 0, use: false, hero: false, ...o });
 
 // ---- input gate ----
 test('gate binds to the relay-stamped id and drops unknown peers', () => {
@@ -41,7 +41,7 @@ test('peer cannot forge authoritative fields', () => {
 });
 
 // ---- snapshot buffer ----
-const snap = (tick, t, x, o = {}) => ({ type: 'snapshot', v: 2, room: 'ABCDEF', tick, t, score: tick, players: [[0, x, 0, 0, 0, 0, 100, -1, -1]], tornadoes: [[0, x, 0, 20]], terminators: [], aliens: [], ships: [], vehicles: [], ...o });
+const snap = (tick, t, x, o = {}) => ({ type: 'snapshot', v: 3, room: 'ABCDEF', tick, t, score: tick, players: [[0, x, 0, 0, 0, 0, 100, -1, -1]], tornadoes: [[0, x, 0, 20]], terminators: [], aliens: [], ships: [], vehicles: [], ...o });
 
 test('buffer drops stale, duplicate, other-room and bad-version snapshots', () => {
   const b = createSnapshotBuffer();
@@ -110,7 +110,7 @@ test('event emitter caps the rate', () => {
 
 test('deduper window is bounded', () => {
   const d = createEventDeduper(3);
-  const ev = (id) => ({ type: 'event', v: 2, id, kind: 'notice', data: {} });
+  const ev = (id) => ({ type: 'event', v: 3, id, kind: 'notice', data: {} });
   for (let i = 1; i <= 5; i++) d.first(ev(i));
   assert.equal(d.first(ev(5)), false);
   assert.equal(d.first(ev(1)), true, 'aged out of the window');

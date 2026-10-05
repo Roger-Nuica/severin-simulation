@@ -79,6 +79,19 @@ export function createHeroInput(ctx, S, api) {
    */
   function consumeInput() {
     const input = ctx.systems.playerInput;
+    // Down in co-op (waiting for a revive): the body is out of his hands. Only
+    // Invincible still toggles; the keys, clicks, wheel and mouse are taken
+    // and dropped so nothing moves, turns, aims or fires the body, and nothing
+    // piles up for when he is back on his feet.
+    if (S.state.coopDown) {
+      releaseKeys();
+      for (const e of input.drain()) {
+        if (e.type === 'keydown' && e.code === 'KeyV' && !e.repeat) api.toggleInvincible();
+      }
+      input.takeLook();
+      input.takeTurn();
+      return;
+    }
     const held = input.held;
     S.keys.up = held.up;
     S.keys.down = held.down;

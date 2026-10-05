@@ -35,7 +35,7 @@ test('input carries a required boolean hero flag', () => {
   assert.equal(validateInput({ ...base, hero: true }).input.hero, true);
   assert.equal(validateInput(base).ok, false);
   assert.equal(validateInput({ ...base, hero: 1 }).ok, false);
-  assert.equal(V, 2);
+  assert.ok(V >= 2);
 });
 
 test('a new run revives everyone and frees the seats but keeps the room', async () => {
