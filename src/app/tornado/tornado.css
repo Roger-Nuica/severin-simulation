@@ -2063,7 +2063,8 @@ body.hero-touch-on .hero-hud.quiet { display: none; }
 
 /* Co-op (engine/net/system.js): room panel, peer HUD and toast. */
 .coop-panel {
-  position: fixed; left: 12px; bottom: 12px; z-index: 30;
+  /* Above the session clock (engine/ui/sessionClock.js), which has the corner. */
+  position: fixed; left: 12px; bottom: 50px; z-index: 30;
   padding: 8px 10px; border-radius: 8px;
   background: rgba(12, 16, 24, 0.78); color: #e8eef7;
   font: 12px/1.4 system-ui, sans-serif; max-width: 340px;
@@ -2413,4 +2414,19 @@ body.hero-touch-on .explainer-help { display: none; }
   .hank-title { font-size: 24px; letter-spacing: 6px; }
   .hank-title small { font-size: 11px; letter-spacing: 4px; }
   .hank-dist { font-size: 17px; }
+}
+
+/* How long this game has been going (engine/ui/sessionClock.js): the lower
+   left corner, never in the way of a touch. */
+.session-clock {
+  position: fixed; z-index: 31; pointer-events: none;
+  left: calc(12px + env(safe-area-inset-left, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 8px;
+  background: rgba(12, 16, 24, 0.78); border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e8eef7; font: 700 14px/1 system-ui, sans-serif; letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 700px), (max-height: 520px) {
+  .session-clock { font-size: 12px; padding: 4px 8px; }
 }

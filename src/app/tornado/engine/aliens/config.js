@@ -39,6 +39,7 @@ export const ALIENS = {
   beltStripe: 2,           // world units per stripe on the belt
   hatchRadius: 4,          // of the ramp's top from the ship's axis
   clearance: 20,           // of buildings round the spot it picks
+  plantClearance: 62,      // of a nuclear plant's middle (its site is 24 across the middle, the towers 34 high)
   viaductClearance: 30,    // of the elevated highway's centre line, the hull being 15 wide
   funnelClearance: 70,
   spotBound: 85,
@@ -97,7 +98,6 @@ export const ALIENS = {
   skin: 0x6fd35a,
   glow: new THREE.Color(0.25, 2.2, 0.45),
   // Roger (engine/heroMode.js).
-  rogerSight: 45,          // crew this near him go for him
   huntSpeed: 6,
   rayHitRadius: 1,         // of where the ray was aimed, for it to hit him
   // The ships' tracking laser.
@@ -128,6 +128,15 @@ export const ALIENS = {
   // a railgun or Lightning bolt, and one tick of the fire gun. The katana
   // (blade), the EMP and the freeze are not accepted at all.
   hunterHit: { bullet: 0.25, bolt: 2, fire: 0.5 },
+  // The landing ship after its fourth abduction (on request): it pulls the
+  // ramp in, climbs to huntHeight and turns hunter -- homing missiles at
+  // Roger (aliens/missiles.js) -- and two more hunter ships come in.
+  liftSeconds: 3,
+  huntHeight: 34,
+  huntSpeed: 9,
+  huntStandOff: 45,        // it circles him this far out (on the ground)
+  huntCircle: 0.12,        // rad/s round him
+  extraHunters: 2,
   hunterGlow: new THREE.Color(2.4, 0.3, 0.22),
   // The nuclear plants (engine/nuclear.js): every alien ship goes for them
   // while any is standing -- five hits bring one down. The hunters stand
@@ -154,10 +163,11 @@ export const ALIENS = {
   goalSeconds: 7           // the opening "STOP THE ALIENS" message
 };
 
-// Ray colours: the crew's green, the hunters' red.
+// Ray colours: the crew's green, the hunters' red. Less than half as bright
+// as they were (on request, 2026-10-05: they read as too bright).
 export const RAY_COLOURS = {
-  green: { core: new THREE.Color(2.5, 6, 3), glow: new THREE.Color(0.3, 2.4, 0.6), flare: new THREE.Color(1.2, 5, 1.6), splash: new THREE.Color(1, 4, 1.4) },
-  red: { core: new THREE.Color(6, 2.4, 2), glow: new THREE.Color(2.4, 0.3, 0.25), flare: new THREE.Color(5, 1.4, 1.1), splash: new THREE.Color(4, 1.1, 0.9) }
+  green: { core: new THREE.Color(1.1, 2.6, 1.3), glow: new THREE.Color(0.12, 0.9, 0.25), flare: new THREE.Color(0.5, 2, 0.65), splash: new THREE.Color(0.4, 1.6, 0.55) },
+  red: { core: new THREE.Color(2.6, 1, 0.85), glow: new THREE.Color(0.9, 0.12, 0.1), flare: new THREE.Color(2, 0.55, 0.45), splash: new THREE.Color(1.6, 0.45, 0.35) }
 };
 
 export const UP = new THREE.Vector3(0, 1, 0);
@@ -194,6 +204,8 @@ export const UP = new THREE.Vector3(0, 1, 0);
  * @property {number} [retarget] seconds until it looks for a nearer target
  * @property {import('../health/melee.js').TouchState} [touch] its melee cooldown (health/melee.js)
  * @property {number} [touchClock] world seconds it has hunted Roger, the clock of `touch`
+ * @property {number} [flip] seconds until it turns round the other way while circling Roger (standOff.js)
+ * @property {number} [circle] +1 or -1, the way it circles him
  * @property {boolean} [locked] its ray is aimed at where Roger stood (crew.js huntRoger)
  * @property {number} [lockX]
  * @property {number} [lockZ]

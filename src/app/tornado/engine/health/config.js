@@ -107,6 +107,7 @@ export const HEALTH = deepFreeze({
     alienTouch: hit(34),
     terminatorTouch: hit(50),
     hunterTracker: hit(50),       // once per burst hit
+    alienMissile: hit(30),        // one of the landing ship's homing missiles, once it hunts (aliens/missiles.js)
     ufoTracker: hit(20),          // once per burst hit
     trexFlame: hit(33, { perSecond: true }),
     ordinaryFire: hit(10, { perSecond: true }),

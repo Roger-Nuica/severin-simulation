@@ -45,7 +45,38 @@ export function createAlienShip(ctx, S, api) {
         && Math.abs(z - p.z) < fp.depth / 2 + ALIENS.clearance) return false;
     }
     if (ctx.systems.chasm && ctx.systems.chasm.gapAt(x, z) > -4) return false;
+    // The big sites are not in Environment.buildings: the nuclear plants
+    // (their towers stand higher than the ship hangs), the factory, and the
+    // blocks of the backdrop (on request: it came down inside the plant).
+    const nuclear = ctx.systems.nuclear;
+    for (const plant of nuclear ? nuclear.markers().plants : []) {
+      if (plant.standing && Math.hypot(x - plant.x, z - plant.z) < ALIENS.plantClearance) return false;
+    }
+    const factory = ctx.systems.factory;
+    if (factory && factory.site) {
+      const f = factory.site();
+      if (Math.hypot(x - f.x, z - f.z) < f.radius + ALIENS.clearance) return false;
+    }
+    const backdrop = ctx.systems.backdrop;
+    for (const b of backdrop ? backdrop.solidBlocks() : []) {
+      if (b.state === 0 && Math.abs(x - b.x) < b.hw + ALIENS.clearance && Math.abs(z - b.z) < b.hd + ALIENS.clearance) return false;
+    }
     return true;
+  }
+
+  /**
+   * Whether the ship and the foot of its ramp (which runs out towards the
+   * middle of town) are both clear.
+   * @param {number} x
+   * @param {number} z
+   * @returns {boolean}
+   */
+  function clearSite(x, z) {
+    if (!clearSpot(x, z)) return false;
+    const far = Math.hypot(x, z) > 5;
+    const a = far ? Math.atan2(-z, -x) : 0;
+    const reach = ALIENS.hatchRadius + api.rampLength() * Math.cos(ALIENS.rampAngle) + 4;
+    return clearSpot(x + Math.cos(a) * reach, z + Math.sin(a) * reach);
   }
 
   /**
@@ -53,14 +84,17 @@ export function createAlienShip(ctx, S, api) {
    * @returns {{x: number, z: number}}
    */
   function pickSpot() {
-    let fallback = { x: 0, z: 0 };
-    for (let i = 0; i < 80; i++) {
+    for (let i = 0; i < 300; i++) {
       const x = (Math.random() * 2 - 1) * ALIENS.spotBound;
       const z = (Math.random() * 2 - 1) * ALIENS.spotBound;
-      if (clearSpot(x, z)) return { x, z };
-      if (i === 0) fallback = { x, z };
+      if (clearSite(x, z)) return { x, z };
     }
-    return fallback;
+    // Nowhere fully clear (a crowded town): the first spot the ship itself
+    // fits, on a fine grid, then the middle of the square at the origin.
+    for (let x = -ALIENS.spotBound; x <= ALIENS.spotBound; x += 5) {
+      for (let z = -ALIENS.spotBound; z <= ALIENS.spotBound; z += 5) if (clearSpot(x, z)) return { x, z };
+    }
+    return { x: 0, z: 0 };
   }
 
   /**
@@ -362,5 +396,118 @@ export function createAlienShip(ctx, S, api) {
     return out;
   }
 
-  return { clearSpot, pickSpot, plannedSpot, frameLanding, arrive, arrivalHeight, funnelAtShip, wreck, updateWreck, removeShip, crashAt, hitShip, shipTargets };
+  // ---------------------------------------------------------------------
+  // Turned hunter (on request): after its fourth abduction
+  // ---------------------------------------------------------------------
+
+  /**
+   * Its four taken: the ramp comes in, the crew left on the ground go on the
+   * rampage (crew.js), and it climbs away to hunt Roger with homing missiles.
+   * Two more hunter ships come in with it.
+   * @returns {void}
+   */
+  function liftOff() {
+    S.state.phase = 'lifting';
+    S.state.timer = 0;
+    S.state.missileTimer = 1.5;
+    S.state.pairOwed = 0;
+    const hero = api.heroTarget(S.state.x, S.state.z);
+    S.state.circle = hero ? Math.atan2(S.state.z - hero.z, S.state.x - hero.x) : 0;
+    api.stopTracker(S.shipTracker);
+    if (S.beam) S.beam.visible = false;
+    api.sendHunters(ALIENS.extraHunters, 'THE SHIP IS HUNTING', `Four taken · it is coming for Roger with homing missiles · ${ALIENS.extraHunters} more hunters inbound`);
+  }
+
+  /**
+   * The landing ship as a hunter: the climb with the ramp coming in, then
+   * circling Roger at ALIENS.huntStandOff and firing missiles in pairs; with
+   * no Roger to hunt, it burns the nearest person every few seconds as the
+   * hunters do.
+   * @param {number} dt
+   * @param {boolean} jammed a solar storm holds its fire
+   * @returns {void}
+   */
+  function updateShipHunt(dt, jammed) {
+    const g = S.ship.group;
+    if (S.state.phase === 'lifting') {
+      const u = Math.min(1, S.state.timer / ALIENS.liftSeconds);
+      if (S.rampPivot) {
+        S.rampPivot.userData.tilt.scale.x = Math.max(0.001, 1 - u * 2);
+        if (u >= 0.5) S.rampPivot.visible = false;
+      }
+      const e = u * u * (3 - 2 * u);
+      g.position.y = THREE.MathUtils.lerp(ALIENS.hoverHeight, ALIENS.huntHeight, e);
+      g.rotation.z = 0.05 * Math.sin(S.state.timer * 3);
+      if (u >= 1) {
+        S.state.phase = 'hunting';
+        S.state.timer = 0;
+      }
+      return;
+    }
+    const hero = api.heroTarget(g.position.x, g.position.z);
+    g.position.y = ALIENS.huntHeight + 0.8 * Math.sin(S.state.timer * 1.1) - S.frame.jam * 4;
+    S.state.spin += dt * 0.6;
+    g.rotation.y = S.state.spin;
+    let tx;
+    let tz;
+    let person = null;
+    if (hero) {
+      // Round him, at its stand-off, never still.
+      S.state.circle += ALIENS.huntCircle * dt;
+      tx = hero.x + Math.cos(S.state.circle) * ALIENS.huntStandOff;
+      tz = hero.z + Math.sin(S.state.circle) * ALIENS.huntStandOff;
+    } else {
+      person = api.nearestPerson(g.position.x, g.position.z);
+      tx = person ? person.mesh.position.x : g.position.x;
+      tz = person ? person.mesh.position.z : g.position.z;
+    }
+    const dx = tx - g.position.x;
+    const dz = tz - g.position.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 0.5) {
+      const step = Math.min(d, ALIENS.huntSpeed * dt);
+      g.position.x += (dx / d) * step;
+      g.position.z += (dz / d) * step;
+      g.rotation.z = -0.1 * (dx / d);
+      g.rotation.x = 0.1 * (dz / d);
+    }
+    S.state.x = g.position.x;
+    S.state.z = g.position.z;
+    if (S.frame.peace || jammed) return;
+    S.state.missileTimer -= dt;
+    if (hero) {
+      const far = Math.hypot(hero.x - g.position.x, hero.z - g.position.z);
+      if (S.state.missileTimer <= 0 && far < api.MISSILE.range) {
+        // A pair: the first now, the second a moment later off the other side.
+        launchFrom(0);
+        S.state.pairOwed = api.MISSILE.pairGap;
+        S.state.missileTimer = api.between(api.MISSILE.every);
+      }
+      if (S.state.pairOwed > 0) {
+        S.state.pairOwed -= dt;
+        if (S.state.pairOwed <= 0) launchFrom(1);
+      }
+    } else if (person && S.state.missileTimer <= 0 && d < ALIENS.hunterShootRange) {
+      S.state.missileTimer = api.between(ALIENS.hunterShotEvery) + 1;
+      api.fireRay(new THREE.Vector3(g.position.x, g.position.y - 0.5, g.position.z), new THREE.Vector3(tx, 1.5, tz));
+      ctx.systems.people.explodePerson(person);
+    }
+  }
+
+  /**
+   * One missile off the rim, on the side `n` (0 or 1), first heading out and
+   * down a little.
+   * @param {number} n
+   * @returns {void}
+   */
+  function launchFrom(n) {
+    const g = S.ship.group;
+    const a = S.state.spin + n * Math.PI;
+    const ox = Math.cos(a);
+    const oz = Math.sin(a);
+    const from = S.scratch.set(g.position.x + ox * 11, g.position.y + 0.4, g.position.z + oz * 11);
+    api.launchMissile(from, new THREE.Vector3(ox, -0.35, oz).normalize());
+  }
+
+  return { liftOff, updateShipHunt, clearSpot, pickSpot, plannedSpot, frameLanding, arrive, arrivalHeight, funnelAtShip, wreck, updateWreck, removeShip, crashAt, hitShip, shipTargets };
 }

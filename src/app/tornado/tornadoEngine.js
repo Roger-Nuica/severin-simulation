@@ -153,6 +153,7 @@ import { createStreetTrafficSystem } from './engine/environment/streetTraffic.js
 import { createBirdsSystem } from './engine/environment/birds.js';
 import { createNewsChopperSystem } from './engine/environment/newsChopper.js';
 import { createNewsTickerSystem } from './engine/ui/newsTicker.js';
+import { createSessionClockSystem } from './engine/ui/sessionClock.js';
 import { createExplainerSystem } from './engine/ui/explainer.js';
 import { createAirSupportSystem } from './engine/airSupport.js';
 import { createJetSoundSystem } from './engine/sound/jets.js';
@@ -839,6 +840,8 @@ export function createSimulation(container) {
   register('birds', createBirdsSystem(ctx), { auto: true });
   register('newsChopper', createNewsChopperSystem(ctx), { auto: true });
   register('newsTicker', createNewsTickerSystem(ctx), { auto: true });
+  // How long this game has been going, lower left (engine/ui/sessionClock.js).
+  register('sessionClock', createSessionClockSystem(ctx), { auto: true });
   register('explainer', createExplainerSystem(ctx), { auto: true });
   // GHOST flight (2026-10-04): three stealth fighters 30 s into a run,
   // hunting the aliens from above (R-056), and their sound.
@@ -1148,6 +1151,7 @@ export function createSimulation(container) {
     updateAtmosphere();
     updateBrightness(rawDt);
     ctx.systems.newsTicker.updateNewsTicker(rawDt);
+    ctx.systems.sessionClock.updateSessionClock(Sim.state.paused);
     updateClouds(dt);
     updateWeather(dt);
     // Real time deliberately: slowing the audio graph's own parameter ramps

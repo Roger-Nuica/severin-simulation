@@ -3,6 +3,13 @@
 import { useEffect, useState } from 'react';
 
 /**
+ * The install button is switched off for now (on request, 2026-10-05: the
+ * lower corner shows the session clock instead). The service worker still
+ * registers; set this to true to offer the install again.
+ */
+const OFFER_INSTALL = false;
+
+/**
  * Registers the service worker (production only, so dev hot reload is not
  * cached) and shows an install button once the browser offers the install
  * prompt.
@@ -17,8 +24,9 @@ export default function PwaSupport() {
       navigator.serviceWorker.register('/sw.js').catch((err) => console.warn('SW registration failed', err));
     }
     const onPrompt = (e) => {
+      // Kept from showing the browser's own install bar too while switched off.
       e.preventDefault();
-      setInstallPrompt(e);
+      if (OFFER_INSTALL) setInstallPrompt(e);
     };
     const onInstalled = () => setInstallPrompt(null);
     window.addEventListener('beforeinstallprompt', onPrompt);

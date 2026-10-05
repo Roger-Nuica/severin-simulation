@@ -19,6 +19,9 @@
 export const GUNNER = Object.freeze({
   /** At most this many at once (one more per press of the button). */
   max: 3,
+  /** On request (2026-10-05): a pair of them comes by itself, a minute into the game (engine/ui/sessionClock.js). */
+  autoAt: 60,
+  autoCount: 2,
   /** Life-size: 2.3 m, armoured. */
   height: 2.3,
   /** Health (engine/health/damageTable.js `gunner`). */
