@@ -63,7 +63,7 @@ const PLASMA_SAMPLE_URL = null;
  *   updateCharge: (level: number) => void,
  *   stopCharge: () => void,
  *   playMegaBoom: () => void,
- *   playShipLaser: (seconds: number) => void,
+ *   playShipLaser: (seconds: number, warm: number, colour?: 'green'|'red') => void,
  *   playBullet: () => void,
  *   playDryClick: () => void,
  *   playSlowmo: () => void,
@@ -75,6 +75,8 @@ const PLASMA_SAMPLE_URL = null;
 export function createHeroSoundSystem(engineCtx) {
   /** @type {{ctx: AudioContext, bus: GainNode, noise: AudioBuffer}|null} */
   let graph = null;
+  /** @type {number[]} when the ship lasers now sounding end (context time) */
+  const laserUntil = [];
   /** @type {Object|null} the recorded plasma sound, when there is one */
   let plasmaSample = null;
   let plasmaRequested = false;
@@ -367,33 +369,101 @@ export function createHeroSoundSystem(engineCtx) {
   }
 
   /**
-   * @param {number} seconds how long the laser burns
+   * A ship's tracking laser (redone 2026-10-05: one flat buzz before). A
+   * charging whine rising over the aiming line, then the beam: two detuned
+   * saws thrumming under a low-pass that wobbles, and a crackling sizzle on
+   * top, cut off as the beam thins out. The landing ship's green laser sits
+   * higher than the hunters' red. At most two at once, so a sky of ships
+   * does not stack into a wall of noise.
+   * @param {number} seconds how long the laser lasts, aiming included
+   * @param {number} warm seconds of the aiming line before it burns
+   * @param {'green'|'red'} [colour]
    * @returns {void}
    */
-  function playShipLaser(seconds) {
+  function playShipLaser(seconds, warm, colour = 'red') {
     const g = ensureGraph();
     if (!g) return;
-    const { ctx, bus } = g;
+    const { ctx, bus, noise } = g;
     const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(190, now);
-    osc.frequency.linearRampToValueAtTime(150, now + seconds);
+    if (laserUntil.filter(u => u > now).length >= 2) return;
+    laserUntil.push(now + seconds);
+    if (laserUntil.length > 4) laserUntil.shift();
+    const base = colour === 'green' ? 92 : 64;
+    const end = now + seconds + 0.25;
+    const out = ctx.createGain();
+    out.gain.value = 1;
+    out.connect(bus);
+    /** @type {AudioScheduledSourceNode[]} */
+    const sources = [];
+
+    // The charge: a sine sweeping up through the aiming line.
+    const whine = ctx.createOscillator();
+    whine.type = 'sine';
+    whine.frequency.setValueAtTime(260, now);
+    whine.frequency.exponentialRampToValueAtTime(1900, now + warm);
+    const whineGain = ctx.createGain();
+    whineGain.gain.setValueAtTime(0.0001, now);
+    whineGain.gain.exponentialRampToValueAtTime(0.09, now + warm * 0.9);
+    whineGain.gain.exponentialRampToValueAtTime(0.0001, now + warm + 0.08);
+    whine.connect(whineGain);
+    whineGain.connect(out);
+    whine.start(now);
+    whine.stop(now + warm + 0.1);
+    sources.push(whine);
+
+    // The beam: detuned saws under a wobbling low-pass.
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 1100;
+    lp.Q.value = 6;
+    const wobble = ctx.createOscillator();
+    wobble.frequency.value = 9;
+    const wobbleDepth = ctx.createGain();
+    wobbleDepth.gain.value = 500;
+    wobble.connect(wobbleDepth);
+    wobbleDepth.connect(lp.frequency);
+    const beam = ctx.createGain();
+    beam.gain.setValueAtTime(0.0001, now + warm);
+    beam.gain.exponentialRampToValueAtTime(0.16, now + warm + 0.04);
+    beam.gain.setValueAtTime(0.16, now + seconds - 0.25);
+    beam.gain.exponentialRampToValueAtTime(0.0001, now + seconds);
+    lp.connect(beam);
+    beam.connect(out);
+    for (const detune of [-14, 11]) {
+      const saw = ctx.createOscillator();
+      saw.type = 'sawtooth';
+      saw.frequency.value = base;
+      saw.detune.value = detune;
+      saw.connect(lp);
+      saw.start(now + warm);
+      saw.stop(end);
+      sources.push(saw);
+    }
+    wobble.start(now + warm);
+    wobble.stop(end);
+    sources.push(wobble);
+
+    // The sizzle.
+    const hiss = ctx.createBufferSource();
+    hiss.buffer = noise;
+    hiss.loop = true;
     const band = ctx.createBiquadFilter();
     band.type = 'bandpass';
-    band.frequency.value = 900;
-    band.Q.value = 2;
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.08);
-    gain.gain.setValueAtTime(0.22, now + seconds);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + seconds + 0.2);
-    osc.connect(band);
-    band.connect(gain);
-    gain.connect(bus);
-    osc.start(now);
-    osc.stop(now + seconds + 0.25);
-    osc.onended = () => { try { gain.disconnect(); } catch { /* already */ } };
+    band.frequency.value = colour === 'green' ? 4200 : 3000;
+    band.Q.value = 1.2;
+    const hissGain = ctx.createGain();
+    hissGain.gain.setValueAtTime(0.0001, now + warm);
+    hissGain.gain.exponentialRampToValueAtTime(0.07, now + warm + 0.03);
+    hissGain.gain.setValueAtTime(0.07, now + seconds - 0.25);
+    hissGain.gain.exponentialRampToValueAtTime(0.0001, now + seconds);
+    hiss.connect(band);
+    band.connect(hissGain);
+    hissGain.connect(out);
+    hiss.start(now + warm);
+    hiss.stop(end);
+    sources.push(hiss);
+
+    sources[1].onended = () => { try { out.disconnect(); } catch { /* already */ } };
   }
 
   /**
