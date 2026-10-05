@@ -7,7 +7,7 @@ import { createSoftDotTexture } from '../../utils/textures.js';
  * ===========================================================================
  * SECTION HM.9 — The jump and the jetpack (Space)
  * ===========================================================================
- * Roger leaves the ground for the first time (BACKLOG.md "Jetpack / double
+ * Roger leaves the ground for the first time (TODO.md, feature backlog, "Jetpack / double
  * jump", on request):
  *
  *  - **Space** (on the ground or in the air) lights the jetpack at once

@@ -7,7 +7,7 @@ import { blowUpCar } from '../effects/carBlast.js';
  * SECTION PK — Telekinesis
  * ===========================================================================
  * Roger's C ability (engine/player/abilities.js), added 2026-10-02 on
- * request (BACKLOG.md). C lifts the car he is looking at (the one nearest
+ * request (TODO.md, feature backlog). C lifts the car he is looking at (the one nearest
  * his aim within TK.range and TK.cone) and holds it floating in front of
  * him, a violet beam from his hand to it: on foot it hangs over his
  * shoulder, and with the weapon raised (first person) it hangs just above

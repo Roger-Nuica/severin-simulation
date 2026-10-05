@@ -1,5 +1,8 @@
 # TODO
 
+Open work in one place: the sound files the owner will send, checks only a
+person can make, and the feature backlog.
+
 ## Sounds the owner will provide
 
 Drop each file into `public/sounds/` under exactly this name. The code is
@@ -25,13 +28,13 @@ send a file and it will be hooked up):
   change of 2026-10-05 was checked headless in Chromium (software
   rendering), which is not a visual or audio check.
 
-# Feature backlog
+## Feature backlog
 
 Ideas the owner liked (2026-10-02) and wants kept. Each one is a candidate,
 not a contract: when one is picked, it gets a plan and its numbers go into
 `.claude/rules.md`. Tick an idea off here once it ships.
 
-## Disasters
+### Disasters
 
 - [ ] **Giant hail** — ball-sized ice falls over a chosen area: breaks windows,
   dents cars, dazes people. Builds on the shared particle pool.
@@ -41,13 +44,14 @@ not a contract: when one is picked, it gets a plan and its numbers go into
   out, cars stall, Terminators and ships glitch for a few seconds. Ties in
   with the EMP and the power lines (shipped 2026-10-02 as the Solar Storm
   tile, `engine/solarStorm.js`; Roger's EMP runs down the lines during it).
-- [x] **Gravity rift** — inside a zone, cars, people and aliens float up, then
-  drop all at once and explode where they land (shipped 2026-10-02 as
-  the Gravitron weapon, `engine/gravityRift.js`).
+- [x] **Gravity rift** — inside a zone everything floats up, then drops all at
+  once (shipped 2026-10-02 as the Gravitron weapon, `engine/gravityRift.js`;
+  since 2026-10-05 it lifts everything, including trees, clutter, every
+  enemy and the ships, and only people and enemies explode).
 - [ ] **Lake tsunami** — a giant wave rises from the lake and hits town from
   the side (separate from the dam break).
 
-## Abilities for Roger
+### Abilities for Roger
 
 - [x] **Grappling hook** — G: pulls an alien to Roger, or zips Roger to a wall
   or a heavy enemy (shipped 2026-10-02, `engine/player/grapple.js`).
@@ -59,6 +63,14 @@ not a contract: when one is picked, it gets a plan and its numbers go into
   seconds.
 - [x] **Telekinesis** — lift a car with the mouse and throw it (shipped
   2026-10-02 on C, `engine/player/telekinesis.js`).
-- [x] **Jetpack / double jump** — a short flight over buildings with flame and
-  sound (shipped 2026-10-04 on Space: jump, then the jetpack in the air;
-  roofs are ground; `engine/hero/jetpack.js`).
+- [x] **Jetpack / double jump** — a flight over buildings with flame and
+  sound (shipped 2026-10-04 on Space, `engine/hero/jetpack.js`; since
+  2026-10-05 one press flies, with no time limit; roofs and rubble are
+  ground; silent until `jetpack.mp3` arrives).
+
+### Performance and app
+
+- [ ] **A higher frame rate, a smaller game** (owner's note) — make the game
+  lighter to load and run, and revisit the PWA (the install button is
+  switched off for now, `src/app/tornado/PwaSupport.js` `OFFER_INSTALL`).
+  Start from "Next targets" in the findings (`PROJECT_HISTORY.md`, part 1).

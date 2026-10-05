@@ -201,7 +201,7 @@ export function createCowSystem(ctx) {
     side(x1, z0, x1, z1);
     side(x1, z1, x0, z1);
     side(x0, z1, x0, z0);
-    // Static: its matrices are worked out once (see FINDINGS.md "matrices").
+    // Static: its matrices are worked out once (see PROJECT_HISTORY.md, findings: "matrices").
     fence.updateMatrixWorld(true);
     fence.traverse((o) => { o.matrixAutoUpdate = false; });
     fence.matrixWorldAutoUpdate = false;

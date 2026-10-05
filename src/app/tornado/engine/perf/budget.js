@@ -7,7 +7,7 @@
  * overlay (`?perf=1`, engine/perf/monitor.js) shows a figure in red once it
  * goes over, and the benchmark (`?bench=1`, engine/perf/bench.js) marks
  * each line of its result pass or fail against it. The same numbers, and
- * why they are what they are, are in FINDINGS.md ("Performance budget").
+ * why they are what they are, are in PROJECT_HISTORY.md (findings, "Performance budget").
  *
  * CPU figures are this game's own JavaScript per frame -- every system's
  * update, the instancer and the render call's own work -- not the GPU.
@@ -17,7 +17,7 @@ export const PERF_BUDGET = {
   // doomsday, the aliens' second wave, a nuclear meltdown) and its normal one
   // (the tornado alone). Set just above what the reference run measures
   // (headless Chromium in the cloud container, `?bench=1&render=0`: heavy
-  // 11.4, normal 10.1 -- see FINDINGS.md), so they catch a regression; a
+  // 11.4, normal 10.1 -- see PROJECT_HISTORY.md, findings), so they catch a regression; a
   // laptop runs well under them.
   cpuHeavyMs: 12,
   cpuNormalMs: 11,

@@ -4,7 +4,7 @@
  * SECTION PC — Entity caps and the particle budget
  * ===========================================================================
  * The ceilings every new effect and enemy works under, so that no one of
- * them can take the frame rate down (target: 60 fps, FINDINGS.md "Budget").
+ * them can take the frame rate down (target: 60 fps, PROJECT_HISTORY.md, findings, "Performance budget").
  *
  * Entities: how many enemies of all kinds may be alive at once
  * (engine/enemies.js counts them), and the kinds with their own ceiling

@@ -9,7 +9,7 @@ Create transient point effects with the existing fixed-size particle pools and s
 
 **SAVES:** Keeps tracked emissions within the actual 10,000-particle ceiling and avoids rebuilding particle buffers during updates.
 
-**SOURCE:** `src/app/tornado/engine/particlePool.js`; `src/app/tornado/engine/perf/caps.js`; `src/app/tornado/engine/player/blackHole/matter.js`; `src/app/tornado/engine/yeti.js`; `FINDINGS.md`, “Particle budget”.
+**SOURCE:** `src/app/tornado/engine/particlePool.js`; `src/app/tornado/engine/perf/caps.js`; `src/app/tornado/engine/player/blackHole/matter.js`; `src/app/tornado/engine/yeti.js`; `PROJECT_HISTORY.md` (findings), “Particle budget”.
 
 ## How it works
 

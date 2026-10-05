@@ -19,7 +19,7 @@ Read the repository the way a new maintainer would, then report exactly five dis
 - Runtime code in `src/app/tornado/engine/`: lifecycle reset/dispose gaps, module-level mutable state, per-frame allocations in hot paths, listeners not bound to `ctx.signal`, duplicated damage or effect paths.
 - Tests: logic in `src/` with no coverage under `tests/*.test.mjs`, brittle or skipped tests.
 - Documentation: drift between `docs/`, `GAME_DESIGN.md`, `.claude/rules.md` and the code.
-- Performance notes in `FINDINGS.md`, `docs/performance.md` and `engine/perf/`.
+- Performance notes in `PROJECT_HISTORY.md` (findings), `docs/performance.md` and `engine/perf/`.
 - Tooling: `npm run lint` and `npm run build` output, if you run them, and configuration problems.
 
 ## What you may do

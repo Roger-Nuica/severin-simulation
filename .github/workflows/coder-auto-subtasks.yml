@@ -17,7 +17,6 @@ on:
         type: choice
         options:
           - PLAN_katana_subtasks.md
-          - PLAN_coop.md
         default: PLAN_katana_subtasks.md
 
       subtask:
@@ -134,7 +133,7 @@ jobs:
             requested_subtask="$SUBTASK_INPUT"
 
             case "$plan_file" in
-              PLAN_katana_subtasks.md|PLAN_coop.md)
+              PLAN_katana_subtasks.md)
                 ;;
               *)
                 echo "Unsupported plan path: $plan_file" >&2
@@ -380,9 +379,7 @@ jobs:
             Treat runtime code as the source of truth for implemented values.
 
             Stop and record BLOCKED if a decision gate or unresolved approval is
-            encountered. PLAN_coop.md Subtask 1 is a clarification/approval gate,
-            not authorization to invent the ten listed Co-op decisions or to
-            implement later subtasks.
+            encountered.
 
             Do not raise existing caps. Do not modify unrelated files.
 

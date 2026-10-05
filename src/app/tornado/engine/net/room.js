@@ -8,7 +8,7 @@
  * outgoing message goes through the `send(connId, msg)` it is given, and
  * time comes from `now()`, so it is testable without sockets or timers.
  *
- * Approved policy (PLAN_coop.md): private rooms joined by invite code,
+ * Approved policy (the co-op plan, archived in PROJECT_HISTORY.md): private rooms joined by invite code,
  * capacity 2 (one host + one peer), 30 s reconnect grace for a peer who
  * drops, no host migration -- if the host goes the room closes.
  */

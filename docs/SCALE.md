@@ -88,7 +88,7 @@ number in the table is read from `engine/scale.js`. The visible effects:
 
 `?bench=1&render=0` CPU is about the same: heavy 5.08 ms and hero 5.00 ms,
 against 4.90 and 4.87 ms before, on the same container. The fingerprints
-change, since the whole town changed (see FINDINGS.md).
+change, since the whole town changed (see the findings in PROJECT_HISTORY.md).
 
 ## The steps (as planned)
 
@@ -108,4 +108,4 @@ change, since the whole town changed (see FINDINGS.md).
 4. **The storm and the disasters**: the tornado's radius and slider, then the
    lift capacities against the new sizes. Also the volcano.
 5. **Check the whole game** with a screenshot per area, and record the
-   fingerprints and timings in FINDINGS.md.
+   fingerprints and timings in the findings of PROJECT_HISTORY.md.
