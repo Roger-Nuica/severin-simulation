@@ -71,3 +71,7 @@ The project prefers reusing the existing damage and visual pipelines rather than
 - respect enemy registry + damage rules
 - route visual-only changes through `gamefeel` and `sound` instead of inventing ad hoc paths
 - do not create a parallel weapon system unless the existing file is genuinely overloaded
+
+## Co-op guest
+
+The guest uses the same wheel (R-049). It must raise the weapon (right-click) before the rifle, minigun, railgun, Fire Gun or Black Hole Gun fires; the Katana fires without raising, as on the host. The host resolves guest shots from `net/guestWeapons.js` and the same `enemies.hit` contract, so enemy immunity is unchanged (R-054). Known disagreement, not reconciled: the guest's railgun cooldown there is 1.6 s, while the host's own Railgun cooldown in `heroWeapons.js` is 0.2 s. See R-060.

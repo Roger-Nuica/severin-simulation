@@ -17,6 +17,49 @@ export const INTERP_DELAY = 0.14;
 export const MAX_EXTRAPOLATE = 0.25;
 /** Snapshots kept. */
 export const BUFFER_SIZE = 8;
+/** Arrival samples the clock-offset estimator takes its minimum over (~8 s at 15 Hz). */
+export const OFFSET_WINDOW = 120;
+/** Most the offset may move per accepted snapshot (s): a slow slew, never a jump. */
+export const OFFSET_SLEW = 0.01;
+
+/**
+ * @typedef {object} OffsetEstimator
+ * @property {(candidate: number) => number} update feed one `localNow - snap.t`; returns the offset to use
+ * @property {() => number|null} value current offset, null before the first sample
+ * @property {() => void} clear
+ */
+
+/**
+ * Clock-offset estimator: the host-time to local-time offset is the minimum of
+ * `localNow - snap.t` over a sliding window (the least-delayed arrival is the
+ * best estimate of the true offset; queueing jitter only ever adds delay), and
+ * the value in use slews toward it by at most `slew` per sample so neither a
+ * jitter spike nor a window edge moves render time. The first sample is taken
+ * as is. Per instance; the ring is preallocated, so no per-sample allocation.
+ * @param {number} [windowSize] samples in the window
+ * @param {number} [slew] maximum change per sample (s)
+ * @returns {OffsetEstimator}
+ */
+export function createOffsetEstimator(windowSize = OFFSET_WINDOW, slew = OFFSET_SLEW) {
+  const ring = new Float64Array(Math.max(1, windowSize | 0));
+  let count = 0;
+  let head = 0;
+  /** @type {number|null} */
+  let offset = null;
+  return {
+    update(candidate) {
+      ring[head] = candidate;
+      head = (head + 1) % ring.length;
+      if (count < ring.length) count++;
+      let min = Infinity;
+      for (let i = 0; i < count; i++) if (ring[i] < min) min = ring[i];
+      offset = offset === null ? candidate : Math.min(offset + slew, Math.max(offset - slew, min));
+      return offset;
+    },
+    value: () => offset,
+    clear() { count = 0; head = 0; offset = null; }
+  };
+}
 
 /** Columns holding angles (wrapped when blended), by kind. */
 const ANGLE_COL = { players: 3, terminators: 3, aliens: 4, ships: 4, vehicles: 3 };
@@ -40,8 +83,8 @@ export function createSnapshotBuffer(opts = {}) {
   /** @type {any[]} */
   let snaps = [];
   let lastTick = -1;
-  /** host time (snapshot.t) -> local time offset, set on first snapshot */
-  let offset = null;
+  /** host time (snapshot.t) -> local time offset: windowed minimum, set on first snapshot */
+  const clock = createOffsetEstimator();
   /** @type {string|undefined} */
   let room = opts.room;
 
@@ -58,10 +101,9 @@ export function createSnapshotBuffer(opts = {}) {
     if (room === undefined) room = snap.room;
     if (snap.tick <= lastTick) return { ok: false, error: 'stale' };
     lastTick = snap.tick;
-    // Align the clocks on the first snapshot, then keep the offset that
-    // makes the *newest* arrival the most recent (min over the window).
-    const candidate = localNow - snap.t;
-    offset = offset === null ? candidate : Math.min(offset + 0.05, Math.max(offset - 0.05, candidate));
+    // Align the clocks on the first snapshot, then follow the minimum of
+    // (arrival - host time) over the window, slewed (see createOffsetEstimator).
+    clock.update(localNow - snap.t);
     snaps.push(snap);
     if (snaps.length > BUFFER_SIZE) snaps.shift();
     return { ok: true };
@@ -73,6 +115,7 @@ export function createSnapshotBuffer(opts = {}) {
    * @returns {{t: number, score: number, kinds: Record<string, Map<number, number[]>>}|null}
    */
   function sample(localNow) {
+    const offset = clock.value();
     if (!snaps.length || offset === null) return null;
     const newest = snaps[snaps.length - 1];
     const renderT = Math.min(localNow - offset - INTERP_DELAY, newest.t + MAX_EXTRAPOLATE);
@@ -113,6 +156,6 @@ export function createSnapshotBuffer(opts = {}) {
     push, sample,
     size: () => snaps.length,
     lastTick: () => lastTick,
-    clear() { snaps = []; lastTick = -1; offset = null; room = opts.room; }
+    clear() { snaps = []; lastTick = -1; clock.clear(); room = opts.room; }
   };
 }

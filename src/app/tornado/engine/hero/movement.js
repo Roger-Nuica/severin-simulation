@@ -91,14 +91,15 @@ export function createHeroMovement(ctx, S, api) {
    * @param {number} x
    * @param {number} z
    * @param {number} pad
+   * @param {number} [above] only boxes standing higher than this block (a guest flying over the roofs)
    * @returns {boolean} whether something walking can stand here
    */
-  function blockedAt(x, z, pad) {
+  function blockedAt(x, z, pad, above = 0) {
     if (Math.abs(x) > HERO.bound || Math.abs(z) > HERO.bound) return true;
     // The dam is the west edge of the world (flood/dam.js westLimit).
     if (x < ctx.systems.flood.westLimit() + pad) return true;
     if (ctx.systems.chasm && ctx.systems.chasm.gapAt(x, z) > -1.5) return true;
-    return inBuilding(x, z, pad);
+    return inBuilding(x, z, pad, above);
   }
 
   /**

@@ -743,6 +743,7 @@ The entries below record what was agreed or reported at the time they were writt
   target every 0.25 s (currentTarget) instead of every frame. Speech bubbles:
   the random roll before the pool scan, the screen size read twice a second.
 - Draw calls per scene render (shadow pass included): about 2,430 -> 380.
+- Trap (2026-10-05, headless Chrome on `next dev`, `?bench=1&scenario=heavy&render=0&seconds=60`): three runs of the same code gave three different fingerprints (`790/790665/…`, `790/795298/…`, `787/800396/…`), so the fingerprint cannot prove a refactor changed nothing there; CPU mean was 1.31 to 1.39 ms with 0 MB/s heap growth, and run-to-run differences of about 6% are noise. Compare fingerprints only on a production build (`npm run build && npm start`).
 - World matrices (`engine/matrices.js`): one pass a frame that rebuilds a
   local matrix only when position/rotation/scale changed and a world matrix
   only when it or its parent changed (or it changed parent). Checked equal

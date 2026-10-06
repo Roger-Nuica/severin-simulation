@@ -110,6 +110,106 @@ const VIEW_YAW_SCALE = 0.8;
 const VIEW_MIN_FORWARD = 0.38;   // keeps the grip clear of the near plane (0.1)
 const VIEW_SPIN = 0.9;           // turns the blade about its own axis to show its flat
 
+// The sword's own measures, in the figure's local units (before PERSON_SCALE).
+const UNIT = 1 / PERSON_SCALE;
+const BLADE_LOCAL = BLADE_LENGTH * UNIT;
+const GRIP_LOCAL = GRIP_LENGTH * UNIT;
+const GUARD_AT = 0.05;
+const viewFlip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+
+/**
+ * @typedef {Object} KatanaKit what owns the meshes made
+ * @property {<G extends THREE.BufferGeometry>(g: G) => G} keepGeo
+ * @property {<M extends THREE.Material>(m: M) => M} keepMat
+ */
+
+/**
+ * @param {KatanaKit['keepGeo']} keepGeo
+ * @param {THREE.Group} group
+ * @param {THREE.BufferGeometry} geometry
+ * @param {THREE.Material} material
+ * @param {number} y
+ * @returns {THREE.Mesh}
+ */
+const addKatanaPart = (keepGeo, group, geometry, material, y) => {
+  const mesh = new THREE.Mesh(keepGeo(geometry), material);
+  mesh.position.y = y;
+  // Too thin to show in the shadow map, and every caster is drawn twice.
+  mesh.castShadow = false;
+  group.add(mesh);
+  return mesh;
+};
+
+/**
+ * The katana into `group`, along local +y, the hand at the origin just under
+ * the guard and the edge toward +z: steel blade, a thin glowing edge, a dark
+ * guard, a wrapped grip. Shared by Roger's rig and the co-op guest's viewmodel.
+ * @param {THREE.Group} group
+ * @param {KatanaKit} kit
+ * @returns {void}
+ */
+export function fillKatana(group, kit) {
+  const { keepGeo, keepMat } = kit;
+  const steel = keepMat(new THREE.MeshStandardMaterial({ color: 0xc9d2de, metalness: 0.9, roughness: 0.2, emissive: 0x10161e }));
+  const edge = keepMat(new THREE.MeshBasicMaterial({ color: BLADE_COLOUR }));
+  const brass = keepMat(new THREE.MeshStandardMaterial({ color: 0x3a3226, metalness: 0.8, roughness: 0.35 }));
+  const wrap = keepMat(new THREE.MeshStandardMaterial({ color: 0x14182a, roughness: 0.85 }));
+  addKatanaPart(keepGeo, group, new THREE.BoxGeometry(0.007, BLADE_LOCAL, 0.034), steel, GUARD_AT + BLADE_LOCAL / 2);
+  const glow = addKatanaPart(keepGeo, group, new THREE.BoxGeometry(0.01, BLADE_LOCAL, 0.007), edge, GUARD_AT + BLADE_LOCAL / 2);
+  glow.position.z = 0.0185;
+  addKatanaPart(keepGeo, group, new THREE.CylinderGeometry(0.05, 0.05, 0.012, 10), brass, GUARD_AT);
+  addKatanaPart(keepGeo, group, new THREE.BoxGeometry(0.03, GRIP_LOCAL, 0.032), wrap, GUARD_AT - GRIP_LOCAL / 2);
+}
+
+/**
+ * The first-person blade: meshes that share the katana's own geometry and
+ * materials (nothing new to compile or dispose), the blade a little thicker
+ * and turned to show its flat, hung in a group that follows the camera.
+ * @param {THREE.Group} katana the sword from `fillKatana`
+ * @param {THREE.Object3D} scene
+ * @returns {{view: THREE.Group, holder: THREE.Group}}
+ */
+export function buildKatanaView(katana, scene) {
+  const view = new THREE.Group();
+  view.name = 'hero_view_katana';
+  view.visible = false;
+  const holder = new THREE.Group();
+  holder.rotation.order = 'YXZ';
+  holder.scale.setScalar(PERSON_SCALE);
+  const spin = new THREE.Group();
+  spin.rotation.y = VIEW_SPIN;
+  // Wider and thicker than the third-person blade: seen from a hand's length away it must read at once.
+  spin.scale.set(3, 1, 2.4);
+  for (const part of katana.children) {
+    const mesh = /** @type {THREE.Mesh} */ (part);
+    const copy = new THREE.Mesh(mesh.geometry, mesh.material);
+    copy.position.copy(mesh.position);
+    copy.frustumCulled = false;
+    copy.castShadow = false;
+    spin.add(copy);
+  }
+  holder.add(spin);
+  view.add(holder);
+  scene.add(view);
+  return { view, holder };
+}
+
+/**
+ * The guest's idle blade: low on the right of the view, in the camera's frame
+ * (the same resting pose Roger's first-person blade starts from).
+ * @param {THREE.Object3D} view from `buildKatanaView`
+ * @param {THREE.Object3D} holder
+ * @param {THREE.Camera} cam
+ * @returns {void}
+ */
+export function placeKatanaViewIdle(view, holder, cam) {
+  view.position.copy(cam.position);
+  view.quaternion.copy(cam.quaternion).multiply(viewFlip);
+  holder.position.set(VIEW_IDLE[HX], VIEW_IDLE[HY], VIEW_IDLE[HZ]);
+  holder.rotation.set(VIEW_IDLE[PITCH], VIEW_IDLE[YAW], VIEW_IDLE[ROLL]);
+  view.updateMatrixWorld(true);
+}
+
 /**
  * @param {number} t 0 to 1
  * @returns {number} a smooth ease in and out
@@ -159,7 +259,7 @@ export function createKatanaRig(ctx, S, kit) {
   const unit = 1 / PERSON_SCALE;
   const bladeLength = BLADE_LENGTH * unit;
   const gripLength = GRIP_LENGTH * unit;
-  const guardAt = 0.05;
+  const guardAt = GUARD_AT;
 
   /** @type {THREE.Object3D|null} */
   let root = null;
@@ -180,7 +280,6 @@ export function createKatanaRig(ctx, S, kit) {
   let view = null;
   /** @type {THREE.Group|null} the first-person blade's hand, posed each frame */
   let holder = null;
-  const viewFlip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
 
   // Animation state (all per rig, so per run).
   let clock = 0;
@@ -217,61 +316,22 @@ export function createKatanaRig(ctx, S, kit) {
    * @param {number} y
    * @returns {THREE.Mesh}
    */
-  const addPart = (group, geometry, material, y) => {
-    const mesh = new THREE.Mesh(keepGeo(geometry), material);
-    mesh.position.y = y;
-    // Too thin to show in the shadow map, and every caster is drawn twice.
-    mesh.castShadow = false;
-    group.add(mesh);
-    return mesh;
-  };
+  const addPart = (group, geometry, material, y) => addKatanaPart(keepGeo, group, geometry, material, y);
 
   /**
-   * The katana along local +y, the hand at the origin just under the guard and
-   * the edge toward +z: steel blade, a thin glowing edge, a dark guard, a
-   * wrapped grip.
+   * The katana along local +y (see `fillKatana`).
    * @returns {void}
    */
   function buildKatana() {
-    const steel = keepMat(new THREE.MeshStandardMaterial({ color: 0xc9d2de, metalness: 0.9, roughness: 0.2, emissive: 0x10161e }));
-    const edge = keepMat(new THREE.MeshBasicMaterial({ color: BLADE_COLOUR }));
-    const brass = keepMat(new THREE.MeshStandardMaterial({ color: 0x3a3226, metalness: 0.8, roughness: 0.35 }));
-    const wrap = keepMat(new THREE.MeshStandardMaterial({ color: 0x14182a, roughness: 0.85 }));
-    addPart(katana, new THREE.BoxGeometry(0.007, bladeLength, 0.034), steel, guardAt + bladeLength / 2);
-    const glow = addPart(katana, new THREE.BoxGeometry(0.01, bladeLength, 0.007), edge, guardAt + bladeLength / 2);
-    glow.position.z = 0.0185;
-    addPart(katana, new THREE.CylinderGeometry(0.05, 0.05, 0.012, 10), brass, guardAt);
-    addPart(katana, new THREE.BoxGeometry(0.03, gripLength, 0.032), wrap, guardAt - gripLength / 2);
+    fillKatana(katana, kit);
   }
 
   /**
-   * The first-person blade: meshes that share the katana's own geometry and
-   * materials (nothing new to compile or dispose), the blade a little thicker
-   * and turned to show its flat, hung in a group that follows the camera.
+   * The first-person blade (see `buildKatanaView`).
    * @returns {void}
    */
   function buildView() {
-    view = new THREE.Group();
-    view.name = 'hero_view_katana';
-    view.visible = false;
-    holder = new THREE.Group();
-    holder.rotation.order = 'YXZ';
-    holder.scale.setScalar(PERSON_SCALE);
-    const spin = new THREE.Group();
-    spin.rotation.y = VIEW_SPIN;
-    // Wider and thicker than the third-person blade: seen from a hand's length away it must read at once.
-  spin.scale.set(3, 1, 2.4);
-    for (const part of katana.children) {
-      const mesh = /** @type {THREE.Mesh} */ (part);
-      const copy = new THREE.Mesh(mesh.geometry, mesh.material);
-      copy.position.copy(mesh.position);
-      copy.frustumCulled = false;
-      copy.castShadow = false;
-      spin.add(copy);
-    }
-    holder.add(spin);
-    view.add(holder);
-    ctx.Sim.three.scene.add(view);
+    ({ view, holder } = buildKatanaView(katana, ctx.Sim.three.scene));
   }
 
   /**

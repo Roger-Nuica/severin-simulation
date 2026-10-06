@@ -6,8 +6,12 @@ import { createSnapshotBuffer } from './interp.js';
 import { createEventEmitter, createEventDeduper } from './events.js';
 import { createPlayerRegistry, REVIVE, FRIENDLY_FIRE } from './players.js';
 import { PROTOCOL_VERSION, LIMITS, WEAPONS } from './protocol.js';
-import { GUEST_WEAPONS, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrigger, coolDown } from './guestWeapons.js';
+import { GUEST_WEAPONS, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrigger, coolDown, weaponAt } from './guestWeapons.js';
+import { createBullets } from '../hero/bullets.js';
 import { HERO } from '../hero/config.js';
+import { JETPACK } from '../hero/jetpack.js';
+import { stepAir } from './flight.js';
+import { TELEPORT } from '../player/teleport.js';
 import { newPrediction, viewPoint, predictFrame, recordSent, reconcile } from './prediction.js';
 import { stepRun, aimDirection } from '../hero/walk.js';
 import { HOLE } from '../player/blackHole.js';
@@ -19,6 +23,14 @@ import { mayHurtPlayer, splashAmount, rayBodyDistance, inSector } from '../healt
 import { dressAsRoger, rogerLimbs, newOwned, disposeRoger } from '../hero/rogerLook.js';
 import { rogerStyle, newRunCycle, stepRunCycle, swingLimbs, newCameraPose, followCamera, wheelHtml, wrapAngle, newFireLatch, fireLatchPress, fireLatchRelease, fireLatchSample } from './rogerView.js';
 import { createNetMetrics, isNetDebug } from './metrics.js';
+import { createWeaponModels } from '../hero/weaponModels.js';
+import { attachHeld } from '../hero/heldWeapons.js';
+import { heldKey } from './heldWeapon.js';
+import { fillKatana, buildKatanaView, placeKatanaViewIdle } from '../hero/katana/model.js';
+import { shownKey, swayOf, viewOffset } from './viewModel.js';
+import { newFeedback, stepFeedback, flashOpacity, SHOT_LOOK, SWING, swingAmount } from './shotFeedback.js';
+import { createTrexFlames } from '../trex/flames.js';
+import { FIRE_GUN } from '../hero/fireGun.js';
 import { createHeroRequests, heroRequestOutcome, mayRequestLock, HERO_FLAG_SECONDS } from './heroRequest.js';
 
 /**
@@ -79,7 +91,10 @@ const KILL_SCORE = 20;
 /** The car Roger drives is the one co-op vehicle (Hero Mode car flow). */
 const CAR_ID = 9000;
 const SEAT_REACH = 6;
-const TELEPORT = { distance: 25, cooldown: 5 };
+/** A guest flies as the host's Roger does (hero/jetpack.js): the same speeds, no fuel, no energy. */
+const FLY_SPEEDS = { run: JETPACK.flySpeed, aim: JETPACK.flySpeed, back: JETPACK.flySpeed };
+/** Input `abil` bit 16: Space held (the jetpack's climb); a level, not an edge. */
+const JET_BIT = 16;
 const RELAY_URL = (typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_RELAY_URL) || 'ws://localhost:8787';
 
 /**
@@ -114,7 +129,7 @@ export function createNetSystem(ctx) {
     bypass: false,
     holdRevive: false,
     pendingWelcome: false,
-    /** @type {Map<string, {obj: any, cd: number, pending: import('./guestWeapons.js').Trigger|null, tpCd: number, speed: number, lastUse: boolean, flame: {tick: number, shooter: string}, run: import('./rogerView.js').RunCycle, owned: import('../hero/rogerLook.js').Owned, limbs: any}>} */
+    /** @type {Map<string, {obj: any, cd: number, pending: import('./guestWeapons.js').Trigger|null, tpCd: number, alt: number, vy: number, air: boolean, speed: number, lastUse: boolean, flame: {tick: number, shooter: string}, run: import('./rogerView.js').RunCycle, owned: import('../hero/rogerLook.js').Owned, limbs: any, held: import('../hero/heldWeapons.js').Held}>} */
     avatars: new Map(),
     /** @type {WeakMap<object, number>} */
     ids: new WeakMap(),
@@ -167,6 +182,12 @@ export function createNetSystem(ctx) {
     fireLatch: newFireLatch(),
     weapon: 0,
     abil: 0,
+    /** Heights of the players' feet (metres), newest snapshot and the eased value drawn, by player id (the jetpack). */
+    altTarget: new Map(),
+    altNow: new Map(),
+    /** The own authoritative position in the last snapshot, and when E was last pressed (to show the warp). */
+    lastAuth: null,
+    tpAt: 0,
     /** The pointer lock was taken for the guest's first person (losing it lowers the weapon, as Roger's). */
     aimLocked: false,
     /** Ability bits pressed since the last input was sent: a tap shorter than the send interval still reaches the host. */
@@ -192,6 +213,7 @@ export function createNetSystem(ctx) {
   // Scratch for the guest's flame (per instance, never module state).
   const aimVec = new THREE.Vector3();
   const muzzleVec = new THREE.Vector3();
+  const tracerEnd = new THREE.Vector3();
   // Scratch for the guests' walk (host) and the revive countdown.
   const guestKeys = { up: false, down: false, left: false, right: false };
   const walkDir = { x: 0, z: 0 };
@@ -285,6 +307,9 @@ export function createNetSystem(ctx) {
     S.peerScore = 0;
     S.peerRow = null;
     S.pred = newPrediction();
+    S.altTarget.clear();
+    S.altNow.clear();
+    S.lastAuth = null;
     S.predStats = { snaps: 0, blends: 0, last: 0, worst: 0 };
     S.peerHp.clear();
     S.peerInv.clear();
@@ -464,7 +489,8 @@ export function createNetSystem(ctx) {
     const style = rogerStyle(id);
     dressAsRoger(obj.mesh, owned.keep, { tee: style.tee });
     Sim.three.scene.add(obj.mesh);
-    S.avatars.set(id, { obj, cd: 0, pending: null, tpCd: 0, speed: 0, lastUse: false, flame: { tick: 0, shooter: id }, run: newRunCycle(), owned, limbs: rogerLimbs(obj.mesh) });
+    const limbs = rogerLimbs(obj.mesh);
+    S.avatars.set(id, { obj, cd: 0, pending: null, tpCd: 0, alt: 0, vy: 0, air: false, speed: 0, lastUse: false, flame: { tick: 0, shooter: id }, run: newRunCycle(), owned, limbs, held: attachHeld(limbs.armR, owned.keep) });
   }
 
   /** @param {string} id */
@@ -778,21 +804,33 @@ export function createNetSystem(ctx) {
           if (trigger && ctl.aim) guestFire(p, a, input, dt, trigger);
           else if (dbg && trigger) dbg.unfired(1);
         }
-        // Bit 2: Teleport. Bits 1 and 4 (Time Slow, EMP) are host-only.
+        // Bit 2: Teleport, as Roger's (player/teleport.js): the first place to
+        // stand along the way they face, from the full distance back; free.
+        // Bits 1 and 4 (Time Slow, EMP) are host-only.
         if ((edge & 2) && a.tpCd <= 0 && ctl.move) {
-          a.tpCd = TELEPORT.cooldown;
-          const tx = p.x + Math.sin(p.heading) * TELEPORT.distance;
-          const tz = p.z + Math.cos(p.heading) * TELEPORT.distance;
-          if (h.standable(tx, tz)) { p.x = tx; p.z = tz; }
+          const to = guestLanding(p, h);
+          if (!to) sendEvent('notice', { text: 'TELEPORT · no room to land that way' }, p.id);
+          else {
+            a.tpCd = TELEPORT.cooldown;
+            const tele = ctx.systems.teleport;
+            tele.warpAt(p.x, p.z, true);
+            p.x = to.x; p.z = to.z;
+            tele.warpAt(to.x, to.z, false);
+            if (ctx.systems.powerArcSound) ctx.systems.powerArcSound.playZap(1);
+          }
         }
       }
-      pos.set(p.x, 0, p.z);
+      // The jetpack: Space held climbs, let go it sinks gently; down or seated, it lets go.
+      stepGuestAir(p, a, ctl.move && p.state === 'up' && (input.abil & JET_BIT) !== 0, ctl.move, dt, h);
+      pos.set(p.x, a.alt, p.z);
       a.obj.mesh.rotation.y = p.heading;
       // Down: lying flat; revived: upright.
       a.obj.mesh.rotation.x = p.state === 'up' ? 0 : -Math.PI / 2 + 0.1;
       // Blinks while a shield (spawn or revive) lasts, like Roger's own.
       a.obj.mesh.visible = p.state !== 'dead' && !p.seat && (p.shield <= 0 || Math.floor(p.shield * 10) % 2 === 0);
       swingLimbs(a.limbs, a.run.phase, p.state === 'up' ? stepRunCycle(a.run, p.x, p.z, dt, HERO.stride, HERO.runSpeed) : 0);
+      // The guest's weapon in its hand, as the host sees the guest's Roger.
+      a.held.show(heldKey(p.weapon, p.state === 'up', !!p.seat));
       // Hunters now hurt a guest through the health API (melee touches, rays),
       // which calls catchPlayer at 0 health; there is no instant catch here.
     }
@@ -864,23 +902,61 @@ export function createNetSystem(ctx) {
       const dir = aimDirection(p.heading, Math.sign(input.mz), -Math.sign(input.mx), walkDir);
       const len = Math.hypot(dir.x, dir.z);
       if (len < 1e-3) return;
-      dx = (dir.x / len) * HERO.aimWalkSpeed * dt;
-      dz = (dir.z / len) * HERO.aimWalkSpeed * dt;
+      const speed = a.air ? JETPACK.flySpeed : HERO.aimWalkSpeed;
+      dx = (dir.x / len) * speed * dt;
+      dz = (dir.z / len) * speed * dt;
     } else {
       runState.heading = p.heading;
       runState.speed = a.speed;
       stepRun(runState, guestKeys, dt);
       p.heading = wrapAngle(runState.heading);
       a.speed = runState.speed;
-      dx = Math.sin(p.heading) * a.speed * dt;
-      dz = Math.cos(p.heading) * a.speed * dt;
+      const k = a.air ? JETPACK.flySpeed / HERO.runSpeed : 1;
+      dx = Math.sin(p.heading) * a.speed * k * dt;
+      dz = Math.cos(p.heading) * a.speed * k * dt;
     }
+    // In the air only the buildings taller than the guest's feet stop them.
+    const above = a.alt > 0.01 ? a.alt + JETPACK.stepUp : 0;
     const nx = THREE.MathUtils.clamp(p.x + dx, -HERO.bound, HERO.bound);
-    if (h.standable(nx, p.z)) p.x = nx;
+    if (h.standable(nx, p.z, above)) p.x = nx;
     else a.speed *= 0.5;
     const nz = THREE.MathUtils.clamp(p.z + dz, -HERO.bound, HERO.bound);
-    if (h.standable(p.x, nz)) p.z = nz;
+    if (h.standable(p.x, nz, above)) p.z = nz;
     else a.speed *= 0.5;
+  }
+
+  /**
+   * The first place a guest could stand along the way they face, from the
+   * teleport's full distance back (player/teleport.js `landingSpot`, for a guest).
+   * @param {import('./players.js').Player} p
+   * @param {any} h heroMode
+   * @returns {{x: number, z: number}|null}
+   */
+  function guestLanding(p, h) {
+    const sx = Math.sin(p.heading), sz = Math.cos(p.heading);
+    for (let d = TELEPORT.distance; d >= TELEPORT.minDistance; d -= TELEPORT.step) {
+      const x = p.x + sx * d, z = p.z + sz * d;
+      if (h.standable(x, z)) return { x, z };
+    }
+    return null;
+  }
+
+  /**
+   * One step of a guest's height, as Roger's (hero/jetpack.js stepAir): Space
+   * lights the pack at once and climbs, let go it sinks slowly, no fuel; it
+   * lands on a roof or the street. Out of the air it falls (down, seated).
+   * @param {import('./players.js').Player} p
+   * @param {{alt: number, vy: number, air: boolean}} a
+   * @param {boolean} jet Space held by a guest who can fly.
+   * @param {boolean} free The guest's body is theirs to move (not seated).
+   * @param {number} dt
+   * @param {any} h heroMode
+   * @returns {void}
+   */
+  function stepGuestAir(p, a, jet, free, dt, h) {
+    if (!free) { a.alt = 0; a.vy = 0; a.air = false; return; }
+    const next = stepAir(a, { jet, up: p.state === 'up' }, dt, h.groundAt(p.x, p.z, a.alt), JETPACK);
+    a.alt = next.alt; a.vy = next.vy; a.air = next.air;
   }
 
   /**
@@ -994,6 +1070,13 @@ export function createNetSystem(ctx) {
       a.cd = w.cooldown;
       const hit = scan(p, yaw, pitch, w.range);
       if (dbg && hit) dbg.fire(trigger.weapon, 2);
+      // What the host sees of the guest's shot: one tracer in the shared round
+      // pool, from just ahead of the guest's eye to where the ray ends. Cosmetic
+      // (no hit, no casing, no sound, no particles); the damage is the call below.
+      const reach = hit ? hit.t : w.range;
+      muzzleVec.set(ox + dx * 0.8, EYE - 0.2 + dy * 0.8, oz + dz * 0.8);
+      tracerEnd.set(ox + dx * reach, EYE + dy * reach, oz + dz * reach);
+      hero().guestTracer(muzzleVec, tracerEnd);
       if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: EYE + dy * hit.t, z: oz + dz * hit.t } })) { if (dbg) dbg.fire(trigger.weapon, 3); credit(KILL_SCORE, p.id); }
       // Friendly fire (D4): the partner in the line of fire, if nearer than the enemy hit.
       hurtRay(p.id, ox, EYE, oz, dx, dy, dz, hit ? hit.t : w.range, w.type);
@@ -1061,6 +1144,20 @@ export function createNetSystem(ctx) {
   // Snapshots
   // ---------------------------------------------------------------------
 
+  /**
+   * The players off the ground: [id, feet height], the host's Roger (id 0) and the guests.
+   * @param {any} h heroMode
+   * @returns {number[][]}
+   */
+  function altRows(h) {
+    /** @type {number[][]} */
+    const rows = [];
+    const own = h.rogerAlt();
+    if (own > 0.05) rows.push([0, Math.round(own * 100) / 100]);
+    for (const [id, a] of S.avatars) if (a.alt > 0.05) rows.push([Number(id), Math.round(a.alt * 100) / 100]);
+    return rows.slice(0, LIMITS.maxPerKind);
+  }
+
   /** @returns {import('./protocol.js').Snapshot} */
   function buildSnapshot() {
     const h = hero();
@@ -1126,6 +1223,7 @@ export function createNetSystem(ctx) {
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
+      alt: altRows(h),
       ack: gate.acks((id) => id !== '0' && !!players.get(id))
     };
   }
@@ -1144,10 +1242,12 @@ export function createNetSystem(ctx) {
     standable: (x, z) => {
       const h = hero();
       if (!h || typeof h.standable !== 'function') return true;
-      try { return h.standable(x, z); } catch { return true; }
+      const alt = S.altNow.get(Number(S.myId)) || 0;
+      try { return h.standable(x, z, alt > 0.01 ? alt + JETPACK.stepUp : 0); } catch { return true; }
     },
     bound: HERO.bound,
-    speeds: GUEST_SPEEDS
+    /** In the air the guest flies at the jetpack's speed. */
+    get speeds() { return (S.altNow.get(Number(S.myId)) || 0) > 0.01 ? FLY_SPEEDS : GUEST_SPEEDS; }
   };
 
   /**
@@ -1162,6 +1262,15 @@ export function createNetSystem(ctx) {
     if (!row) { S.pred = newPrediction(); return; }
     let ack = -1;
     if (Array.isArray(msg.ack)) for (const r of msg.ack) if (r[0] === id) ack = r[1];
+    // A jump of the authoritative position just after E is the teleport: show both ends here too.
+    const last = S.lastAuth;
+    S.lastAuth = { x: row[1], z: row[2] };
+    if (last && Math.hypot(row[1] - last.x, row[2] - last.z) > 8 && performance.now() - S.tpAt < 1500 && ctx.systems.teleport) {
+      ctx.systems.teleport.warpAt(last.x, last.z, true);
+      ctx.systems.teleport.warpAt(row[1], row[2], false);
+      if (ctx.systems.powerArcSound) ctx.systems.powerArcSound.playZap(1);
+      S.tpAt = 0;
+    }
     const out = reconcile(S.pred, { x: row[1], z: row[2] }, ack, row[4] === 0 && row[7] < 0, predEnv);
     S.pred = out.state;
     if (dbg && S.pred.active) {
@@ -1190,7 +1299,11 @@ export function createNetSystem(ctx) {
         if (Array.isArray(msg.ack)) for (const r of msg.ack) if (String(r[0]) === S.myId) mine = r[1];
         dbg.snapshotArrived(performance.now(), mine);
       }
-      if (buffer.push(msg, performance.now() / 1000).ok) reconcileOwn(msg);
+      if (buffer.push(msg, performance.now() / 1000).ok) {
+        S.altTarget.clear();
+        if (Array.isArray(msg.alt)) for (const r of msg.alt) S.altTarget.set(r[0], r[1]);
+        reconcileOwn(msg);
+      }
       return;
     }
     if (msg.type !== 'event') return;
@@ -1344,7 +1457,9 @@ export function createNetSystem(ctx) {
     dressAsRoger(root, owned.keep, { tee: style.tee });
     root.userData.owned = owned;
     root.userData.run = newRunCycle();
-    root.userData.limbs = rogerLimbs(root);
+    const limbs = rogerLimbs(root);
+    root.userData.limbs = limbs;
+    root.userData.held = attachHeld(limbs.armR, owned.keep);
     return root;
   }
 
@@ -1386,7 +1501,171 @@ export function createNetSystem(ctx) {
     return g;
   }
 
+  // The guest's weapon in hand (first person): the host's own close-up models,
+  // made on first use through `keepGeo`/`keepMat` (released in `clearProxies`).
+  /** @type {Map<string, THREE.Object3D>} */
+  const viewGroups = new Map();
+  /** @type {ReturnType<typeof createWeaponModels>|null} */
+  let weaponModels = null;
+  /** @type {Map<string, {flash: THREE.Mesh, barrels: THREE.Object3D|null}>} the parts shot feedback moves, by wheel key */
+  const viewParts = new Map();
+  /** The guest's own shot feedback (flash, recoil, barrel spin), predicted, cosmetic (shotFeedback.js). */
+  let feedback = newFeedback();
+  /** @type {ReturnType<typeof createBullets>|null} the guest's own round pool, for its tracers (made on the first shot) */
+  let rounds = null;
+  /** @type {ReturnType<typeof createTrexFlames>|null} the guest's own Fire Gun flames (cosmetic: no burning, made on first use) */
+  let flames = null;
+  /** Tracers alive at once in the guest's own pool (the minigun's 0.09 s shots at up to 220 m, 320 m/s: about 8). */
+  const GUEST_TRACERS = 32;
+  /** The wheel keys whose shot draws a tracer: the three guns, and the Black Hole Gun's bolt. */
+  const TRACER_KEYS = new Set(['rifle', 'minigun', 'railgun', 'blackhole']);
+  const noLanding = () => {};
+  const viewAt = { x: 0, y: 0, z: 0 };
+  const viewVec = new THREE.Vector3();
+  /** @type {{view: THREE.Group, holder: THREE.Group}|null} the Katana's first-person blade */
+  let katanaView = null;
+
+  /**
+   * The close-up model for a wheel key, made on first use (the rifle without
+   * its charge readout, which belongs to the host's HUD state).
+   * @param {string} key
+   * @returns {THREE.Object3D}
+   */
+  function viewGroupFor(key) {
+    const made = viewGroups.get(key);
+    if (made) return made;
+    const kit = { scene: Sim.three.scene, keepGeo: /** @type {any} */ (keepGeo), keepMat: /** @type {any} */ (keepMat) };
+    /** @type {THREE.Object3D} */
+    let group;
+    if (key === 'katana') {
+      const sword = new THREE.Group();
+      fillKatana(sword, kit);
+      katanaView = buildKatanaView(sword, Sim.three.scene);
+      group = katanaView.view;
+    } else {
+      weaponModels = weaponModels || createWeaponModels(kit);
+      const m = weaponModels;
+      const built = /** @type {{group: THREE.Group, flash: THREE.Mesh, barrels?: THREE.Object3D}} */ (key === 'minigun' ? m.buildMinigun() : key === 'railgun' ? m.buildRailgun()
+        : key === 'fire' ? m.buildFireGun() : key === 'blackhole' ? m.buildHoleGun() : m.buildRifle());
+      group = built.group;
+      viewParts.set(key, { flash: built.flash, barrels: built.barrels || null });
+    }
+    viewGroups.set(key, group);
+    return group;
+  }
+
+  /**
+   * Shows the model of the weapon in the guest's hand in the camera's frame,
+   * or hides them all (`key` null).
+   * @param {THREE.Camera} cam the guest's camera, already looking
+   * @param {string|null} key wheel key to show
+   * @param {boolean} moving the guest is walking (sway)
+   * @param {number} dt real seconds (the barrels' turn)
+   * @returns {void}
+   */
+  function placeViewmodel(cam, key, moving, dt) {
+    const group = key ? viewGroupFor(key) : null;
+    for (const [k, g] of viewGroups) g.visible = k === key;
+    if (!group) return;
+    if (key === 'katana' && katanaView) {
+      placeKatanaViewIdle(katanaView.view, katanaView.holder, cam);
+      // The cut: out and back across the view (predicted, cosmetic).
+      const cut = swingAmount(feedback.swing);
+      if (cut > 0) {
+        katanaView.holder.rotation.x += SWING.pitch * cut;
+        katanaView.holder.rotation.y += SWING.yaw * cut;
+        katanaView.holder.position.x += SWING.sweep * cut;
+        katanaView.view.updateMatrixWorld(true);
+      }
+      return;
+    }
+    const o = viewOffset(viewAt, swayOf(moving, performance.now() / 1000));
+    // The kick of a shot, as the host's own viewmodel (heroWeapons.js placeView).
+    group.position.set(o.x, o.y + feedback.recoil * 0.02, o.z + feedback.recoil * 0.1).applyQuaternion(cam.quaternion).add(cam.position);
+    group.quaternion.copy(cam.quaternion);
+    group.rotateX(feedback.recoil * 0.08);
+    const parts = key ? viewParts.get(key) : null;
+    if (parts) {
+      const lit = feedback.flash > 0 && feedback.flashKey === key;
+      parts.flash.visible = lit;
+      if (lit) {
+        parts.flash.material.opacity = flashOpacity(feedback.flash);
+        parts.flash.scale.setScalar(SHOT_LOOK[/** @type {keyof typeof SHOT_LOOK} */ (key)]?.scale || 1);
+      }
+      if (parts.barrels) parts.barrels.rotation.z += feedback.spin * dt;
+    }
+    group.updateMatrixWorld(true);
+  }
+
+  /**
+   * The one audio cue of a shot, through the hero sound system the host's
+   * weapons use (this computer's own audio, never sent).
+   * @param {string} key wheel key that fired
+   * @returns {void}
+   */
+  function playShotCue(key) {
+    if (key === 'katana') { if (ctx.systems.katanaSound) ctx.systems.katanaSound.playSwing(); return; }
+    const look = SHOT_LOOK[/** @type {keyof typeof SHOT_LOOK} */ (key)];
+    if (!look) return;
+    const snd = ctx.systems.heroSound;
+    if (look.cue === 'bullet') snd.playBullet();
+    else if (look.cue === 'zap') snd.playZap();
+    else if (look.cue === 'plasma') snd.playPlasma(0.3);
+  }
+
+  /**
+   * One tracer from just ahead of the guest's eye along its aim, in its own
+   * round pool (hero/bullets.js, no hit, no casing: cosmetic; the host
+   * resolves the shot). Predicted like the flash, so it shows even for a shot
+   * the host refuses.
+   * @param {THREE.Camera} cam the guest's camera, already looking
+   * @param {{range: number}|null} w the weapon's table entry
+   * @returns {void}
+   */
+  function drawTracer(cam, w) {
+    if (!w) return;
+    rounds = rounds || createBullets(ctx, { max: GUEST_TRACERS, casings: 0 });
+    cam.getWorldDirection(viewVec);
+    muzzleVec.copy(cam.position).addScaledVector(viewVec, 0.8);
+    muzzleVec.y -= 0.2;
+    tracerEnd.copy(cam.position).addScaledVector(viewVec, w.range);
+    rounds.fire(muzzleVec, tracerEnd, null, null, null);
+  }
+
+  /**
+   * The Fire Gun's flame from the guest's muzzle: the same particles and
+   * roar as the host's, in the guest's own pool. Cosmetic: the burning is
+   * the host's `guestFlame`.
+   * @param {THREE.Camera} cam the guest's camera, already looking
+   * @param {number} dt real seconds
+   * @returns {void}
+   */
+  function breatheFlame(cam, dt) {
+    if (!flames) { flames = createTrexFlames(ctx, { size: FIRE_GUN.flameSize, alpha: FIRE_GUN.flameAlpha, name: 'guest_fire_gun_flames' }); flames.init(); }
+    cam.getWorldDirection(viewVec);
+    muzzleVec.copy(cam.position).addScaledVector(viewVec, 0.8 + FIRE_GUN.ahead);
+    muzzleVec.y -= 0.2;
+    flames.emit(muzzleVec, viewVec, Math.round(FIRE_GUN.rate * dt + Math.random()));
+    flames.update(dt);
+    ctx.systems.creatureSounds.loop('fireGun', muzzleVec, 0.9);
+  }
+
+  /** Takes every viewmodel out of the scene (their geometry is released with `S.geos`). @returns {void} */
+  function clearViewmodels() {
+    if (flames) flames.release();
+    flames = null;
+    if (rounds) rounds.dispose();
+    rounds = null;
+    for (const g of viewGroups.values()) g.removeFromParent();
+    viewGroups.clear();
+    viewParts.clear();
+    feedback = newFeedback();
+    weaponModels = null;
+    katanaView = null;
+  }
+
   function clearProxies() {
+    clearViewmodels();
     for (const map of S.proxies.values()) for (const obj of map.values()) disposeProxy(obj);
     if (S.proxyRoot) Sim.three.scene.remove(S.proxyRoot);
     S.proxyRoot = null;
@@ -1433,6 +1712,7 @@ export function createNetSystem(ctx) {
     S.buttons.aim = false;
     releaseFire();
     S.aimLocked = false;
+    for (const g of viewGroups.values()) g.visible = false;
     const canvas = Sim.three.renderer.domElement;
     if (document.pointerLockElement === canvas) document.exitPointerLock();
   }
@@ -1478,8 +1758,9 @@ export function createNetSystem(ctx) {
             else say('RIGHT-CLICK to raise the weapon · ENTER to fire');
           } else if (e.code === 'Escape' && S.buttons.aim) leavePeerAim();
           else if (e.code === 'KeyQ') { S.abil |= 1; S.abilLatch |= 1; }
-          else if (e.code === 'KeyE') { S.abil |= 2; S.abilLatch |= 2; }
+          else if (e.code === 'KeyE') { S.abil |= 2; S.abilLatch |= 2; S.tpAt = performance.now(); }
           else if (e.code === 'KeyR') { S.abil |= 4; S.abilLatch |= 4; }
+          else if (e.code === 'Space') S.abil |= JET_BIT;
           else if (e.code === 'KeyF') S.buttons.use = true;
           break;
         }
@@ -1489,6 +1770,7 @@ export function createNetSystem(ctx) {
           else if (e.code === 'KeyE') S.abil &= ~2;
           else if (e.code === 'KeyR') S.abil &= ~4;
           else if (e.code === 'KeyV') S.abil &= ~8;
+          else if (e.code === 'Space') S.abil &= ~JET_BIT;
           else if (e.code === 'KeyF') S.buttons.use = false;
           break;
         case 'mousedown':
@@ -1570,6 +1852,13 @@ export function createNetSystem(ctx) {
     S.peerScore = s.score;
     // Own avatar from the prediction while it runs (else from the host's row).
     const pv = S.pred.active && S.buttons.aim ? viewPoint(S.pred) : null;
+    // Heights ease towards the newest snapshot's (the jetpack), and settle to the ground.
+    const ease = 1 - Math.exp(-12 * dt);
+    for (const [id, now] of S.altNow) {
+      const next = now + ((S.altTarget.get(id) || 0) - now) * ease;
+      if (next < 0.01 && !S.altTarget.has(id)) S.altNow.delete(id); else S.altNow.set(id, next);
+    }
+    for (const [id, to] of S.altTarget) if (!S.altNow.has(id)) S.altNow.set(id, to);
     for (const [kind, rows] of Object.entries(s.kinds)) {
       let map = S.proxies.get(kind);
       if (!map) { map = new Map(); S.proxies.set(kind, map); }
@@ -1588,11 +1877,13 @@ export function createNetSystem(ctx) {
           obj.rotation.y = row[4];
         } else {
           const px = mine && pv ? pv.x : row[1], pz = mine && pv ? pv.z : row[2];
-          obj.position.set(px, 0, pz);
+          obj.position.set(px, kind === 'players' ? (S.altNow.get(id) || 0) : 0, pz);
           obj.rotation.y = mine && pv ? liveYaw : row[3];
           if (kind === 'players') {
             obj.rotation.x = row[4] === 0 ? 0 : -Math.PI / 2 + 0.1;
             swingLimbs(obj.userData.limbs, obj.userData.run.phase, row[4] === 0 ? stepRunCycle(obj.userData.run, px, pz, dt, HERO.stride, HERO.runSpeed) : 0);
+            // The weapon in hand from the row's weapon column (5); hidden down or seated (vehicle column 7).
+            obj.userData.held.show(heldKey(row[5], row[4] === 0, row[7] >= 0));
           }
           if (kind === 'terminators') obj.rotation.x = row[4] === 0 ? 0 : -Math.PI / 2 + 0.1;
         }
@@ -1609,11 +1900,23 @@ export function createNetSystem(ctx) {
     if (me) {
       const cam = Sim.three.camera;
       const cx = pv ? pv.x : me[1], cz = pv ? pv.z : me[2];
-      if (S.buttons.aim) followCamera(camPose, cx, cz, S.look.yaw, S.look.pitch, true, FOLLOW);
-      else followCamera(camPose, cx, cz, me[3], 0, false, FOLLOW);
+      const myAlt = S.altNow.get(Number(S.myId)) || 0;
+      if (S.buttons.aim) followCamera(camPose, cx, cz, S.look.yaw, S.look.pitch, true, FOLLOW, myAlt);
+      else followCamera(camPose, cx, cz, me[3], 0, false, FOLLOW, myAlt);
       if (camPose.firstPerson) cam.position.set(camPose.px, camPose.py, camPose.pz);
       else cam.position.lerp(camGoal.set(camPose.px, camPose.py, camPose.pz), Math.min(1, dt * 5));
       cam.lookAt(camPose.lx, camPose.ly, camPose.lz);
+      // The guest's own shot feedback at the press: flash, kick, barrel spin and one cue
+      // per shot. Predicted from the host's cooldown table; a shot the host refuses
+      // (not in Hero Mode, no energy, no target) still shows and sounds here.
+      const step = stepFeedback(feedback, { fire: S.buttons.fire || S.fireLatch.pending, aim: S.buttons.aim, up: me[4] === 0, weapon: S.weapon }, dt);
+      feedback = step.fb;
+      if (step.shot) playShotCue(step.shot);
+      if (step.shot && TRACER_KEYS.has(step.shot)) drawTracer(cam, weaponAt(S.weapon));
+      if (rounds) rounds.update(dt, 1, noLanding);
+      if (step.flame) breatheFlame(cam, dt);
+      else if (flames) flames.update(dt);
+      placeViewmodel(cam, shownKey(S.buttons.aim, me[4] === 0, S.weapon), k0.up || k0.down || k0.left || k0.right, dt);
       const mine = S.proxies.get('players');
       const own = mine && mine.get(Number(S.myId));
       if (own) own.visible = !camPose.firstPerson;

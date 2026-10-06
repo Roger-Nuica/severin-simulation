@@ -133,7 +133,7 @@ export function validateInput(msg) {
   if (typeof msg.fire !== 'boolean' || typeof msg.aim !== 'boolean' || typeof msg.use !== 'boolean' || typeof msg.hero !== 'boolean') return { ok: false, error: 'buttons' };
   if (!Number.isInteger(msg.weapon) || msg.weapon < 0 || msg.weapon >= WEAPONS.length) return { ok: false, error: 'weapon' };
   // Ability bits: 1 time slow, 2 teleport, 4 EMP, 8 Invincible (V).
-  if (!Number.isInteger(msg.abil) || msg.abil < 0 || msg.abil > 15) return { ok: false, error: 'abil' };
+  if (!Number.isInteger(msg.abil) || msg.abil < 0 || msg.abil > 31) return { ok: false, error: 'abil' };
   return {
     ok: true,
     input: {
@@ -157,6 +157,9 @@ export function validateInput(msg) {
  * The client derives the bar's glow from `sinceLastDamage`; glow itself is
  * never sent. The players row keeps its nine columns on purpose: a longer
  * row would fail an older client's strict row-width check.
+ * Optional `alt` (added with the guest's jetpack; same additive rule):
+ *   alt          [playerId, height of the feet above the ground, metres]
+ * Only players off the ground have a row; none means everyone is standing.
  * Optional `ack` (added for client-side prediction; absent from older hosts,
  * and ignored by older clients, which read only the listed fields):
  *   ack          [playerId, lastAcceptedInputSeq]
@@ -198,6 +201,13 @@ export function validateSnapshot(msg) {
     for (const row of msg.hp) {
       if (!Array.isArray(row) || row.length !== 3 || !row.every(num)) return { ok: false, error: 'hp' };
       if (!inRange(row[1], 0, 1000) || row[2] < 0) return { ok: false, error: 'hp' };
+    }
+  }
+  if (msg.alt !== undefined) {
+    if (!Array.isArray(msg.alt) || msg.alt.length > LIMITS.maxPerKind) return { ok: false, error: 'alt' };
+    for (const row of msg.alt) {
+      if (!Array.isArray(row) || row.length !== 2 || !row.every(num)) return { ok: false, error: 'alt' };
+      if (!Number.isInteger(row[0]) || !inRange(row[1], 0, 1000)) return { ok: false, error: 'alt' };
     }
   }
   if (msg.ack !== undefined) {

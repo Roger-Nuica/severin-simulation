@@ -37,6 +37,25 @@ send a file and it will be hooked up):
   mouse, F revives both ways, V works for both. Checked so far with two
   headless browsers on one machine through the local relay.
 
+- Co-op guest fixes (plan `PLAN_coop-guest-fixes.md`), nothing below has been run
+  in two real browsers:
+  - **Subtask 6 manual gate (required):** over the real relay, W A S D respond
+    with no perceptible delay, no rubber-banding on walls or at the map edge,
+    teleport, car seat, down and revive and Restart do not desync, and the host
+    still moves instantly (use `?netdebug` and read the `prediction:` line).
+  - **Subtask 1 measured report:** two computers, host window in the
+    foreground, `?netdebug` on both, the relay run with `RELAY_DEBUG=1` on
+    Render (note its region and any slow first join); paste both overlays and
+    the `[relay-debug]` lines.
+  - **Approvals:** lowering `INTERP_DELAY` (0.14 s, proposed about 0.10 s only
+    if the measured snapshot gap stays short), and the new rule R-060.
+  - **Decision:** the guest's railgun cooldown is 1.6 s (`net/guestWeapons.js`)
+    but the host's own is 0.2 s (`heroWeapons.js`); say which should stand.
+  - **Subtask 12 gate:** guest right-click shows the weapon for each of the six
+    wheel entries, every guest weapon's effect, damage and score reach the
+    host, each sees the other's held weapon, no stray meshes or DOM after
+    rejoin, Restart, Leave or Reset, frame rate near 56 fps.
+
 ## Feature backlog
 
 Ideas the owner liked (2026-10-02) and wants kept. Each one is a candidate,
@@ -83,3 +102,5 @@ not a contract: when one is picked, it gets a plan and its numbers go into
   lighter to load and run, and revisit the PWA (the install button is
   switched off for now, `src/app/tornado/PwaSupport.js` `OFFER_INSTALL`).
   Start from "Next targets" in the findings (`PROJECT_HISTORY.md`, part 1).
+
+- [ ] Co-op parity (checks only a person can make, two browsers): the guest sees tracers, flames, the Black Hole bolt and the Katana swing; E teleports 18 m with the warp effect on both screens and a notice when there is no room; Space flies (no double jump, no fuel), the partner is seen in the air, the camera rises with the guest, roofs are landed on. Not done: the jetpack's flames and smoke on the figures, and a guest's shots from the air still aim from the ground height.

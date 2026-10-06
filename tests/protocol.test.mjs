@@ -7,7 +7,7 @@ const input = (o = {}) => ({ type: 'input', v: V, seq: 1, mx: 0, mz: 1, yaw: 0.5
 test('valid input is accepted and normalised', () => assert.equal(validateInput(input()).ok, true));
 
 test('input rejects bad fields', () => {
-  for (const bad of [{ mx: 2 }, { mz: NaN }, { seq: -1 }, { seq: 1.5 }, { weapon: 9 }, { abil: 16 }, { fire: 1 }, { pitch: 3 }, { v: 99 }, { x: 5 }, { score: 1e9 }, { position: [0, 0] }]) {
+  for (const bad of [{ mx: 2 }, { mz: NaN }, { seq: -1 }, { seq: 1.5 }, { weapon: 9 }, { abil: 32 }, { fire: 1 }, { pitch: 3 }, { v: 99 }, { x: 5 }, { score: 1e9 }, { position: [0, 0] }]) {
     assert.equal(validateInput(input(bad)).ok, false, JSON.stringify(bad));
   }
 });
@@ -87,4 +87,14 @@ test('worst-case snapshot (every kind at the per-kind cap) fits the frame limit'
   assert.ok(bytes < LIMITS.maxBytes, `${bytes} bytes`);
   // Sustained worst case at the approved 15 Hz.
   console.log(`# worst-case snapshot ${bytes} B -> ${(bytes * LIMITS.snapshotHz / 1024).toFixed(0)} KiB/s`);
+});
+
+test('input accepts the Space bit (abil 16) and the snapshot carries optional altitude rows', () => {
+  assert.equal(validateInput(input({ abil: 16 })).ok, true);
+  assert.equal(validateInput(input({ abil: 31 })).ok, true);
+  assert.equal(validateSnapshot(snap({ alt: [[0, 12.5], [1, 3]] })).ok, true);
+  assert.equal(validateSnapshot(snap()).ok, true);
+  for (const bad of [[[0]], [[0, -1]], [[0, 5000]], [[0.5, 3]], 'x']) {
+    assert.equal(validateSnapshot(snap({ alt: bad })).ok, false, JSON.stringify(bad));
+  }
 });

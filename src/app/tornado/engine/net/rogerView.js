@@ -133,22 +133,23 @@ export const newCameraPose = () => ({ px: 0, py: 0, pz: 0, lx: 0, ly: 0, lz: 0, 
  * @param {number} pitch Look pitch, radians.
  * @param {boolean} aim The aim button is held.
  * @param {{back: number, height: number, lookAhead: number, lookHeight: number, eye: number}} cfg Distances, metres.
+ * @param {number} [alt] Height of Roger's feet above the ground (the jetpack); the whole view rises with it.
  * @returns {CameraPose} `out`.
  */
-export const followCamera = (out, x, z, yaw, pitch, aim, cfg) => {
+export const followCamera = (out, x, z, yaw, pitch, aim, cfg, alt = 0) => {
   const sy = Math.sin(yaw), cy = Math.cos(yaw);
   if (aim) {
     const cp = Math.cos(pitch), sp = Math.sin(pitch);
-    out.px = x + sy * 0.3; out.py = cfg.eye; out.pz = z + cy * 0.3;
+    out.px = x + sy * 0.3; out.py = cfg.eye + alt; out.pz = z + cy * 0.3;
     out.lx = out.px + sy * cp * 10; out.ly = out.py + sp * 10; out.lz = out.pz + cy * cp * 10;
     out.firstPerson = true;
     return out;
   }
   out.px = x - sy * cfg.back;
-  out.py = Math.max(0.6, cfg.height + pitch * 3);
+  out.py = Math.max(0.6, cfg.height + pitch * 3) + alt;
   out.pz = z - cy * cfg.back;
   out.lx = x + sy * cfg.lookAhead;
-  out.ly = cfg.lookHeight + pitch * cfg.lookAhead;
+  out.ly = cfg.lookHeight + pitch * cfg.lookAhead + alt;
   out.lz = z + cy * cfg.lookAhead;
   out.firstPerson = false;
   return out;

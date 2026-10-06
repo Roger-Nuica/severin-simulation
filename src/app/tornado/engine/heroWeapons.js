@@ -5,6 +5,7 @@ import { HOLE } from './player/blackHole.js';
 import { RIFT } from './gravityRift.js';
 import { tableDamage, shipKindOf } from './health/enemyDamage.js';
 import { createBullets } from './hero/bullets.js';
+import { createWeaponModels, RAIL_YELLOW } from './hero/weaponModels.js';
 import { createFireGun } from './hero/fireGun.js';
 import { createKatanaSlash } from './hero/katana/slash.js';
 import { createKatanaPieces } from './hero/katana/pieces.js';
@@ -73,9 +74,6 @@ const SWIPE_FRAME_MAX_PX = 400;
 const WEAPON_NAMES = { rifle: 'PLASMA RIFLE', minigun: 'MINIGUN', railgun: 'RAILGUN', fire: 'FIRE GUN', blackhole: 'BLACK HOLE GUN', katana: 'KATANA', gravitron: 'GRAVITRON' };
 // Each weapon's colour on the HUD's WEAPON line (the railgun is yellow now).
 const WEAPON_COLOURS = { rifle: '', minigun: '#e8c46a', railgun: '#ffd83a', fire: '#ff8a3a', blackhole: '#c99bff', katana: '#9fe8ff', gravitron: '#7fffd0' };
-// The railgun's yellow: its coils, its flash, its ring.
-// Held to ~1-1.5 so the core stays yellow instead of clipping to white.
-const RAIL_YELLOW = new THREE.Color(1.5, 1.15, 0.1);
 // The ring: a deeper, more saturated amber than the core, so it separates.
 const RAIL_RING = new THREE.Color(1.0, 0.45, 0.04).multiplyScalar(LIGHTING.railgunRingEmissive);
 
@@ -160,6 +158,7 @@ const UP = new THREE.Vector3(0, 1, 0);
  *   katanaLook: (dx: number, dy: number, centred?: boolean) => void,
  *   katanaState: () => Readonly<KatanaInput>,
  *   guestFlame: (gun: {tick: number}, dt: number, muzzle: THREE.Vector3, dir: THREE.Vector3) => void,
+ *   guestTracer: (from: THREE.Vector3, to: THREE.Vector3) => void,
  *   katanaBladeToggle: () => boolean,
  *   katanaBlade: () => import('./hero/katana/blade.js').KatanaBlade,
  *   katanaBladeLine: () => Readonly<import('./hero/katana/bladeUi.js').BladeLine>
@@ -177,6 +176,10 @@ export function createHeroWeapons(ctx, hero) {
     railCooldown: 0,
     shown: false
   };
+  /** @type {ReturnType<typeof createWeaponModels>|null} the close-up model builders (hero/weaponModels.js), made on first use */
+  let models = null;
+  /** @returns {ReturnType<typeof createWeaponModels>} */
+  const wm = () => models || (models = createWeaponModels({ scene: Sim.three.scene, keepGeo: hero.keepGeo, keepMat: hero.keepMat }));
   /** @type {{group: THREE.Group, muzzle: THREE.Object3D, flash: THREE.Mesh, barrels?: THREE.Group, glow?: THREE.MeshBasicMaterial}|null} */
   let minigunView = null;
   /** @type {{group: THREE.Group, muzzle: THREE.Object3D, flash: THREE.Mesh, glow: THREE.MeshBasicMaterial}|null} */
@@ -269,227 +272,8 @@ export function createHeroWeapons(ctx, hero) {
   // The close-up models
   // ---------------------------------------------------------------------
 
-  /**
-   * The parts every close-up model shares: the gloved hands and red sleeves,
-   * and a muzzle with a flash on it.
-   * @param {THREE.Group} group
-   * @param {number} muzzleZ
-   * @param {THREE.Color} flashColour
-   * @returns {{muzzle: THREE.Object3D, flash: THREE.Mesh}}
-   */
-  function addHandsAndMuzzle(group, muzzleZ, flashColour) {
-    const glove = hero.keepMat(new THREE.MeshStandardMaterial({ color: 0x1b1d22, roughness: 0.8 }));
-    const sleeve = hero.keepMat(new THREE.MeshStandardMaterial({ color: 0xc0282d, roughness: 0.7 }));
-    /**
-     * @param {THREE.BufferGeometry} geo
-     * @param {THREE.Material} mat
-     * @param {number} x
-     * @param {number} y
-     * @param {number} z
-     * @returns {THREE.Mesh}
-     */
-    const add = (geo, mat, x, y, z) => {
-      const mesh = new THREE.Mesh(hero.keepGeo(geo), mat);
-      mesh.position.set(x, y, z);
-      mesh.frustumCulled = false;
-      group.add(mesh);
-      return mesh;
-    };
-    add(new THREE.BoxGeometry(0.13, 0.14, 0.2), glove, 0.01, -0.16, -0.22);
-    add(new THREE.CylinderGeometry(0.075, 0.09, 0.7, 10), sleeve, 0.06, -0.35, 0.1).rotation.x = 1.0;
-    add(new THREE.BoxGeometry(0.12, 0.1, 0.18), glove, -0.04, -0.14, -0.72);
-    add(new THREE.CylinderGeometry(0.07, 0.085, 0.9, 10), sleeve, -0.22, -0.4, -0.45).rotation.set(0.9, 0, -0.6);
-    const muzzle = new THREE.Object3D();
-    muzzle.position.set(0, 0, muzzleZ);
-    group.add(muzzle);
-    const flash = new THREE.Mesh(hero.keepGeo(new THREE.SphereGeometry(0.1, 10, 8)), hero.keepMat(new THREE.MeshBasicMaterial({
-      color: flashColour, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false
-    })));
-    flash.visible = false;
-    flash.frustumCulled = false;
-    muzzle.add(flash);
-    return { muzzle, flash };
-  }
+  // (The Minigun, Railgun, Black Hole Gun and Gravitron models, and the hands every model shares, are hero/weaponModels.js's: the co-op guest builds the same ones.)
 
-  /**
-   * The minigun: a squat receiver, an ammo box on its side and six barrels
-   * round a spindle that spins up while the trigger is held.
-   * @returns {NonNullable<typeof minigunView>}
-   */
-  function buildMinigun() {
-    const group = new THREE.Group();
-    group.name = 'hero_view_minigun';
-    const dark = hero.keepMat(new THREE.MeshStandardMaterial({ color: 0x33373d, metalness: 0.8, roughness: 0.35, emissive: 0x0c0e11 }));
-    const steel = hero.keepMat(new THREE.MeshStandardMaterial({ color: 0x9aa1ab, metalness: 0.9, roughness: 0.25, emissive: 0x15181c }));
-    const olive = hero.keepMat(new THREE.MeshStandardMaterial({ color: 0x4b5233, roughness: 0.7 }));
-    /**
-     * @param {THREE.BufferGeometry} geo
-     * @param {THREE.Material} mat
-     * @param {number} x
-     * @param {number} y
-     * @param {number} z
-     * @param {THREE.Object3D} [parent]
-     * @returns {THREE.Mesh}
-     */
-    const add = (geo, mat, x, y, z, parent = group) => {
-      const mesh = new THREE.Mesh(hero.keepGeo(geo), mat);
-      mesh.position.set(x, y, z);
-      mesh.frustumCulled = false;
-      parent.add(mesh);
-      return mesh;
-    };
-    add(new THREE.BoxGeometry(0.24, 0.22, 0.5), dark, 0, 0, -0.3);            // receiver
-    add(new THREE.BoxGeometry(0.2, 0.2, 0.26), olive, -0.2, -0.05, -0.28);     // ammo box
-    add(new THREE.BoxGeometry(0.05, 0.14, 0.05), dark, 0, 0.16, -0.22);        // carry handle posts
-    add(new THREE.BoxGeometry(0.05, 0.03, 0.3), dark, 0, 0.23, -0.3);
-    const barrels = new THREE.Group();
-    barrels.position.set(0, 0, -0.55);
-    group.add(barrels);
-    const barrelGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.75, 8);
-    barrelGeo.rotateX(Math.PI / 2);
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2;
-      add(barrelGeo, steel, Math.cos(a) * 0.055, Math.sin(a) * 0.055, -0.37, barrels);
-    }
-    add(new THREE.CylinderGeometry(0.02, 0.02, 0.75, 6).rotateX(Math.PI / 2), dark, 0, 0, -0.37, barrels);
-    for (const z of [-0.12, -0.7]) {
-      add(new THREE.TorusGeometry(0.075, 0.015, 6, 18), steel, 0, 0, z, barrels);
-    }
-    const { muzzle, flash } = addHandsAndMuzzle(group, -1.3, new THREE.Color(3, 1.8, 0.5));
-    group.traverse((child) => { child.castShadow = false; child.receiveShadow = false; });
-    group.visible = false;
-    Sim.three.scene.add(group);
-    return { group, muzzle, flash, barrels };
-  }
-
-  /**
-   * The railgun: two long rails with a gap between them, violet coils
-   * glowing along it (brighter as it recharges to the next bolt) and a
-   * stock.
-   * @returns {NonNullable<typeof railgunView>}
-   */
-  function buildRailgun() {
-    const group = new THREE.Group();
-    group.name = 'hero_view_railgun';
-    const dark = hero.keepMat(new THREE.MeshStandardMaterial({ color: 0x23262e, metalness: 0.8, roughness: 0.3, emissive: 0x0b0c10 }));
-    const steel = hero.keepMat(new THREE.MeshStandardMaterial({ color: 0xb4bac6, metalness: 0.9, roughness: 0.2, emissive: 0x16181d }));
-    const glow = /** @type {THREE.MeshBasicMaterial} */ (hero.keepMat(new THREE.MeshBasicMaterial({ color: RAIL_YELLOW.clone() })));
-    /**
-     * @param {THREE.BufferGeometry} geo
-     * @param {THREE.Material} mat
-     * @param {number} x
-     * @param {number} y
-     * @param {number} z
-     * @returns {THREE.Mesh}
-     */
-    const add = (geo, mat, x, y, z) => {
-      const mesh = new THREE.Mesh(hero.keepGeo(geo), mat);
-      mesh.position.set(x, y, z);
-      mesh.frustumCulled = false;
-      group.add(mesh);
-      return mesh;
-    };
-    add(new THREE.BoxGeometry(0.18, 0.2, 0.55), dark, 0, 0, -0.28);            // body
-    add(new THREE.BoxGeometry(0.12, 0.16, 0.3), dark, 0, -0.04, 0.05);         // stock
-    for (const y of [0.07, -0.05]) add(new THREE.BoxGeometry(0.1, 0.035, 1.05), steel, 0, y, -0.95);
-    for (let i = 0; i < 5; i++) {
-      const coil = add(new THREE.TorusGeometry(0.085, 0.018, 6, 18), glow, 0, 0.01, -0.6 - i * 0.17);
-      coil.rotation.y = 0;
-    }
-    add(new THREE.BoxGeometry(0.02, 0.02, 0.9), glow, 0, 0.01, -0.95);         // the charge between the rails
-    const { muzzle, flash } = addHandsAndMuzzle(group, -1.5, new THREE.Color(3, 2.6, 0.6));
-    group.traverse((child) => { child.castShadow = false; child.receiveShadow = false; });
-    group.visible = false;
-    Sim.three.scene.add(group);
-    return { group, muzzle, flash, glow };
-  }
-
-  /**
-   * The Black Hole Gun: a squat dark emitter with a black sphere held in
-   * spinning violet rings at the muzzle, glowing brighter when the bar can
-   * pay for a shot.
-   * @returns {NonNullable<typeof holeView>}
-   */
-  function buildHoleGun() {
-    const group = new THREE.Group();
-    group.name = 'hero_view_blackhole';
-    const dark = hero.keepMat(new THREE.MeshStandardMaterial({ color: 0x1a1622, metalness: 0.8, roughness: 0.3, emissive: 0x0a0610 }));
-    const glow = /** @type {THREE.MeshBasicMaterial} */ (hero.keepMat(new THREE.MeshBasicMaterial({ color: new THREE.Color(1.3, 0.5, 2.4) })));
-    const black = hero.keepMat(new THREE.MeshBasicMaterial({ color: 0x000000 }));
-    /**
-     * @param {THREE.BufferGeometry} geo
-     * @param {THREE.Material} mat
-     * @param {number} x
-     * @param {number} y
-     * @param {number} z
-     * @param {THREE.Object3D} [parent]
-     * @returns {THREE.Mesh}
-     */
-    const add = (geo, mat, x, y, z, parent = group) => {
-      const mesh = new THREE.Mesh(hero.keepGeo(geo), mat);
-      mesh.position.set(x, y, z);
-      mesh.frustumCulled = false;
-      parent.add(mesh);
-      return mesh;
-    };
-    add(new THREE.BoxGeometry(0.22, 0.22, 0.6), dark, 0, 0, -0.3);
-    add(new THREE.CylinderGeometry(0.09, 0.13, 0.4, 12).rotateX(Math.PI / 2), dark, 0, 0, -0.75);
-    for (let i = 0; i < 3; i++) add(new THREE.BoxGeometry(0.24, 0.02, 0.05), glow, 0, 0.12, -0.15 - i * 0.14);
-    const core = add(new THREE.SphereGeometry(0.075, 16, 12), black, 0, 0, -1.08);
-    const rings = new THREE.Group();
-    rings.position.set(0, 0, -1.08);
-    group.add(rings);
-    for (let i = 0; i < 2; i++) {
-      const ring = add(new THREE.TorusGeometry(0.13 + i * 0.04, 0.008, 6, 32), glow, 0, 0, 0, rings);
-      ring.rotation.set(i ? 1.1 : 0.4, i ? 0.5 : -0.3, 0);
-    }
-    const { muzzle, flash } = addHandsAndMuzzle(group, -1.08, new THREE.Color(1.4, 0.6, 2.8));
-    group.traverse((child) => { child.castShadow = false; child.receiveShadow = false; });
-    group.visible = false;
-    Sim.three.scene.add(group);
-    return { group, muzzle, flash, glow, core, rings };
-  }
-
-  /**
-   * The Gravitron: a pale emitter with three rings stacked along the
-   * barrel, turning, glowing mint when the bar can pay for a shot.
-   * @returns {NonNullable<typeof gravView>}
-   */
-  function buildGravitron() {
-    const group = new THREE.Group();
-    group.name = 'hero_view_gravitron';
-    const body = hero.keepMat(new THREE.MeshStandardMaterial({ color: 0xc8d0d8, metalness: 0.7, roughness: 0.35 }));
-    const glow = /** @type {THREE.MeshBasicMaterial} */ (hero.keepMat(new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 2.2, 1.6) })));
-    /**
-     * @param {THREE.BufferGeometry} geo
-     * @param {THREE.Material} mat
-     * @param {number} x
-     * @param {number} y
-     * @param {number} z
-     * @param {THREE.Object3D} [parent]
-     * @returns {THREE.Mesh}
-     */
-    const add = (geo, mat, x, y, z, parent = group) => {
-      const mesh = new THREE.Mesh(hero.keepGeo(geo), mat);
-      mesh.position.set(x, y, z);
-      mesh.frustumCulled = false;
-      parent.add(mesh);
-      return mesh;
-    };
-    add(new THREE.BoxGeometry(0.2, 0.2, 0.55), body, 0, 0, -0.28);
-    add(new THREE.CylinderGeometry(0.05, 0.05, 0.75, 10).rotateX(Math.PI / 2), body, 0, 0, -0.85);
-    add(new THREE.SphereGeometry(0.06, 14, 10), glow, 0, 0, -1.25);
-    const rings = new THREE.Group();
-    group.add(rings);
-    for (let i = 0; i < 3; i++) {
-      add(new THREE.TorusGeometry(0.11 - i * 0.015, 0.012, 6, 28), glow, 0, 0, -0.62 - i * 0.2, rings);
-    }
-    const { muzzle, flash } = addHandsAndMuzzle(group, -1.25, new THREE.Color(0.8, 2.6, 1.9));
-    group.traverse((child) => { child.castShadow = false; child.receiveShadow = false; });
-    group.visible = false;
-    Sim.three.scene.add(group);
-    return { group, muzzle, flash, glow, rings };
-  }
 
   /**
    * The bullets, the Fire Gun's flames and the aiming rings, made on first
@@ -548,13 +332,13 @@ export function createHeroWeapons(ctx, hero) {
    *   heroMode.js's
    */
   function view() {
-    if (current() === 'minigun') return minigunView || (minigunView = buildMinigun());
-    if (current() === 'railgun') return railgunView || (railgunView = buildRailgun());
-    if (current() === 'blackhole') return holeView || (holeView = buildHoleGun());
-    if (current() === 'gravitron') return gravView || (gravView = buildGravitron());
+    if (current() === 'minigun') return minigunView || (minigunView = wm().buildMinigun());
+    if (current() === 'railgun') return railgunView || (railgunView = wm().buildRailgun());
+    if (current() === 'blackhole') return holeView || (holeView = wm().buildHoleGun());
+    if (current() === 'gravitron') return gravView || (gravView = wm().buildGravitron());
     if (current() === 'fire') {
       buildEffects();
-      return fireView || (fireView = /** @type {NonNullable<typeof fireGun>} */ (fireGun).build(addHandsAndMuzzle));
+      return fireView || (fireView = wm().buildFireGun());
     }
     return null;
   }
@@ -1244,6 +1028,12 @@ export function createHeroWeapons(ctx, hero) {
     guestFlame: (/** @type {{tick: number}} */ gun, /** @type {number} */ dt, /** @type {THREE.Vector3} */ muzzle, /** @type {THREE.Vector3} */ dir) => {
       buildEffects();
       if (fireGun) fireGun.breathe(gun, dt, muzzle, dir);
+    },
+    // A co-op guest's shot drawn on the host: one tracer in the shared round
+    // pool, cosmetic only (no hit, no casing, no sound; damage is the host's own path).
+    guestTracer: (/** @type {THREE.Vector3} */ from, /** @type {THREE.Vector3} */ to) => {
+      buildEffects();
+      if (bullets) bullets.fire(from, to, null, null, null);
     },
     katanaBladeLine: () => bladeUi.line(),
     hudColour: () => WEAPON_COLOURS[/** @type {keyof typeof WEAPON_COLOURS} */ (current())] || ''

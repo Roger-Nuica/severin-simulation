@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createInputGate } from '../src/app/tornado/engine/net/inputGate.js';
-import { createSnapshotBuffer } from '../src/app/tornado/engine/net/interp.js';
+import { createSnapshotBuffer, createOffsetEstimator, OFFSET_SLEW, INTERP_DELAY, MAX_EXTRAPOLATE } from '../src/app/tornado/engine/net/interp.js';
 import { createEventEmitter, createEventDeduper } from '../src/app/tornado/engine/net/events.js';
 import { createPlayerRegistry, REVIVE } from '../src/app/tornado/engine/net/players.js';
 
@@ -99,6 +99,59 @@ test('an entity missing from the older snapshot appears without blending; discre
   const out = b.sample(0.24);
   assert.deepEqual(out.kinds.terminators.get(7), [7, 5, 5, 0, 1]);
   assert.equal(b.sample(0.24).score, 2);
+});
+
+// ---- clock offset estimator ----
+/** Deterministic jitter in [0, 0.08) s, no Math.random. */
+const jit = (/** @type {number} */ i) => ((i * 2654435761) % 1000) / 1000 * 0.08;
+
+test('offset estimator: first sample taken as is, then the windowed minimum', () => {
+  const e = createOffsetEstimator(4, 1);
+  assert.equal(e.value(), null);
+  assert.equal(e.update(0.5), 0.5);
+  assert.equal(e.update(0.6), 0.5, 'a late arrival does not raise the offset');
+  assert.equal(e.update(0.3), 0.3, 'an earlier arrival lowers it');
+  e.update(0.7); e.update(0.7); e.update(0.7);
+  assert.equal(e.update(0.7), 0.7, 'the old minimum leaves the window');
+  e.clear();
+  assert.equal(e.value(), null);
+});
+
+test('offset estimator: slews, never jumps', () => {
+  const e = createOffsetEstimator(2, 0.01);
+  e.update(0);
+  e.update(5); // window [0, 5]: minimum still 0
+  assert.ok(Math.abs(e.update(5) - 0.01) < 1e-12, 'window now [5, 5]: moves 0.01, not 5');
+  assert.ok(Math.abs(e.update(5) - 0.02) < 1e-12);
+  assert.ok(Math.abs(e.update(-5) - 0.01) < 1e-12, 'and back down at the same rate');
+});
+
+test('jittered replay: render time stays smooth and ordered, clamp holds', () => {
+  const b = createSnapshotBuffer();
+  const naive = [];
+  const render = [];
+  for (let i = 1; i <= 300; i++) {
+    const t = i / 15;
+    b.push(snap(i, t, i), t + 0.03 + jit(i)); // 30 ms base latency plus up to 80 ms jitter
+    const now = t + 0.12;
+    const out = b.sample(now);
+    render.push(out.t);
+    naive.push(now - (0.03 + jit(i)) - INTERP_DELAY);
+  }
+  const maxStep = (/** @type {number[]} */ a) => Math.max(...a.slice(1).map((v, i) => Math.abs(v - a[i])));
+  assert.ok(maxStep(render) < maxStep(naive), 'steadier than following each arrival');
+  for (let i = 1; i < render.length; i++) assert.ok(render[i] >= render[i - 1] - 0.02, 'render time does not run back');
+  const out = b.sample(1000);
+  assert.ok(out.t <= 300 / 15 + MAX_EXTRAPOLATE + 1e-9, 'extrapolation clamp unchanged');
+});
+
+test('a late spike does not move render time, a real clock shift is followed at the slew rate', () => {
+  const b = createSnapshotBuffer();
+  for (let i = 1; i <= 20; i++) b.push(snap(i, i / 15, i), i / 15);
+  const before = b.sample(21 / 15).t;
+  b.push(snap(21, 21 / 15, 21), 21 / 15 + 0.5); // one packet 0.5 s late
+  assert.ok(Math.abs(b.sample(21 / 15).t - before) < 1e-9);
+  assert.ok(OFFSET_SLEW > 0);
 });
 
 test('empty buffer samples to null', () => assert.equal(createSnapshotBuffer().sample(1), null));

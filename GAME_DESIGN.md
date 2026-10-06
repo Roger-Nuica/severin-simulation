@@ -48,7 +48,7 @@ Most threats take health (alien rays, touches, ship lasers, homing missiles, HAV
 
 ### Co-op
 
-Two players can share a town (desktop only), each on their own computer. The host runs the world and is the only one who starts storms, disasters, enemies and modes; the guest's panel keeps only the sound settings and the Hero request. Each Roger plays exactly like the single-player one with its own keys, mouse and camera: on foot A and D turn, right-click raises the weapon and then the mouse looks. Each sees both health bars, both can be Invincible, they can hurt each other, and both can fight and wreck whatever the host has brought in. A downed player cannot move; the partner revives them by holding F beside them, with a countdown, and the run ends when both are down.
+Two players can share a town (desktop only), each on their own computer. The host runs the world and is the only one who starts storms, disasters, enemies and modes; the guest's panel keeps only the sound settings and the Hero request. Each Roger plays exactly like the single-player one with its own keys, mouse and camera: on foot A and D turn, right-click raises the weapon and then the mouse looks. The guest carries the whole weapon wheel, sees the weapon in hand when aiming, and each player sees the other's weapon in hand; the guest's own movement answers at once instead of waiting on the network. Each sees both health bars, both can be Invincible, they can hurt each other, and both can fight and wreck whatever the host has brought in. A downed player cannot move; the partner revives them by holding F beside them, with a countdown, and the run ends when both are down.
 
 ### On a phone or tablet
 
@@ -92,4 +92,6 @@ Short dated notes on how the game changed; the reasoning is in `PROJECT_HISTORY.
 - 2026-10-05 (evening): the aliens' and ships' shots redrawn (flying bolts, lances, soft beams that fade near the camera, small impacts), their own sounds, and the tracking laser warns before it burns.
 - 2026-10-05 (night): co-op rebuilt around ownership: the guest's keys, mouse and camera drive only its own Roger, with the single-player controls; a downed Roger no longer reacts to input; the guest can revive a downed host; the guest has Invincible and a panel with only the sound settings.
 - 2026-10-05 (late): the ships' tracking lasers are thick glowing columns; the mouse wheel keeps first person when moving onto or off the Katana.
+- 2026-10-05 (co-op fixes): the co-op guest raises and sees every weapon on the wheel with shot feedback, each Roger shows the weapon in hand, and the guest's movement is immediate.
+- 2026-10-05 (co-op parity): the guest sees its own shots, flames, Black Hole bolt and Katana cut; teleports like the host's Roger (free for the guest); and flies with the jetpack the same way (Space lights it, held climbs, no fuel), seen by both players.
 - Earlier tuning kept for reference: the mothership comes after 4 abductions (was 5); hunters after 90 s (was 150, then 120); the sombrero wave after 2 minutes; alien speed +30%; the Yeti 10.5 m; satellite funnels off; waterspouts only on request; Hank and the earthquake only from the panel.

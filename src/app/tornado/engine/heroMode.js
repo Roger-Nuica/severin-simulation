@@ -166,7 +166,9 @@ export { SHIP_DAMAGE } from './hero/config.js';
  *   placeRoger: (x: number, z: number) => boolean,
  *   rogerFacing: () => ({x: number, z: number, heading: number}|null),
  *   rogerAim: () => (THREE.Vector3|null),
- *   standable: (x: number, z: number) => boolean,
+ *   standable: (x: number, z: number, above?: number) => boolean,
+ *   groundAt: (x: number, z: number, alt: number) => number,
+ *   rogerAlt: () => number,
  *   freezeRoger: (seconds: number) => boolean,
  *   zipRoger: (x: number, z: number, speed: number) => boolean,
  *   rogerZipping: () => boolean,
@@ -179,6 +181,7 @@ export { SHIP_DAMAGE } from './hero/config.js';
  *   killRoger: (title: string, sub: string, kind?: string) => void,
  *   hitArea: (x: number, z: number, radius: number, title: string, sub: string, source?: string) => void,
  *   guestFlame: (gun: {tick: number}, dt: number, muzzle: THREE.Vector3, dir: THREE.Vector3) => void,
+ *   guestTracer: (from: THREE.Vector3, to: THREE.Vector3) => void,
  *   setCoopDown: (down: boolean) => void,
  *   rogerPose: () => ({x: number, z: number, heading: number, weapon: string, driving: boolean}|null),
  *   weapon: () => string,
@@ -807,11 +810,12 @@ export function createHeroModeSystem(ctx) {
   /**
    * @param {number} x
    * @param {number} z
+   * @param {number} [above] only buildings taller than this block (a flying guest, net/system.js)
    * @returns {boolean} whether Roger could stand there: not in a building,
    *   not over the chasm, inside the map
    */
-  function standable(x, z) {
-    return !api.blockedAt(x, z, HERO.pad);
+  function standable(x, z, above = 0) {
+    return !api.blockedAt(x, z, HERO.pad, above);
   }
 
   /**
@@ -865,7 +869,7 @@ export function createHeroModeSystem(ctx) {
       if (S.state.phase === 'aiming') api.leaveAim();
       S.showcase = { targets, t: 0, shot: -1 };
     },
-    initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, rogerAim: () => (S.state.phase === 'aiming' ? S.aimDir : null), standable, freezeRoger,
+    initHero, updateHero, markers, terminatorDistance, drivingCar: api.drivingCar, notify: api.notify, announce: api.announce, empSweep: api.empSweep, rogerTarget: api.rogerTarget, placeRoger, rogerFacing, rogerAim: () => (S.state.phase === 'aiming' ? S.aimDir : null), standable, groundAt: (/** @type {number} */ x, /** @type {number} */ z, /** @type {number} */ alt) => api.groundAt(x, z, alt), rogerAlt: () => (S.Hero.active && S.roger ? S.state.alt : 0), freezeRoger,
     zipRoger, rogerZipping: () => S.state.zipActive, stopZip: () => { S.state.zipActive = false; }, solidAlong: api.solidAlong, rogerFrozen: () => S.state.frozen > 0, rogerAirborne: () => S.state.airborne,
     // The mothership's downwash (engine/mothershipWind.js): Roger shoved by
     // the wind, on his feet or in the air, kept out of the buildings.
@@ -887,6 +891,7 @@ export function createHeroModeSystem(ctx) {
       return { x: p.x, z: p.z, heading: S.state.heading, weapon: S.weapons ? S.weapons.current() : '', driving: S.state.phase === 'driving', run: S.runs };
     },
     guestFlame: (/** @type {any} */ gun, /** @type {number} */ dt, /** @type {THREE.Vector3} */ muzzle, /** @type {THREE.Vector3} */ dir) => { if (S.weapons) S.weapons.guestFlame(gun, dt, muzzle, dir); },
+    guestTracer: (/** @type {THREE.Vector3} */ from, /** @type {THREE.Vector3} */ to) => { if (S.weapons) S.weapons.guestTracer(from, to); },
     setCoopDown: (/** @type {boolean} */ down) => {
       if (!S.roger) return;
       S.state.coopDown = down;

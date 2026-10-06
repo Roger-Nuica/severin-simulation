@@ -301,7 +301,7 @@ export default function TornadoSimulator() {
                   power lines while it lasts. */}
               <button id="btn-solar" className="pill event" type="button" aria-pressed="false"
                 title="Solar Storm: a flare, then aurora overhead and a blackout across town · cars stall, Terminators and ships lock up · in Hero Mode your EMP (R) runs down the power lines · ~40 s">☀️ Solar Storm</button>
-              {/* engine/strikeTargeting.js: click (or drag) the ground to
+              {/* Strike Targeting: engine/strikeTargeting.js click or drag the ground to
                   call lightning down; Esc or the tile again to stop. */}
               <button id="btn-strike" className="pill event" type="button" aria-pressed="false"
                 title="Lightning: click the ground to call down 3-5 strikes, hold and drag to paint · Esc to stop">🌩️ Lightning</button>

@@ -4,6 +4,7 @@ import { createSpinningStarsTexture } from '../../utils/textures.js';
 import { HERO } from './config.js';
 import { HEALTH } from '../health/config.js';
 import { createKatanaRig } from './katana/model.js';
+import { createWeaponModels } from './weaponModels.js';
 import { dressAsRoger, rogerLimbs } from './rogerLook.js';
 
 /**
@@ -250,76 +251,10 @@ export function createHeroModels(ctx, S, api) {
    * @returns {{group: THREE.Group, muzzle: THREE.Object3D, flash: THREE.Mesh, energy: THREE.MeshBasicMaterial, panel: THREE.CanvasTexture, shown: number}}
    */
   function buildViewRifle() {
-    const group = new THREE.Group();
-    group.name = 'hero_view_rifle';
-    const dark = keepMat(new THREE.MeshStandardMaterial({ color: 0x2c323d, metalness: 0.75, roughness: 0.32, emissive: 0x0c1016 }));
-    const trim = keepMat(new THREE.MeshStandardMaterial({ color: 0x8d98aa, metalness: 0.85, roughness: 0.22, emissive: 0x151a22 }));
-    // His armoured fist and the Storm Ranger's navy sleeve (hero/rogerLook.js).
-    const glove = keepMat(new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.25, metalness: 0.6 }));
-    const sleeve = keepMat(new THREE.MeshStandardMaterial({ color: 0x1a2440, roughness: 0.55, metalness: 0.15 }));
-    // Barely over 1: this close to the eye, anything brighter blooms the
-    // whole rifle into one blue glare.
-    const energy = keepMat(new THREE.MeshBasicMaterial({ color: new THREE.Color(0.22, 0.8, 1.35) }));
-    /**
-     * @param {THREE.BufferGeometry} geo
-     * @param {THREE.Material} mat
-     * @param {number} x
-     * @param {number} y
-     * @param {number} z
-     * @returns {THREE.Mesh}
-     */
-    const part = (geo, mat, x, y, z) => {
-      const mesh = new THREE.Mesh(keepGeo(geo), mat);
-      mesh.position.set(x, y, z);
-      mesh.frustumCulled = false;
-      group.add(mesh);
-      return mesh;
-    };
-    part(new THREE.BoxGeometry(0.17, 0.2, 0.62), dark, 0, 0, -0.35);            // receiver
-    part(new THREE.BoxGeometry(0.14, 0.16, 0.5), dark, 0, 0.01, -0.86);         // fore-end
-    part(new THREE.BoxGeometry(0.09, 0.05, 0.9), trim, 0, 0.125, -0.55);        // top rail
-    part(new THREE.BoxGeometry(0.03, 0.03, 0.95), energy, 0, 0.16, -0.56);      // energy strip
-    for (const side of [-1, 1]) {
-      part(new THREE.BoxGeometry(0.02, 0.045, 0.8), energy, side * 0.088, 0.01, -0.58);
-      const fin = part(new THREE.BoxGeometry(0.2, 0.015, 0.2), trim, side * 0.12, 0.03, -0.98);
-      fin.rotation.z = side * 0.35;
-    }
-    const barrel = part(new THREE.CylinderGeometry(0.045, 0.055, 0.5, 12), trim, 0, 0.02, -1.3);
-    barrel.rotation.x = Math.PI / 2;
-    const ring = part(new THREE.TorusGeometry(0.07, 0.018, 8, 20), energy, 0, 0.02, -1.55);
-    ring.rotation.y = 0;
-    const tip = part(new THREE.CylinderGeometry(0.06, 0.06, 0.05, 12), energy, 0, 0.02, -1.58);
-    tip.rotation.x = Math.PI / 2;
-    // The readout, on the back of the receiver facing the eye.
-    const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 80;
-    const panel = new THREE.CanvasTexture(canvas);
-    panel.colorSpace = THREE.SRGBColorSpace;
-    S.runTextures.push(panel);
-    const screen = part(new THREE.PlaneGeometry(0.15, 0.094), keepMat(new THREE.MeshBasicMaterial({ map: panel, toneMapped: false })), 0, 0.16, -0.12);
-    screen.rotation.x = -0.55;
-    // His hand on the grip and the red sleeve running out of shot.
-    part(new THREE.BoxGeometry(0.13, 0.14, 0.2), glove, 0.01, -0.14, -0.22);
-    const arm = part(new THREE.CylinderGeometry(0.075, 0.09, 0.7, 10), sleeve, 0.06, -0.33, 0.1);
-    arm.rotation.x = 1.0;
-    // The other hand, under the fore-end.
-    part(new THREE.BoxGeometry(0.12, 0.1, 0.18), glove, -0.02, -0.12, -0.9);
-    const arm2 = part(new THREE.CylinderGeometry(0.07, 0.085, 0.9, 10), sleeve, -0.2, -0.38, -0.62);
-    arm2.rotation.set(0.9, 0, -0.6);
-    const muzzleNode = new THREE.Object3D();
-    muzzleNode.position.set(0, 0.02, -1.62);
-    group.add(muzzleNode);
-    const flashMesh = new THREE.Mesh(keepGeo(new THREE.SphereGeometry(0.12, 12, 8)), keepMat(new THREE.MeshBasicMaterial({
-      color: new THREE.Color(0.8, 1.8, 4), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false
-    })));
-    flashMesh.visible = false;
-    flashMesh.frustumCulled = false;
-    muzzleNode.add(flashMesh);
-    group.traverse((child) => { child.castShadow = false; child.receiveShadow = false; });
-    group.visible = false;
-    Sim.three.scene.add(group);
-    const vm = { group, muzzle: muzzleNode, flash: flashMesh, energy, panel, shown: -1 };
+    const vm = { ...createWeaponModels({
+      scene: Sim.three.scene, keepGeo, keepMat,
+      keepTexture: (texture) => { S.runTextures.push(texture); return texture; }
+    }).buildRifle(), shown: -1 };
     drawChargePanel(vm);
     return vm;
   }

@@ -37,6 +37,7 @@ export const TELEPORT = {
  * @param {Object} ctx
  * @returns {{
  *   jump: () => boolean,
+ *   warpAt: (x: number, z: number, inward: boolean) => void,
  *   landingSpot: () => ({x: number, z: number}|null),
  *   initTeleport: () => void,
  *   updateTeleport: (rawDt: number) => void,
@@ -199,5 +200,5 @@ export function createTeleportSystem(ctx) {
     geometries.length = 0;
   }
 
-  return { jump, landingSpot, initTeleport, updateTeleport, resetTeleport, disposeTeleport };
+  return { jump, warpAt, landingSpot, initTeleport, updateTeleport, resetTeleport, disposeTeleport };
 }

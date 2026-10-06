@@ -48,6 +48,7 @@ export const BULLETS = {
 
 /**
  * @param {Object} ctx
+ * @param {{max?: number, casings?: number}} [opts] pool sizes: the bullets alive at most, and the casings (a tracer-only pool, a co-op guest's, asks for few)
  * @returns {{
  *   fire: (from: THREE.Vector3, to: THREE.Vector3, hit: BulletHit, eject: THREE.Vector3, side: THREE.Vector3) => void,
  *   setFrozen: (on: boolean) => void,
@@ -57,9 +58,11 @@ export const BULLETS = {
  *   dispose: () => void
  * }}
  */
-export function createBullets(ctx) {
+export function createBullets(ctx, opts = {}) {
   const { Sim } = ctx;
-  const N = BULLETS.max;
+  const N = opts.max || BULLETS.max;
+  // A pool that only draws tracers (a co-op guest's) needs no casings: one slot, never used.
+  const shellN = opts.casings === undefined ? BULLETS.casings : Math.max(1, opts.casings);
   const bodyGeo = new THREE.CapsuleGeometry(BULLETS.radius, BULLETS.length, 3, 8);
   bodyGeo.rotateX(Math.PI / 2);
   const brass = new THREE.MeshStandardMaterial({ color: BULLETS.brass, metalness: 0.9, roughness: 0.3, emissive: 0x2a1d06 });
@@ -74,7 +77,7 @@ export function createBullets(ctx) {
   const trailMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 1.5, 0.6), transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
   const trails = new THREE.InstancedMesh(trailGeo, trailMat, N);
   const casingGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.11, 6);
-  const casings = new THREE.InstancedMesh(casingGeo, brass, BULLETS.casings);
+  const casings = new THREE.InstancedMesh(casingGeo, brass, shellN);
   for (const mesh of [bodies, tips, trails, casings]) {
     mesh.frustumCulled = false;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -93,7 +96,7 @@ export function createBullets(ctx) {
   }
   /** @type {{pos: THREE.Vector3, vel: THREE.Vector3, spin: THREE.Vector3, rot: THREE.Euler, life: number}[]} */
   const shells = [];
-  for (let i = 0; i < BULLETS.casings; i++) {
+  for (let i = 0; i < shellN; i++) {
     shells.push({ pos: new THREE.Vector3(), vel: new THREE.Vector3(), spin: new THREE.Vector3(), rot: new THREE.Euler(), life: 0 });
   }
   let nextBullet = 0;
@@ -111,9 +114,9 @@ export function createBullets(ctx) {
    * One round out of the muzzle, and its casing out of the side.
    * @param {THREE.Vector3} from the muzzle
    * @param {THREE.Vector3} to where it will stop
-   * @param {BulletHit} hit what happens there
-   * @param {THREE.Vector3} eject where the casing comes out
-   * @param {THREE.Vector3} side the gun's right, for the casing's throw
+   * @param {BulletHit|null} hit what happens there (null: a tracer only, nothing lands, as a co-op guest's shot drawn on the host)
+   * @param {THREE.Vector3|null} eject where the casing comes out (null: no casing)
+   * @param {THREE.Vector3|null} side the gun's right, for the casing's throw
    * @returns {void}
    */
   function fire(from, to, hit, eject, side) {
@@ -128,8 +131,9 @@ export function createBullets(ctx) {
     b.hang = frozen ? BULLETS.hangAfter : Infinity;
     b.hit = hit;
     b.live = true;
+    if (!eject || !side) return;
     const c = shells[nextShell];
-    nextShell = (nextShell + 1) % BULLETS.casings;
+    nextShell = (nextShell + 1) % shellN;
     c.pos.copy(eject);
     c.vel.copy(side).multiplyScalar(2.5 + Math.random() * 1.5);
     c.vel.y += 2 + Math.random() * 1.5;
@@ -213,7 +217,7 @@ export function createBullets(ctx) {
     // The casings: on the world's time, so they hang in Bullet Time too.
     const dt = rawDt * worldScale;
     let shown = 0;
-    for (let i = 0; i < BULLETS.casings; i++) {
+    for (let i = 0; i < shellN; i++) {
       const c = shells[i];
       if (c.life <= 0) {
         casings.setMatrixAt(i, hidden);

@@ -38,7 +38,6 @@ export const FIRE_GUN = {
  * @param {{keepGeo: (g: THREE.BufferGeometry) => THREE.BufferGeometry, keepMat: (m: THREE.Material) => THREE.Material,
  *   flashMessage: (text: string) => void, rogerPosition: () => THREE.Vector3}} hero
  * @returns {{
- *   build: (addHandsAndMuzzle: (group: THREE.Group, z: number, colour: THREE.Color) => {muzzle: THREE.Object3D, flash: THREE.Mesh}) => {group: THREE.Group, muzzle: THREE.Object3D, flash: THREE.Mesh, pilot: THREE.Mesh},
  *   breathe: (gun: {tick: number}, dt: number, muzzle: THREE.Vector3, aimDir: THREE.Vector3) => void,
  *   update: (dt: number, firing: boolean, muzzle: THREE.Vector3|null, aimDir: THREE.Vector3) => void,
  *   clear: () => void,
@@ -54,45 +53,7 @@ export function createFireGun(ctx, hero) {
   let tickClock = 0;
   const from = new THREE.Vector3();
 
-  /**
-   * The close-up model: a fuel tank under a stubby barrel, a wide nozzle
-   * with a blue pilot flame at its lip.
-   * @param {(group: THREE.Group, z: number, colour: THREE.Color) => {muzzle: THREE.Object3D, flash: THREE.Mesh}} addHandsAndMuzzle
-   * @returns {{group: THREE.Group, muzzle: THREE.Object3D, flash: THREE.Mesh, pilot: THREE.Mesh}}
-   */
-  function build(addHandsAndMuzzle) {
-    const group = new THREE.Group();
-    group.name = 'hero_view_firegun';
-    const steel = hero.keepMat(new THREE.MeshStandardMaterial({ color: 0x5c5f66, metalness: 0.85, roughness: 0.35, emissive: 0x101114 }));
-    const red = hero.keepMat(new THREE.MeshStandardMaterial({ color: 0xa3261b, metalness: 0.4, roughness: 0.5 }));
-    const blue = hero.keepMat(new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 1.2, 3), transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
-    /**
-     * @param {THREE.BufferGeometry} geo
-     * @param {THREE.Material} mat
-     * @param {number} x
-     * @param {number} y
-     * @param {number} z
-     * @returns {THREE.Mesh}
-     */
-    const add = (geo, mat, x, y, z) => {
-      const mesh = new THREE.Mesh(hero.keepGeo(geo), mat);
-      mesh.position.set(x, y, z);
-      mesh.frustumCulled = false;
-      group.add(mesh);
-      return mesh;
-    };
-    add(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 14).rotateX(Math.PI / 2), red, 0, -0.12, -0.3);      // the tank
-    add(new THREE.BoxGeometry(0.12, 0.12, 0.5), steel, 0, 0.04, -0.3);                                  // body
-    add(new THREE.CylinderGeometry(0.035, 0.035, 0.6, 10).rotateX(Math.PI / 2), steel, 0, 0.04, -0.82); // barrel
-    add(new THREE.CylinderGeometry(0.07, 0.045, 0.14, 12).rotateX(Math.PI / 2), steel, 0, 0.04, -1.16); // nozzle
-    const pilot = add(new THREE.SphereGeometry(0.03, 8, 6), blue, 0, 0.04, -1.25);
-    const { muzzle, flash } = addHandsAndMuzzle(group, -1.25, new THREE.Color(3, 1.6, 0.5));
-    muzzle.position.y = 0.04;
-    group.traverse((child) => { child.castShadow = false; child.receiveShadow = false; });
-    group.visible = false;
-    Sim.three.scene.add(group);
-    return { group, muzzle, flash, pilot };
-  }
+  // (The close-up model is hero/weaponModels.js's `buildFireGun`.)
 
   /**
    * Is (x, z) in the cone from (ox, oz) along dir, as far as range?
@@ -273,5 +234,5 @@ export function createFireGun(ctx, hero) {
     flames.release();
   }
 
-  return { build, update, breathe, clear, dispose };
+  return { update, breathe, clear, dispose };
 }
