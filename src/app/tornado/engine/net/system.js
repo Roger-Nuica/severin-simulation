@@ -821,7 +821,7 @@ export function createNetSystem(ctx) {
         }
       }
       // The jetpack: Space held climbs, let go it sinks gently; down or seated, it lets go.
-      stepGuestAir(p, a, ctl.move && p.state === 'up' && (input.abil & JET_BIT) !== 0, ctl.move, dt, h);
+      stepGuestAir(p, a, !!input && ctl.move && p.state === 'up' && (input.abil & JET_BIT) !== 0, ctl.move, dt, h);
       pos.set(p.x, a.alt, p.z);
       a.obj.mesh.rotation.y = p.heading;
       // Down: lying flat; revived: upright.
