@@ -439,7 +439,7 @@ export function createNetSystem(ctx) {
       }
       case 'input': {
         const r = gate.accept(msg, (id) => id !== '0' && !!players.get(id));
-        if (!r.ok) { if (dbg) dbg.reject(r.error); return; }
+        if (!r.ok) { if (dbg) dbg.reject('error' in r ? r.error : ''); return; }
         if (dbg) dbg.inputAccepted(performance.now());
         const p = players.get(r.id);
         if (p) {
@@ -887,7 +887,7 @@ export function createNetSystem(ctx) {
    * acceleration; aiming, W and S walk along the look and A and D strafe.
    * Walls by heroMode.standable, each axis on its own so a wall slides.
    * @param {import('./players.js').Player} p
-   * @param {{speed: number}} a The guest's avatar (keeps the run speed).
+   * @param {{speed: number, air: boolean, alt: number}} a The guest's avatar (keeps the run speed and height).
    * @param {import('./protocol.js').PlayerInput} input
    * @param {number} dt
    * @returns {void}
@@ -1084,7 +1084,7 @@ export function createNetSystem(ctx) {
       a.cd = KATANA.cooldown;
       // A cut in front of the guest: the nearest enemy inside the arc takes a blade hit.
       let target = null;
-      let bestD = KATANA.reach;
+      let bestD = /** @type {number} */ (KATANA.reach);
       ctx.systems.enemies.each((/** @type {any} */ e, /** @type {any} */ kind) => {
         if (!kind.accepts.includes('blade')) return;
         const q = kind.position(e);
@@ -1107,7 +1107,7 @@ export function createNetSystem(ctx) {
       // does) and credited at the person-kill value. `blade` is sent to no kind.
       /** @type {any} */
       let person = null;
-      let bestPerson = KATANA.reach;
+      let bestPerson = /** @type {number} */ (KATANA.reach);
       ctx.systems.people.eachCuttable((/** @type {any} */ c) => {
         const q = c.mesh.position;
         const d = Math.hypot(q.x - ox, q.z - oz);
@@ -1373,7 +1373,7 @@ export function createNetSystem(ctx) {
           const el = /** @type {HTMLElement} */ (child);
           if (PEER_UI_ALLOWED(el)) continue;
           if (!keeps(el)) {
-            if (!S.hiddenUi.has(el)) { S.hiddenUi.set(el, el.hidden); el.hidden = true; }
+            if (!S.hiddenUi.has(el)) { S.hiddenUi.set(el, !!el.hidden); el.hidden = true; }
           } else if (el.tagName !== 'DETAILS') hideOthers(el);
         }
       };
@@ -1589,7 +1589,7 @@ export function createNetSystem(ctx) {
       const lit = feedback.flash > 0 && feedback.flashKey === key;
       parts.flash.visible = lit;
       if (lit) {
-        parts.flash.material.opacity = flashOpacity(feedback.flash);
+        /** @type {THREE.MeshBasicMaterial} */ (parts.flash.material).opacity = flashOpacity(feedback.flash);
         parts.flash.scale.setScalar(SHOT_LOOK[/** @type {keyof typeof SHOT_LOOK} */ (key)]?.scale || 1);
       }
       if (parts.barrels) parts.barrels.rotation.z += feedback.spin * dt;
