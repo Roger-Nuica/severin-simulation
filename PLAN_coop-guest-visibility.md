@@ -1,0 +1,375 @@
+# Plan: Co-op guest visibility (the guest sees the host's world)
+
+## Goal
+Make the co-op guest (ROGER 2) a full player of the host's world: (1) **visibility**: see what the host's simulation does, and (2) **combat and rules**: what the guest's weapons do to people, the world and the other Roger must match what the host's own weapons do, and the guest must not die in ways it cannot see or explain. The scope is the whole co-op contract, not only drawing. Visibility: every weapon shot by either player, the Black Hole, the tornado and, in phases, the other disasters, explosions and world effects, drawn by the same builders and with the same look as in single player. The host stays authoritative (R-053, R-054: damage only on the host, cosmetic only on the guest). No new gameplay, no cap raised (R-048).
+
+This plan contains no production code. It follows the owner's two-browser report of 2026-10-06. Nothing here has been run in two browsers: each finding says whether it is **confirmed from code** or a **hypothesis** that the first subtask (a diagnostic) settles.
+
+## Owner's decisions, 2026-10-06 (recorded; they replace the "recommended defaults" below)
+**Governing principle (the owner's words): THE GUEST MUST HAVE ALL THE POWERS THAT THE HOST HAS, AND ALL THE EXACT WEAPONS WITH THE SAME LOGIC AND EFFECTS: HOST AND GUEST SHOULD BE ABLE TO PLAY THE SAME, EXCEPT FOR CREATING TORNADOES AND DISASTERS.** Wherever this plan, an earlier plan or a rule gives the guest less than the host's Roger (a weapon, an ability, a movement power, an effect on the world, what the guest sees), that is a gap to close, not a design. The one difference the owner allows is that **only the host creates tornadoes and disasters** (the panel's storm, presets, disasters, modes; the guest's panel stays as it is). Everything else the host's Roger can do, the guest can do, with the host's own logic and effects: not a lookalike, not a second table. The other differences allowed are the ones the host's authority forces (damage and world state are resolved on the host; the guest's screen is drawn from what the host says).
+
+The owner answered "yes" or "default" to every clarification, with the extras below. Each is also written into `.claude/rules.md` as R-061 (the owner asked for them to be added to the rules; R-061 is a proposed rule, so the owner's explicit approval of the wording is still due, as R-060's was).
+1. The 2026-10-05 decision "no new event type" is **reversed**: guest-visible effects travel in an additive snapshot `fx` field plus state rows.
+2. `PROTOCOL_VERSION` goes from 3 to **4**; the relay is redeployed with the host and the guest.
+3. The Black Hole and the vortex get small additive render-only entry points; their gameplay paths stay unchanged.
+4. Town destruction may differ between the two screens in phases 1 and 2, until Subtask 13 reports.
+5. Disaster and figure order as proposed in Subtasks 11 and 12.
+6. The guest's railgun cooldown **matches the host's** (0.2 s). Subtask 14c is therefore no longer blocked on the owner.
+7. Both players' shots look identical on both screens (the rifle as the plasma beam, the railgun as lightning, the minigun's bullets with casings and sparks), replacing the tracer.
+8. Sounds for host events play on the guest (existing recipes at the event's position, with a per-kind rate cap).
+9. **Time Slow and Bullet Time work for both players and affect both** (answered 2026-10-06, replacing the earlier default of a tint only on the guest): whoever presses Q, the world slows on both screens, with the tint and the muffled sound on both, and the guest's own Q works as the host's does. **Only the world slows, for now**: each Roger keeps full speed inside the slowed world, as the host's Roger does today, and neither Roger is slowed by the other's Q (the owner, 2026-10-06). A second Q while one is active is refused, as the host's own press is.
+10. The host's flash and sound reach the guest; no camera shake on the guest.
+11. Friendly fire: **on** for both players, as written; the stale `docs/weapons.md:46` is corrected; the guest's rifle gets the blast.
+12. The staged shared-shooter abstraction is approved (resolve half only, hitscan first), with the manual stop after C2.
+13. **The guest's rifle gets the host's charge and the MEGA BEAM** (hold to charge). This needs the charge to travel in the input (an additive input field; part of the version 4 change).
+15. **Same logic, not a parallel copy.** A guest's weapon or ability runs the host's real code with the guest as shooter or actor (the staged shared-shooter abstraction, C1 to C3), and the end state has **no separate guest weapon table**: `net/guestWeapons.js` keeps only the gating the host's flow also has (raised weapon, Katana exception, input pacing), and the damage, range, cooldown, ammo, energy, blast, kill circle, charge and MEGA BEAM numbers all come from the one definition the host uses. Subtask C7 retires the table.
+16. **Play the same.** The guest is a second Roger in every respect except creating tornadoes and disasters: the same wheel, abilities, jetpack, Invincible and revive. **The car stays as it is: the guest rides as the passenger (the owner, 2026-10-06: "passenger"); it does not drive.** **Every ability is free for the guest and for the host** (the owner, 2026-10-06: "free for all"; the energy is infinite for now, `ENERGY.infinite`, and the cost values are disabled, not removed).
+14. Black Hole inside its own no-escape zone: keep R-031 (the caster dies, as Roger does), make it legible (the hole visible plus a warning to the shooter); no number change. This is the one place where the "same powers" principle and the safety rule meet: the guest dies exactly as the host's Roger would.
+
+## Reading done
+`CLAUDE.md`, `.claude/rules.md` (R-013, R-030, R-047, R-048, R-049, R-050, R-051, R-053, R-054, R-059, R-060), `docs/architecture.md` ("Co-op: who owns what"), `PLAN_coop-guest-fixes.md` (Subtasks 8 to 13, "Protected-value, cap and protocol items", Clarifications), `PROJECT_HISTORY.md` part 1 (co-op network measurements: 162 KiB/s worst case, typical snapshot under 1 KB), `.claude/skills/full-autonomous-run/SKILL.md` (classification, mandatory stop). Code read: `net/system.js`, `net/protocol.js`, `net/events.js`, `net/interp.js`, `net/shotFeedback.js`, `net/guestWeapons.js`, `relay/server.mjs`, `heroWeapons.js`, `hero/bullets.js`, `hero/plasma.js`, `hero/fireGun.js`, `player/blackHole.js`, `tornadoes.js`, `vortex.js` (birth, scale), `stormLife.js` (birth), `lightning.js` (`strikeAt`), `tornadoEngine.js` (frame), `engine/events.js`, `rng.js`.
+
+## Root-cause summary
+
+One architectural cause explains every symptom. The guest's browser runs a full second copy of the engine, but keeps it idle on purpose (`net/system.js:53-55`: "the local simulation stays idle so its own storm/enemies never diverge from the host's"). Whatever the host's simulation does is drawn only in the host's scene. The wire carries almost none of it: the snapshot has six entity kinds plus `hp`, `alt` and `ack` (`net/protocol.js:60`, `:172`), and the event whitelist has eleven kinds, none about a projectile, an effect or a disaster (`protocol.js:63`). Only entity positions cross; the guest draws them as placeholder primitives.
+
+| # | Symptom | Root cause (file:line) | Status |
+|---|---|---|---|
+| RC1 | Nothing the host's weapons make is visible to the guest (symptom 2) | Host rounds are spawned into the host's own pools: minigun `bullets.fire` (`heroWeapons.js:620`), plasma beam `S.beam` (`hero/plasma.js:363-460`, `:752-790`), railgun `strikeTargeting.boltAt` (`heroWeapons.js:703-740`; `lightning.strikeAt`, `lightning.js:479`). No hook emits them; `buildSnapshot` (`net/system.js:1162`) has no field for them | Confirmed |
+| RC2 | Black Hole invisible, host's and guest's (symptom 1) | The hole (look, matter, wind, lens, sound, hazard) lives in the host's `blackHole` system (`player/blackHole.js:127-142`, `:413-445`). A guest shot reaches it only through `blackHole.fire` on the host (`net/system.js:1137`). No snapshot field or event carries it. The guest's own copy of the system is initialised but never opened. The guest's own bolt is drawn as a bullet tracer (`TRACER_KEYS` includes `blackhole`, `net/system.js:1521`) | Confirmed |
+| RC3 | Fire Gun: guest cannot see the host's flames (symptom 3) | Host flames come from `fireGun.update` into the host's `createTrexFlames` pool (`hero/fireGun.js:186-200`); nothing replicates "firing", yaw or pitch. The guest's own flames exist (`breatheFlame`, `net/system.js:1643`, driven by `step.flame` at `:1917`) | Host side confirmed. Guest's own flames: **hypothesis** (code path exists; whether it shows is unverified in a browser; candidates are the shared particle budget and the flame pool's `init` order). The diagnostic checks it |
+| RC4 | Guest's rifle looks like a small bullet; minigun lacks casings, sparks, muzzle effects (symptom 4) | `drawTracer` (`net/system.js:1625-1634`) always uses a bullet pool made with `casings: 0` (`:1626`), passes `hit = null, eject = null` to `rounds.fire`, and updates it with `noLanding` (`:1522`, `:1916`). In `bullets.js` casings need `eject` and sparks need `hit` (`hero/bullets.js:122-146`, `:187-195`). The rifle has no beam: the host's rifle is the three-layer plasma beam from `buildBeam` (`plasma.js:363-404`), which the guest never builds. On the host, a guest's rifle, railgun and hole shot also appear only as tracers (`heroWeapons.js:1034-1037`) | Confirmed |
+| RC5 | Tornado not seen (symptom 5) | The row is `[i, x, z, Sim.params.radius]` (`net/system.js:1180-1181`) and the guest draws a bare grey 45% opacity open cone (`makeProxy`, `net/system.js:1477-1510`; `obj.scale.set(row[3], 140, row[3])` at `:1872-1874`). It never carries the funnel's `birth`, `sizeMul`, `fade` or lean (`vortex.js:695-720`), so it cannot show touchdown, size or rope-out, and uses none of the real funnel's particles, dust ring, collar or lighting. The guest's real funnel (`ctx.tornadoes`, instance 0) is active but hidden: `group.visible = active && birth > 0.001` (`vortex.js:698`) and `birth` only advances while `Sim.state.running` (`stormLife.js:75-86`), which is false on the guest | Placeholder confirmed. "Why it is faint or invisible": **hypothesis** (a flat grey standard material in a dark, stormy scene; also drawn before Start with birth 0). Diagnostic line prints proxy count, position and radius |
+| RC6 | Every other host effect missing | Explosions: the host does send an `explosion` event (`net/system.js:2072`) but the guest's `peerMessage` switch has no case and falls to `default` (`:1346`): sent, never drawn. Disasters, fires, floods, lightning, debris and the rest have no channel | Confirmed |
+| RC7 | Other enemies and actors invisible; placeholders for the rest | `buildSnapshot` sends only `terminator`/`pursuer` (`net/system.js:1184`), aliens, the UFO and hunters, moving cars. T-Rex, Yeti, Patient Zero, Hank, HAVOC, samurai, cows, train, GHOST jets, helicopter, mothership are not sent at all. The ones that are sent are a capsule, sphere, disc and box (`makeProxy`) | Confirmed |
+| RC8 | The relay is not the cause, but bounds the fix | `relay/server.mjs:71` `hostOut` bucket = 15 x 2 + 30 = 60 frames/s; frame limit 64 KiB (`protocol.js` `maxBytes`, `server.mjs:48`); an event `data` is capped at 1,024 B (`protocol.js:235`) and 30 events/s (`LIMITS.eventRate`). Projectiles as one event each would clip: the minigun alone is 18 rounds/s (`MINIGUN.rate`), a guest's 11/s | Confirmed |
+
+Not a root cause: relay drops, interpolation or prediction (those were the previous plan). The crash `Cannot read properties of null (reading 'abil')` is already fixed in the working tree (`net/system.js:824`, `!!input &&`).
+
+### Second group (owner's report, 2026-10-06): combat and damage
+
+| # | Symptom | Root cause (file:line) | Status |
+|---|---|---|---|
+| RC9 | A (the guest cannot kill people) | The guest's rifle, minigun and railgun resolve through `scan` (`net/system.js:1006-1024`), which walks only `ctx.systems.enemies.each`. People are not registry kinds, so a ray never sees them; neither does it see buildings, cars, trees, the UFO, the mothership, nuclear plants, tornadoes or samurai, and it ignores walls (a shot passes through a building to an enemy behind it). The host's weapons use `traceAim` (`hero/plasma.js:261-355`, which does include people, cars, trees, buildings and the ground) and then `landRound` (`heroWeapons.js:645`), `plasmaHit` (`plasma.js:562`) and `boltAt`. Which guest weapons reach people today: **Katana yes** (`people.eachCuttable`, `net/system.js:1100-1111`); **Fire Gun yes** (`fireGun.scorch` calls `people.explodePerson` in the cone, `fireGun.js:125-131`); **Black Hole yes** (the hole's `consumables` include people inside the 40 m zone); **rifle, minigun, railgun: no**. The rifle's blast radius (people within the blast), mega beam and the rail's 5 m kill circle are also missing | Confirmed from code |
+| RC10 | B (the guest dies after shooting the Black Hole Gun) | `guestFire` places the hole where the aim meets the ground, or on the enemy hit (`net/system.js:1124-1141`), with only the 12 m minimum range (`HOLE_MIN_RANGE`, matching the host's `HOLE_GUN.minRange`, `heroWeapons.js:93`) and no check against the 40 m no-escape zone. Each frame the host's hole calls `consumeCaster` (`player/blackHole.js:222-233`), which calls `net.hitGuestsArea(x, z, HOLE.escape * strength, {instantKill: true})` for every guest inside the zone, whoever cast it, then `damagePlayer` to `catchPlayer` downs the guest. So a guest that aims 12 to 40 m away stands inside its own hole and is killed as the hole opens (`strength` grows over the opening seconds, so the zone widens under it). This is R-031 and R-053 working as written ("Roger is no longer exempt", "the hole also swallows a guest inside the zone"), not a bug in the rule. What makes it "very weird" is RC2: the guest cannot see the hole, so it dies to an invisible hole; it also gets no warning, and the host's Roger shooting a hole near the guest kills the guest the same way | Cause confirmed from code; **hypothesis**: that this is the owner's case (the diagnostic logs hole centre, guest distance at open and at each kill) |
+| RC11 | C (the guest cannot hurt the host's Roger; "nothing works as expected") | Routing exists in both directions and friendly fire is on (`FRIENDLY_FIRE = true`, `players.js:24`; `mayHurtPlayer`, `friendlyFire.js:29`): guest rifle, minigun, railgun use `hurtRay` (`net/system.js:1081-1082`), Fire Gun and Katana use `hurtSector`; the host's own use `hurtRay`, `hurtArea`, `splashGuests`, `hurtSector` (`heroWeapons.js:607`, `:724`, `plasma.js:437`, `:543`, `fireGun.js:109`, `katana/slash.js:259`). Gaps in the code: the guest's rifle has no blast splash and no mega charge, so `splashGuests` is never used by a guest (the host's Roger is not hurt by a near miss); the guest's railgun is a ray (`hurtRay` `bolt`) while the host's is a 5 m ground circle (`hurtArea`); the body test is a cylinder at the guest's ground-height eye (`EYE`), ignoring altitude (`rayBodyDistance`, `friendlyFire.js` BODY radius 0.5, top 1.9); the amounts are small (bullet 3, fire 2 a tick, blade 10, plasma 15, `health/config.js:180-191`) and the 0.2 s hit window hides repeats. `damagePlayer` ignores the host's Roger entirely while Hero Mode is off, during the spawn shield (3 s), with Invincible on (V), when dying or won (`health/system.js:147-156`, `:214-219`), and he is positioned from `rogerPose()` only while Hero is active (`updateGuests`, `net/system.js:727-740`). Whether any of these explains the report is unconfirmed | Gaps confirmed; the cause of the report is a **hypothesis** that the combat diagnostic (C0) settles |
+
+Rules versus code on friendly fire (reported, not reconciled): R-053 (`.claude/rules.md`, health bar rule), `docs/combat.md:73` and `GAME_DESIGN.md:47` all say **friendly fire is on**, and the code agrees (`FRIENDLY_FIRE = true`). But `docs/weapons.md:46` says "Not routed: Roger's minigun, railgun, Fire Gun and Katana against the guest, and the guest's plasma splash and Fire Gun against Roger", while the code does route Roger's minigun, railgun, Fire Gun and Katana (call sites above) and the guest's Fire Gun (`scorch(..., shooter)`). `docs/weapons.md:46` is stale on those; only the guest's plasma splash is genuinely unrouted. The owner decides the intended rule (Clarification 11).
+
+## Why this keeps going wrong
+
+The guest is a thin client of a host-authoritative simulation. Everything that makes a shot matter (target finding with walls, people, cars, trees, ships; blast radius; scoring; burning; the hole's pull; effects) lives in the host's single-player code paths (`heroWeapons.js`, `hero/plasma.js`, `hero/fireGun.js`, `hero/katana/`, `player/blackHole.js`, `effects/`), written around "the shooter is Roger, at the camera, with the viewmodel". The guest path in `net/system.js` re-implements a thin subset beside them (`guestFire`, `scan`, `guestFlame`, `guestTracer`, the `GUEST_WEAPONS` table). Each symptom is a place where the parallel copy lacks something the original has: people (A), the zone rule (B), the blast and body rules (C), the beam and casings (visibility). The next weapon change will drift again.
+
+Options, honestly:
+
+| | Continue the parallel table | Shared code paths (an abstract `shooter`) |
+|---|---|---|
+| What | Keep `guestFire` and add what is missing, case by case | A `shooter` value `{id, origin, aim, muzzle, altitude, isHost}`; the host's resolve half (trace, hit dispatch, blast, scoring, flame tick, hole open) takes a shooter instead of reading the camera, Roger's position and the viewmodel; Roger's weapons and `guestFire` both call it |
+| Cost now | Low per fix, but at least: people, buildings, cars, trees, ships, nuclear, tornado, blasts, mega charge, scoring, occlusion, all re-written for the guest | Real refactor of protected, hot code (`heroWeapons.js` 1,041 lines, `plasma.js` 792, `fireGun.js` 238) with single-player regression risk; every weapon its own SEPARATE subtask with bench and manual checks |
+| Cost later | Every weapon change must be made twice; drift is certain (this report is the evidence) | One place per weapon; visibility's single emit point (`weaponFx`, Subtask 3) falls out of the same function, so effects and damage cannot disagree |
+| Testability | Poor: logic is inside `net/system.js` with the scene | Good: the resolve half takes ports (trace, hit, people, health, effects), so a fake world can assert what died and what was created |
+| Risk | Quiet divergence | A regression in single player if a Roger-only dependency is missed |
+
+**Recommendation: shared code paths, staged, resolve half only.** The feedback half (viewmodel, HUD, ammo, energy bar, flash, `flashMessage`) stays Roger-bound; only what a shot does to the world moves behind a `shooter`. Staged by weapon, hitscan first, because `traceAim(o, d)` already takes an origin and a direction (`plasma.js:261`) and is the cheapest seam: Stage 1 swaps the guest's `scan` for the host's `traceAim` and dispatch (fixes A for the three guns at once); Stage 2 does the rifle's blast and the rail circle (fixes C's splash and area gaps); Stage 3 the Black Hole's placement and zone rule and the Fire Gun (already shared). The Katana is already shared in effect. Cost to say plainly: five to seven SEPARATE subtasks touching protected weapons, each with a before-and-after bench and a manual check, instead of one big diff; the parallel table is cheaper this week and dearer every week after.
+
+### Test strategy that would have caught these
+A full-engine headless test is not available: the engine needs Three.js, a DOM and WebGL, and `npm test` covers pure logic only (`CLAUDE.md`). So: (1) make the resolve half take ports, then write **per-weapon contract tests** with a fake world (a few people, a wall, a car, an enemy, the other Roger): for each of the six weapons and for each of the two shooters (host id `'0'`, guest id `'1'`), fire at each target and assert what died, burned, was created, scored and hurt; the table is weapon x target x shooter, and the same table must give the same row for both shooters. (2) Pure tests for the zone rule (a hole opened at distance d from the shooter: is the shooter inside the no-escape zone, what does the rule say). (3) A friendly-fire matrix (shooter x target x weapon x {Hero off, shield, Invincible, hit window}). (4) A manual two-browser checklist for the parts that need a scene (below). A browser-driven scenario (Playwright) is possible only on the owner's explicit request (`browser-verification` skill).
+
+## Inventory: what the guest should see and cannot
+
+"Today" is how it reaches the guest now. Rows marked P1 to P3 are the phases in the design below.
+
+| Item | Produced by | How it reaches the guest today | Gap | Phase |
+|---|---|---|---|---|
+| Minigun rounds, casings, sparks, dust, muzzle flash (host or guest shooter) | `heroWeapons.js:596-633`, `hero/bullets.js` | Not at all (host's); guest's own as a casing-less tracer | Round spawn not replicated; guest builder lacks casings and hit sparks | P1 |
+| Plasma rifle bolt, charge, mega beam and rings, blast | `hero/plasma.js:421-465`, `:752` | Not at all; guest's own as a bullet tracer | No beam factory shared with the guest; no spawn replication | P1 |
+| Railgun bolt (a rail lightning strike on the ground point) | `heroWeapons.js:703`, `strikeTargeting.boltAt` | Not at all; guest's own as a tracer, the host's bolt is lightning | Replicate point; guest calls `lightning.strikeAt(end, power, true)` (presentation only) | P1 |
+| Fire Gun flames and roar | `hero/fireGun.js` | Not at all (host's) | Replicate "firing", yaw, pitch as state | P1 |
+| Black Hole (look, lens, wind, matter, hum, shockwave on open) | `player/blackHole.js` | Not at all, either shooter | State row `hole`; render-only mirror of look, wind, matter, lens, sound | P1 |
+| Katana swing of the host's Roger on the guest's screen, and the host's view of the guest's | `hero/katana/*` | Guest's own swing is local; the host's cut is not shown on the guest | `fx` kind `swing` | P2 |
+| Tornado (funnel look, birth, size, lean, rope-out, several funnels) | `vortex.js`, `tornadoes.js` | Grey cone proxy | State rows `tw`; render-only drive of the real funnel | P1 |
+| Sky, clouds, rain, wind sound, day and night, storm ramp | `clouds.js`, `weather.js`, `dayNight.js`, `scene.js`; read `Sim.params`, `Sim.state.stormRamp`, `DayNight.daylight` | Guest idle: calm sky | One small `env` row (running, ramp, intensity, wind, radius, daylight) | P2 |
+| Explosions (tankers, fuel station, gas, chemical works, cars) | `explosions/`, `events.emit('explosion')` x12 | Event is sent, ignored by the guest | Handle the existing event: cosmetic burst, flash, sound, no damage | P2 |
+| Lightning bolts and thunder (storm, electric storm) | `lightning.js`, `electricStorm/` | Not at all | `fx` kind `bolt` with a point; EMP wave `empPulse` | P2 |
+| Earthquake, chasm, sinkhole, fissure, volcano, lava, meteors, downburst, flood and dam, Firenado, Lavanado, solar storm, Doomsday | `earthquake.js`, `chasm/`, `sinkhole.js`, `fissure/`, `volcano.js`, `meteors/`, `downburst.js`, `flood/`, `firenado.js`, `lavanado.js`, `solarStorm/`, `doomsday.js` | Not at all (host-only; panel hidden on the guest) | One `world` descriptor per disaster, a render-only mirror each (see S12). Cannot run locally: gameplay randomness is `Math.random`, so a local copy would diverge (`rng.js:1-5`) | P3 |
+| Fires (building, ground, fuel, gas mains), smoke | `buildingFire.js`, `groundFire.js`, `fuelFire/`, `gasMains/` | Not at all | Descriptor with a position list; guest draws with the same fire pools | P3 |
+| Building damage, collapse, rubble, topple; destroyed viaduct, power lines | `damage.js`, `topple.js`, `rubble.js`, `buildings.js` | Seed matching covers construction only (`applySeed`, `net/system.js:394`); destruction is not replicated, so the guest's town stays intact | Delta list of (building id, damage state) if ids are stable (**hypothesis**: ids follow the seeded build order; the explorer confirms) | P3 |
+| Debris, thrown objects, lifted cars, telekinesis, grapple | `physics.js`, `Sim.objects` | Moving cars as boxes at ground height, no y or tilt (`vehicles` row has none) | Not replicable at budget as full state; replicate cars (add y, pitch) and fx-only for the rest. Owner decision | P3 |
+| People and crowd | `environment/people.js`, `crowd.js` | Guest's idle local copy walks on its own randomness: **hypothesis** that they diverge from the host's. Katana and bullet kills are not shown | Diagnostic first; at most a "killed person" fx | P3 |
+| Vehicles (street traffic, train) | `streetTraffic.js`, `train.js` | Moving cars as blue boxes, only if `velocity` is set, capped at 64 rows; the guest's local traffic also runs (**hypothesis**: duplicates) | Real car model on the proxy; train and bus kinds | P2 |
+| Terminators, pursuers, aliens, UFO, hunters | `terminator.js`, `aliens.js` | Capsule, sphere, disc | Reuse the real models | P2 |
+| T-Rex, Yeti, Patient Zero and clones, Hank, HAVOC, samurai, cows, GHOST jets, news helicopter, mothership | their systems | Not sent at all | New additive kinds; real models | P3 |
+| Alien rays, Terminator and HAVOC rounds, missiles, UFO beam, tracker lasers | `aliens/`, `terminator/`, `gunner/` | Not at all | `fx` kinds `ray`, `round`, `missile` (origin, target, kind) | P2 |
+| Host abilities: Time Slow (Bullet Time), EMP, telekinesis, grapple, teleport warp | `player/abilities.js`, `emp.js`, `teleport.js` | Not at all (the guest's own teleport warp is local) | `fx` kinds `warp`, `emp`; Time Slow as an `env` field for tint and sound only | P2 |
+| Jetpack flames and smoke on both figures | `hero/jetpack.js` | Altitude is replicated (`alt`); the flame is not drawn on remote figures | Draw from `alt` rows with the existing jetpack builder | P2 |
+| Hit markers, `+points`, kill feedback | `score` event | Only the guest's own `score` shows as text (`net/system.js:1345`) | Marker on the same event | P2 |
+| Sounds for host events (shots, explosions, hole hum, thunder) | `sound/`, `heroSound` | None; the guest's idle audio graph hears nothing | Each replicated item plays its existing cue at its position through the guest's own audio | P1 to P3 |
+| Score, mission, health, game over, announce | events and `hp` | Done | none | done |
+| Guest figure's Fire Gun, Katana swing, aim direction on the host's screen | `guestFlame`, `guestTracer` | Flames done; swing not shown on the host's screen | `aim` rows give the partner's raised-weapon direction on both screens | P1 |
+
+## Design choice
+
+Options, with trade-offs:
+
+| Option | What | For | Against |
+|---|---|---|---|
+| A. Additive state fields only | More snapshot fields for every effect, as state | No new event type; late joiners and lost frames self-heal | Discrete spawns (a bullet) are awkward as state; many fields |
+| B. A small event vocabulary | One event per shot, per disaster start and stop | Simple to reason about | Event bucket is 30/s and 1 KiB each (`LIMITS.eventRate`); minigun 18/s plus a guest's 11/s would clip; no state for late joiners; whitelist grows with every effect |
+| C. Generic "effects channel", batched in the snapshot | An additive `fx` array: spawn records (kind, shooter, origin, target, extra), stamped with host time, played by the guest's existing builders; plus state rows for what lasts | Fits the existing bucket (no extra frames); ids de-duplicate; a bounded cap; one place on each side | Needs a protocol bump and a schema; a lost snapshot loses its fx (cosmetic only) |
+| D. Run the disasters locally on the guest | Start the same system on both | No wire cost | Impossible to keep in step: `Math.random` everywhere, no shared clock; the previous plan rejected an active local simulation |
+| E. Lockstep or full object replication, or video | Replicate `Sim.objects` or the canvas | Exact | Thousands of objects exceed the relay budget; out of scope |
+
+**Recommendation: C plus targeted state rows (a hybrid of A and C), rendered by a render-only mirror.**
+
+1. **Discrete things** (a shot, a bolt, an explosion, a warp, an EMP wave) travel as `fx` rows in the snapshot: `[id, kind, shooter, x, y, z, a, b, c, extra]`, with a host-time offset so the guest plays each at the same moment as the interpolated world (`INTERP_DELAY`, `net/interp.js`). A cap of 24 rows a snapshot; over the cap the oldest cosmetic rows are dropped, never the entity rows. About 60 B a row: a worst case of roughly 1.5 KB a snapshot, about 22 KB/s, far below the 162 KiB/s note.
+2. **Lasting things** travel as state, additive: `tw` (tornado rows: id, birth, sizeMul, fade, leanX, leanZ), `hole` (x, z, age, closing), `aim` (player id, yaw, pitch, firing bits: fire gun, minigun spin), `env` (running, storm ramp, intensity, wind, radius, daylight, time scale). State heals itself after a lost frame.
+3. **Rendering**: a new `net/mirror.js` (per-instance state on `S`, JSDoc-typed, pure helpers for scheduling in `net/fxQueue.js`) calls the existing builders. Principle: the guest runs the real visual code but never the gameplay half. Where a system mixes the two (the Black Hole, the tornado), the plan adds a small, additive, render-only entry point to it; its gameplay path stays byte-for-byte unchanged.
+4. **No double drawing**: the guest keeps its own predicted feedback for its own shots (flash, kick, cue) and now draws the shot itself with the same builder as the host; `fx` rows whose `shooter` is its own id are skipped on the guest.
+5. **Same look**: shared builders only, no copies: `createBullets` with casings and a sparks-only hit (`hero/bullets.js`); a plasma-beam factory extracted from `plasma.js` (host behaviour unchanged); `lightning.strikeAt(..., true)` for the rail; `createTrexFlames` with `FIRE_GUN` values; `createBlackHoleLook` and its wind and matter; the real `vortex.js` funnel. This also replaces `heroWeapons.js:1034 guestTracer` so the host sees the guest's shots exactly as it sees its own.
+
+This **reverses** the owner's 2026-10-05 decision "no new `shot` event and no new event type: peer-local cosmetics only" (`PLAN_coop-guest-fixes.md` approvals 2 and 4 and Clarification 4). It needs the owner's explicit approval. It is an additive snapshot field, not a new event type, so older hosts and guests still parse; but it needs a protocol contract change (below).
+
+### Protocol-contract changes needing approval
+1. New additive snapshot fields `fx`, `tw`, `hole`, `aim`, `env` with validators and caps in `net/protocol.js` (`validateSnapshot`), and the interpolation of `tw` in `net/interp.js`.
+2. `PROTOCOL_VERSION` 3 to 4. Recommended: the relay must be redeployed anyway (it shares `protocol.js`), and the guest's idea of a "complete" snapshot changes; a mismatch is already turned into the "refresh the page" text.
+3. Possibly new event kinds for one-off state changes (a `world` start or stop for disasters); the whitelist is checked by the relay (`validateEvent`), so adding a kind is a relay redeploy too.
+4. Additive render-only entry points in protected systems (Black Hole, vortex, explosions); no change to their gameplay contracts (R-050).
+5. A new co-op rule R-061 (the mirror principle and the `fx` budget) and amended R-060 wording; `PROTOCOL_VERSION` text in R-059.
+
+Limits respected: R-047 (per-instance state, signal-bound listeners, dispose); R-048 (no cap raised: guest pools use `max` sizes far below the caps, `particleRoom()` before emitting, `vfx-particle-pool` skill); R-053 and R-054 (the guest never calls `enemies.hit`, `damagePlayer`, `blackHole.fire` or `strikeTargeting.boltAt`); R-049 (wheel order); R-051 (Katana); R-060.
+
+## Subtasks
+
+Common rules for every subtask: functional style, every new function typed with JSDoc (the owner's firm standard), British English in comments and docs, state per instance, nothing at module level, lifecycle `reset`/`dispose` released, hot loops allocate nothing (R-047, R-048). Gate: `npm run lint`, `npm test`, `npm run build`.
+
+- [ ] Subtask 0 (FIRST, batched with C0): Diagnostic overlay extension, `?netdebug` only, off by default. Add to the peer overlay: per snapshot kind the rows received, per second; snapshot and event bytes per second (JSON length); event kinds received and **ignored** (this proves RC6: `explosion` arrives and is dropped); tornado proxies (count, x, z, radius, distance to the camera, whether `proxyRoot` is in the scene); whether `flames` and `rounds` exist and their live counts; the shared particle room; fx counters on the host once Subtask 3 exists. Host side: counts of its own shots, hole opens and tornado birth. Pure counters in `net/metrics.js` with tests in `tests/net-metrics.test.mjs`.
+  - Likely files: `net/metrics.js`, `net/system.js` (`debugTick`, `peerMessage`), `tests/net-metrics.test.mjs`
+  - Depends on: none
+  - Classification: LOW-RISK (no design decision, no protected system, no cap).
+  - Risks / edge cases: R-047 (the overlay element is removed in `disposeNet`); R-048 (counters allocate nothing per frame). Dev-only; the relay's frame budget is untouched.
+  - Acceptance: with `?netdebug` on the guest, the overlay shows the list above; with the flag off, behaviour and bytes are identical to today.
+  - [ ] PENDING (person): a two-browser read-out of the overlay (60 s: the host fires each weapon and starts a tornado) settles the hypotheses in RC3 and RC5 and records bytes per second before the change.
+
+- [ ] Subtask 1: Contract and approvals. Record the owner's answers to the Clarifications; write the schema for `fx` (kinds and columns), `tw`, `hole`, `aim`, `env` in `net/protocol.js` with `validateSnapshot` checks (caps: `fx` 24, `tw` 8, `hole` 1, `aim` 8, `env` 1; numbers finite and in `worldBound`; unknown `fx` kinds dropped, not an error), the version bump, and `tests/protocol.test.mjs` plus `tests/relay.integration.test.mjs` cases (accepts with and without the new fields; relays unchanged; rejects out-of-range).
+  - Likely files: `net/protocol.js`, `tests/protocol.test.mjs`, `tests/relay.integration.test.mjs`, `relay/server.mjs` (comment only; the relay already forwards a validated snapshot)
+  - Depends on: Subtask 0 report (for the byte baseline), owner approval of the reversal and the bump
+  - Classification: SEPARATE: new design decision and a protocol contract change that every later subtask depends on.
+  - Risks / edge cases: "Protocol-contract changes needing approval" above. A players row must stay nine columns (older strict row-width check). Cap sizes must keep a worst-case snapshot under the 64 KiB frame (the existing 11 KB worst case plus about 3 KB). R-050: cite R-059 and R-060 in the report.
+  - Acceptance: validators and tests pass; an old-shape snapshot still validates; a new one with every field present is under 16 KB.
+  - **DECISION GATE (owner approval before code):** approve the reversal and the bump.
+
+- [ ] Subtask 2: Pure scheduling core, `net/fxQueue.js`. Typed pure functions over immutable state: `pushFx(queue, rows, hostT)` (drops duplicates by id, drops the guest's own `shooter`, caps), `dueFx(queue, renderT)` (returns the rows whose time has come and the queue left), `tornadoTarget`, `holeAt(age, closing)`. No scene, no DOM; tested like `net/prediction.js`.
+  - Likely files: `net/fxQueue.js` (new), `tests/fx-queue.test.mjs` (new)
+  - Depends on: Subtask 1
+  - Classification: LOW-RISK (mechanical once the schema is fixed; a pure helper with tests).
+  - Risks / edge cases: duplicate ids across a Restart (reset the queue on `welcome` and in `endSession`); ordering when a snapshot is dropped; clock offset (reuse `INTERP_DELAY` from `net/interp.js`, do not add a second clock). R-047.
+  - Acceptance: tests for ordering, de-duplication, own-shooter filter, cap and reset.
+
+- [ ] Subtask 3: Host-side emit. The weapons announce their shots on the existing local bus (`ctx.events`, listed in `engine/events.js` as the convention requires): a new internal `weaponFx` event `{shooter, kind, from, to, hit, extra}`, emitted additively from `heroWeapons.js` (`fireBullet`, `fireRail`, `fireHole`), `hero/plasma.js` (`firePlasma`), `hero/katana/*` (a cut) and from the host's `guestFire` for guest shots. `net/system.js` listens (bound to `ctx.signal`), keeps the rows in a small pooled ring, and `buildSnapshot` drains them into `fx`. Also fill `aim` (yaw, pitch, firing bits) and the `hole` and `tw` and `env` rows from live state (`blackHole.lensInfo()` already exposes the position; the vortex fields are listed in `vortex.js:695-720`).
+  - Likely files: `heroWeapons.js`, `hero/plasma.js`, `net/system.js` (`buildSnapshot`, `guestFire`), `engine/events.js` (list the type), `net/fxOut.js` (new, pure row builders), tests
+  - Depends on: Subtasks 1 and 2
+  - Classification: SEPARATE: touches the weapon contract surface (R-049, R-051, R-054), although only additively; hot path (the minigun at 18 rounds/s must not allocate: reuse a fixed ring).
+  - Risks / edge cases: R-049 and R-054 (no damage, `accepts`, score or cooldown change; the emit is the last statement after the existing logic); R-048 (a ring of fixed size); single player has no listener, so the cost is one `emit` with no subscribers (measure with `?bench=1&scenario=hero`); `players.list().length > 1` gate means nothing is built outside co-op.
+  - Acceptance: with a guest connected, the overlay's host counters equal the shots fired; with none, the bench shows no regression.
+
+- [ ] Subtask 4: Guest player for projectiles. `net/mirror.js` plays due `fx` rows with the existing builders: the minigun round through `createBullets` with its casings and a sparks-only hit (landing effect: `spawnImpactBurst` and dust, no `onHit` damage), the rail bolt through `lightning.strikeAt(end, 1, true)`, and the matching cues through the guest's own audio. The guest's own shots use the same path (replacing `drawTracer` and `GUEST_TRACERS`, keeping the predicted flash, kick and cue). The host's drawing of a guest's shot uses the same `fx` renderer (replacing `heroWeapons.js:1034 guestTracer`).
+  - Likely files: `net/mirror.js` (new), `net/system.js` (`updatePeer`, `drawTracer`, `clearViewmodels`), `net/shotFeedback.js` (`TRACER_KEYS`), `heroWeapons.js` (`guestTracer` removed or delegated), `hero/bullets.js` (only if an option is needed), tests
+  - Depends on: Subtasks 2 and 3
+  - Classification: SEPARATE: visual parity for weapons (weapon contract surface); a pool shared with the host's `createBullets` (R-048).
+  - Risks / edge cases: R-048 (pool `max` stays near the guest's own need; `particleRoom()` before sparks); R-053 and R-054 (the guest must never reach `enemies.hit`); do not double-draw the guest's own shot (the `shooter` filter); Bullet Time (`setFrozen`) is host-only; `Math.random` cosmetics differ between screens, which is acceptable.
+  - Acceptance: from the host, the guest sees minigun rounds with casings and sparks and the rail bolt; the guest's own minigun now has casings and sparks; the host sees the guest's the same way.
+  - **MANDATORY MANUAL STOP** (first end-to-end path of the new technique): ask the owner to check symptoms 2 and 4 for the minigun and railgun in two browsers before Subtasks 5 to 9.
+
+- [ ] Subtask 5: The plasma rifle on both screens. Extract the beam (`buildBeam`, `placeBeam` and the per-frame fade, `plasma.js:363-420`, `:752-790`) into a factory (for example `hero/plasmaBeam.js`) that `plasma.js` itself then uses unchanged, and that the guest's `mirror.js` instantiates for the host's and its own rifle shots (core, sheath, halo, splash, mega rings, `playPlasma` and `playSonicBoom` cues). Replace the bullet tracer for the rifle everywhere.
+  - Likely files: `hero/plasma.js`, `hero/plasmaBeam.js` (new), `net/mirror.js`, `net/shotFeedback.js`, tests
+  - Depends on: Subtask 4
+  - Classification: SEPARATE: refactors a protected host weapon's rendering (behaviour must stay identical); the beam state (`S.beam`, `S.state.beam*`) is shared with Hero Mode.
+  - Risks / edge cases: the host's single-player look must not change at all (compare before and after; `?bench` for the CPU); `S.beam` lifecycle in `endRun`/`dispose` (R-047); R-054 (chip, plasma and mega values untouched); a mega beam's screen shake and flash stay host-local; the guest's own camera is not shaken.
+  - Acceptance: host's beam identical to before; guest sees the host's bolt and its own as the same beam; the host sees the guest's rifle as a beam.
+
+- [ ] Subtask 6: Fire Gun on both screens (the guest's own included). Replicate "firing" through the `aim` rows; the guest's mirror emits flames from each firing player's muzzle with the shared `createTrexFlames` (`FIRE_GUN` size, alpha, rate), the roar through `creatureSounds.loop`. Generalise the guest's `breatheFlame` to several emitters; use the player's real height (see Subtask 14b). Check and, if needed, fix the guest's own flames (RC3 hypothesis: the diagnostic result decides).
+  - Likely files: `net/system.js` (`breatheFlame`, `updatePeer`), `net/mirror.js`, `net/fxOut.js`, `hero/fireGun.js` (read only unless a parameter is needed), tests
+  - Depends on: Subtasks 3 and 4
+  - Classification: SEPARATE: the Fire Gun is a protected weapon (R-054 chip values) and the flame pool uses the shared particle budget (R-048).
+  - Risks / edge cases: flames are state, not events: the guest must stop when `firing` clears or the row vanishes; both flames from two players share one pool (check `particleRoom()`); a scorch/burn tick stays on the host (`scorch`, `fireGun.js:106`); no new burning on the guest.
+  - Acceptance: both players see both flames; stopping fire stops them within a snapshot; the host's single-player flame is unchanged.
+
+- [ ] Subtask 7: The Black Hole on both screens. A render-only entry point in `player/blackHole.js` (additive, for example `mirror(row)` / `mirrorOff()`), driving only `look`, the ambient `matter` and `wind` particles, `lensInfo()` for the lens pass, the open and close shockwave, and `holeSound`, from the `hole` row's position and age; no `reach`, `capture`, `drawIn`, `dissolve`, hazard, light request or `consumables`. Replace the guest's bolt tracer for `blackhole` with the host's reticle and zap cue.
+  - Likely files: `player/blackHole.js`, `player/blackHole/{look,matter,wind}.js` (read first: confirm `matter.ambient`, `wind.step` and `look.update` touch no gameplay state), `net/mirror.js`, `engine/post.js` (lens already reads `lensInfo`), `net/system.js`, tests
+  - Depends on: Subtasks 3 and 4
+  - Classification: SEPARATE: touches the Black Hole contract (20 s, 100 m pull, 40 m no-escape, swallow flow must stay unchanged, CLAUDE.md task anchors) and the shared light pool.
+  - Risks / edge cases: R-047 (mirror state released in `resetBlackHole`/`disposeBlackHole` and on `endSession`); the hole's gameplay is never run on the guest (otherwise the guest's local town would be eaten and local score and `hazards` would act); one hole at a time (the host's queue-behind rule is host-side); the guest in the no-escape zone is downed by the host (R-053), shown through the existing `playerDown`; lens warp must not move the guest's camera; the hole's light uses `lightPool` (R-048).
+  - Acceptance: a hole opened by either player is seen on both screens, opening, spinning, collapsing and closing in step; the host's single-player hole is byte-for-byte as before (R-050).
+  - **MANDATORY MANUAL STOP** with Subtask 8 (below).
+
+- [ ] Subtask 8 (HIGHEST RISK): The tornado, real funnel, driven by state. Replace the grey cone with the guest's own real funnel (instance 0 and, for an Outbreak, the others in `ctx.tornadoes`), driven only by the `tw` rows: position (`center`), `birth`, `sizeMul`, `fade`, lean, `neutralized`, `active`; `Sim.params` size values for the look. The mirror must hold the funnel still where the host says (the guest's own wander would move it: `vortex.js:640-700`, `pinned`) and must **not** let the guest's local physics, force field and capture act on the guest's own objects (`forces.js`, `physics.js` read the nearest vortex presence). Needs a small, additive "remote-driven" flag on the vortex and a read-only guard where physics reads it; the host's flow is untouched.
+  - Likely files: `vortex.js`, `tornadoes.js`, `stormLife.js` (birth), `forces.js`, `physics.js`, `groundFx.js`, `net/mirror.js`, `net/system.js` (`makeProxy` 'tornadoes' branch retired), `net/interp.js` (`tw` interpolation), tests
+  - Depends on: Subtasks 1 to 3; benefits from Subtask 9
+  - Classification: SEPARATE: new technique with no analogue in the codebase (a net-driven gameplay system run render-only), contact with the physics and capture systems, and a branching outcome (what the guest's local town does when a funnel is "present") that affects Subtasks 9 and 12.
+  - Risks / edge cases: R-047 (restore the vortex on `endSession`, `welcome`, Restart and `reset`; the guest must be able to start its own single-player run afterwards); R-048 (the real funnel has its own particle and dust capacity, already built at start-up: no new pool); the `ground` and path-track FX (`groundFx`) and rain cut-out read `ctx.Vortex`; `Sim.state.running` must stay false on the guest or the local sim would start (Hero, missions, score); camera shake and lightning flashes from `touchdown` (`stormLife.js:104-110`) are host cosmetics, decide whether the guest gets them; a funnel merge (Fujiwhara) and neutralise by Roger's beam must rope out on the guest too; hidden: the interpolated row and the state row must agree on `id`.
+  - Acceptance: the guest sees the funnel come down, grow, move, lean and rope out in step with the host, with the same particles and look; the host's funnel is unchanged; leaving the room restores a normal local simulation.
+  - **MANDATORY MANUAL STOP** (per `full-autonomous-run`: new rendering and algorithmic technique): the owner checks symptoms 1, 3, 5 and the single-player regression (a normal run, Hero Mode, black hole, Restart) in two browsers before Subtasks 9 to 13.
+
+- [ ] Subtask 9: The sky follows the host. The `env` row sets the guest's `Sim.state.stormRamp`, `Sim.params.intensity`, wind, radius and `DayNight` target, so the clouds, rain, wind and storm sound match (`clouds.js:465-548`, `weather.js:235-241`, `dayNight.js`). Written before `updateAtmosphere()` in the frame (the net update runs after it today, `tornadoEngine.js:1179`: either move the apply, or add a one-line hook, to avoid a frame of lag). Time Slow as a tint and sound only; the guest is not slowed.
+  - Likely files: `net/mirror.js`, `net/system.js`, `tornadoEngine.js` (the one hook), `dayNight.js`, `weather.js` (read), tests
+  - Depends on: Subtask 8
+  - Classification: SEPARATE: touches the frame order and scene-wide lighting (a visual change to every scene), with a decision on what the guest's own panel sliders do (hidden today).
+  - Risks / edge cases: `Sim.state.running` must stay false (see Subtask 8); the exposure and light changes cost nothing extra but must restore on leaving; R-055 (no camera shake from the earthquake or mothership); R-047.
+  - Acceptance: the guest's sky, rain and wind follow the host's storm and day or night within a second.
+
+- [ ] Subtask 10: The events already sent, and the missing figures' effects. Handle `explosion` (existing event, `net/system.js:1346`) through a cosmetic explosion entry in `explosions/` (burst, flash, light request, sound; no damage, no `events.emit('explosion')` loop-back, no score); add `fx` kinds for lightning (`bolt`), `empPulse`, warp (host teleport), Katana swing, jetpack flames (from `alt`), alien rays and Terminator or HAVOC rounds (origin, target, kind), and the hit marker on `score`.
+  - Likely files: `net/system.js`, `net/mirror.js`, `explosions/index.js` (cosmetic entry only), `lightning.js` (call only), `player/teleport.js`, `hero/jetpack.js`, `aliens/`, `terminator/`, `gunner/` (read for the builders), `net/protocol.js` (event or `fx` kinds), tests
+  - Depends on: Subtask 4
+  - Classification: SEPARATE: several systems, an explosion path that also does damage (R-053: only the host damages; the cosmetic entry must be a distinct function) and a design choice per `fx` kind. Split into separate Coder calls per family (explosion, bolt and EMP, projectiles of enemies, warp and jetpack) once approved.
+  - Risks / edge cases: a loop-back (the guest must never re-emit `explosion` to the bus that `net/system.js:2072` forwards); R-048 caps; sound spam (a cap per second per kind).
+  - Acceptance: each family is seen on the guest once, at the right place, with the existing look.
+
+- [ ] Subtask 11: Real figures instead of placeholders, and the missing actors. Terminators, aliens, UFO and hunters, cars (with y and tilt), then T-Rex, Yeti, Patient Zero, Hank, HAVOC, samurai, cows, GHOST jets, helicopter, mothership as new additive kinds, each with its real model builder. One family per Coder call.
+  - Likely files: `net/system.js` (`makeProxy`), `net/protocol.js` (`SNAPSHOT_KINDS`, `ROW_WIDTH`), `net/interp.js` (`WIDTH`, `ANGLE_COL`), each actor's model file, tests
+  - Depends on: Subtask 1; independent of 4 to 10
+  - Classification: SEPARATE: new design decisions (which models are shared, which actors first) and the entity caps (R-048: proxies share geometry, no `Sim.objects`).
+  - Risks / edge cases: row width changes break an older strict check (additive kinds, never widen an existing row); proxies dispose with the session; the 64 rows per kind cap; animation is replicated state only (no local AI).
+  - Acceptance: per family, the guest sees the actor with its real look and approximately its pose.
+
+- [ ] Subtask 12: The other disasters, one per Coder call, after the Subtask 8 stop. Order proposed (the owner confirms): explosions done in 10, then fires, flood and dam, earthquake and chasm, meteors, volcano and fissure, electric storm, downburst, Firenado and Lavanado. Each uses a `world` descriptor (event: start or stop with parameters; state row for what moves) and a render-only mirror of the existing visual code, never the damage half. Use the `disaster-system-change` skill for each: trace UI, registration, frame update, consumers, lifecycle, rules and performance.
+  - Likely files: the disaster files listed in the inventory, `net/mirror.js`, `net/protocol.js`
+  - Depends on: Subtask 8 (the technique) and its manual stop
+  - Classification: SEPARATE each: new design decision per disaster and contact with disaster contracts.
+  - Risks / edge cases: Subtask 8's branching outcome (local physics suppression) decides the pattern for all; the earthquake has no camera shake (R-055); host-only damage (R-053); `Math.random` means debris is drawn differently on each screen, which is accepted.
+  - Acceptance: per disaster, the guest sees its start, its look and its end.
+
+- [ ] Subtask 13 (research, no code): Building damage and people. The explorer confirms whether building and person ids are stable across both towns (same seed, same build order) and measures the size of a damage-state delta list over a Doomsday run. Report the byte cost and a recommendation (delta list, or accept divergence).
+  - Likely files: `environment/buildings.js`, `environment/people.js`, `damage.js`, `topple.js`, `rubble.js`
+  - Depends on: Subtask 0 report
+  - Classification: SEPARATE (research that gates a design decision; its result may change the plan).
+  - Acceptance: a written finding with numbers; an owner decision follows.
+
+- [ ] Subtask 14: Small fixes found while reading, each its own change.
+  - 14a: Regression test for the guest-without-input crash. Extract the jet-held test (`!!input && ctl.move && p.state === 'up' && (input.abil & JET_BIT) !== 0`, `net/system.js:824`) into a typed pure helper in `net/flight.js` and test `null` input in `tests/guest-flight.test.mjs`. LOW-RISK.
+  - 14b: A guest's shots from the air aim from ground height: `scan`, `guestFire` and the tracer use the constant `EYE` (1.4) and ignore `a.alt` (`net/system.js:1006-1090`; the jetpack altitude is in `a.alt`, line 957). Use eye height plus altitude. SEPARATE: it changes the host's resolution of guest shots (R-060).
+  - 14c: Railgun cooldown: guest 1.6 s (`net/guestWeapons.js`) versus host 0.2 s (`heroWeapons.js:90`). DECIDED 2026-10-06: the guest matches the host (0.2 s); change `GUEST_WEAPONS.railgun.cooldown` and R-060's note in the same change set (a one-line LOW-RISK change; the predicted shot feedback reads the same table).
+  - 14d: Guest hit markers and the `score` event for the partner's points; sounds for host events (covered by 4 to 10; a volume and distance decision).
+  - 14e: Guest "no energy" and "too close" notices stay host events; unchanged.
+  - Depends on: 14a none; 14b after 4; 14c none
+  - Classification: 14a LOW-RISK; 14b SEPARATE (weapon contract); 14c LOW-RISK (decided).
+
+- [ ] Subtask 15: Tests and documentation, per subtask and at the end. Pure tests under `tests/*.test.mjs`: `fx-queue`, protocol validators, `fxOut` row builders, `tw` interpolation, the mirror's own-shooter filter, relay integration for the new fields. Docs in the same change set: `.claude/rules.md` (new R-061 co-op mirror and `fx` budget; amend R-059 and R-060 for the version and the reversal; report, do not reconcile, the railgun disagreement), `docs/architecture.md` ("Co-op: who owns what": the mirror), `docs/weapons.md` (how a guest shot is drawn), `GAME_DESIGN.md` (one or two sentences and one dated changelog line, no numbers), `PROJECT_HISTORY.md` part 1 (measured bytes a second with and without `fx`, per Subtask 0 and the end report), `TODO.md` (the checks only a person can make), `CLAUDE.md` (test list).
+  - Depends on: 1 to 12 as they land
+  - Classification: LOW-RISK per test; the rule text is a decision for the owner (SEPARATE for R-061).
+  - Risks / edge cases: R-050 (cite every protected rule before editing); British English; do not claim visual verification that was not performed (`browser-verification` skill).
+
+- [ ] Subtask 16: Final validation and the manual two-browser gate (person). `npm run lint`, `npm test`, `npm run build`, then the checklist below. Depends on: all.
+
+### Combat and rules subtasks (added 2026-10-06; they sit beside the visibility subtasks)
+
+- [ ] Subtask C0 (FIRST, with Subtask 0): Combat diagnostic, `?netdebug` only. Host side, per guest shot: weapon, aim origin and direction, the enemy found by `scan`, the target `traceAim` would have found from the same ray (kind: person, building, car, tree, ground), people within 5 m of the impact. Per `hurtRay`, `hurtSector`, `hurtArea`, `splashGuests`, `hitGuestsArea` call: shooter, target, result (`damagePlayer` applied or the reason it was refused: Hero off, spawn shield, Invincible, hit window, out, `mayHurt`). Black Hole: hole centre, shooter-to-centre distance, zone radius at each swallow, who was downed. Pure counters and a ring of the last 20 lines in `net/metrics.js`; no gameplay change.
+  - Likely files: `net/metrics.js`, `net/system.js`, `health/system.js` (reason code only), `tests/net-metrics.test.mjs`
+  - Depends on: none
+  - Classification: LOW-RISK (diagnostic, no design decision, no protected value). It calls `traceAim` read-only from a diagnostic: confirm it has no side effect before use.
+  - Risks / edge cases: R-047 (ring per instance); R-048 (no allocation per frame outside co-op); rule R-053 untouched.
+  - Acceptance: the overlay answers: which weapons find a person, why a hit on the host's Roger did or did not land, how far from its own hole the guest stood when it died.
+  - [ ] PENDING (person): the owner repeats the three reports with the overlay on and sends the lines.
+
+- [ ] Subtask C1: Shared-shooter design spike (no code). The explorer lists, for each of the six weapons, every dependency of the resolve half on Roger (camera, `rogerPosition`, `view()`, energy, ammo, `flashMessage`, `S.aimDir`, `rogerKill` events, score) and proposes the `shooter` shape and the ports. Output: a short design note and the staged list below, with the cost of each stage.
+  - Likely files: `heroWeapons.js`, `hero/plasma.js`, `hero/fireGun.js`, `hero/katana/slash.js`, `player/blackHole.js`, `net/system.js`, `net/guestWeapons.js`
+  - Depends on: C0 (and the owner's Clarification 12)
+  - Classification: SEPARATE: new design decision; touches the weapon and damage contracts (R-049, R-051, R-053, R-054).
+  - Acceptance: a written decision the owner approves before C2.
+  - **DECISION GATE** (owner approval).
+
+- [ ] Subtask C2: Guest hitscan through the host's trace (Stage 1; fixes A for rifle, minigun, railgun). `guestFire` replaces `scan` with `traceAim(origin, dir)` from the guest's eye (including altitude, Subtask 14b) and dispatches by `hit.kind` through the same functions the host uses (`landRound`, the person branch, `plasmaHit` for the rifle, `boltAt`-equivalent for the rail), with the guest as shooter. Walls then stop shots. Scoring through `damage.addDamageScore` once, as now (R-049). `GUEST_WEAPONS` keeps only cooldown, range and gating.
+  - Likely files: `net/system.js`, `net/guestWeapons.js`, `heroWeapons.js` (extract `landRound` to take a shooter), `hero/plasma.js` (extract `plasmaHit`), tests
+  - Depends on: C1 approved
+  - Classification: SEPARATE: weapon and damage contract (R-054 table, R-013 acceptance); a refactor of protected host code.
+  - Risks / edge cases: R-013 and R-054 (`accepts` and the table unchanged); host single-player behaviour byte-identical (bench and manual); the guest must never trigger `rogerKill`-only side effects meant for Roger (Smooth Criminal's peace is world-wide, so likely correct to keep); friendly fire stays through `hurtRay`; no double damage on the same shot.
+  - Acceptance: the guest's rifle, minigun and railgun kill people, hurt everything the host's do, and stop at walls; a headless contract table (C5) passes for both shooters.
+
+- [ ] Subtask C3: Rifle blast and railgun circle for the guest (Stage 2; fixes C's splash and area gaps). The guest's rifle uses the host's blast (`plasmaHit` radius, `hurtRogerInBlast` equivalent through `splashGuests` for the other player, `launchRings` effects cosmetic), the railgun the 5 m kill circle and `hurtArea`. The charged mega beam is the owner's call (Clarification 13).
+  - Likely files: `hero/plasma.js`, `heroWeapons.js`, `net/system.js`, `net/guestWeapons.js`
+  - Depends on: C2
+  - Classification: SEPARATE: weapon contract and friendly-fire values (R-053).
+  - Acceptance: a guest's blast hurts the host's Roger with the same falloff as the reverse (15 / 40, muzzle guard 1.5 m).
+
+- [ ] Subtask C4: The Black Hole for the guest (Stage 3; B). Report first; no rule change without the owner (R-031 and R-053 say the caster is not exempt; the 12 m minimum is protected). Options for the owner: (i) keep the rules and make the death legible (the hole visible, Subtask 7; a host `notice` to the shooter when the hole opens inside its own zone: "you are inside the point of no return, run"); (ii) refuse the shot (no energy spent) when the target is closer than the no-escape zone, for the guest only, like the "TOO CLOSE" notice; (iii) raise the minimum range for both players (a protected-number change). Default: (i). Also place the hole from the guest's real aim (altitude, `traceAim`) and clamp as the host does.
+  - Likely files: `net/system.js` (`guestFire` black hole branch), `player/blackHole.js` (read; additive only), `net/guestWeapons.js`
+  - Depends on: C0 report; Subtask 7 for the visible hole; owner decision
+  - Classification: SEPARATE: Black Hole contract and a protected number.
+  - Acceptance: per the owner's choice; the guest is never killed by a hole it could not see or was not told about.
+
+- [ ] Subtask C5: Contract tests and friendly-fire matrix. Pure, under `tests/*.test.mjs`: the weapon x target x shooter table over fake ports (people, wall, car, enemy, other Roger), the black hole zone rule, and the friendly-fire matrix (shooter x target x weapon x Hero off, spawn shield, Invincible, hit window, down). Land the test for each stage with that stage (C2, C3, C4), not after.
+  - Likely files: `tests/guest-combat.test.mjs` (new), `tests/friendly-fire.test.mjs`, `tests/coop-rules.test.mjs`
+  - Depends on: C1 (ports); extends with C2 to C4
+  - Classification: LOW-RISK per test (tests only), but the ports they need come from C1 to C4.
+  - Acceptance: each of the six weapons and both shooters has a row; the table would have failed on today's code for A and C's gaps.
+
+- [ ] Subtask C6: Friendly fire rule and body test. After C0: apply the owner's rule (Clarification 11), account for altitude in the body test, and correct `docs/weapons.md:46` (stale) in the same change set, reporting any difference between `.claude/rules.md`, `GAME_DESIGN.md` and the code rather than reconciling it silently.
+  - Likely files: `health/friendlyFire.js`, `net/system.js`, `docs/weapons.md`, `tests/friendly-fire.test.mjs`
+  - Depends on: C0 report, owner decision
+  - Classification: SEPARATE: damage contract (R-053).
+
+
+- [ ] Subtask 17 (added 2026-10-06 on the owner's principle: THE GUEST MUST HAVE ALL THE POWERS THAT THE HOST HAS): Power parity audit and the missing powers. First a LOW-RISK research step (the explorer, no code): list every power Roger has in single player and mark what the guest has, from `heroMode.js`, `heroWeapons.js`, `player/abilities.js`, `emp.js`, `grapple.js`, `telekinesis.js`, `teleport.js`, `hero/jetpack.js`, `hero/car.js`, `hero/katana/*`, `GAME_DESIGN.md` "Hero Mode". The starting table (confirmed from the code read so far; the explorer completes it):
+
+| Power | Host's Roger | Guest today | Work |
+|---|---|---|---|
+| Rifle, minigun, railgun | full (plasma beam, bullets, lightning, blast, kill circle) | scan-only table, no people, no walls, no blast | C2, C3, S4, S5 |
+| Rifle charge and MEGA BEAM | yes (hold to charge) | none | C3 plus an additive input field (decision 13) |
+| Fire Gun | flames, roar, burns buildings and people | burns (host side), flames drawn only for its own screen | S6 |
+| Black Hole Gun | opens a hole, pull, zone, swallow | opens it, cannot see it, dies in its own zone | S7, C4 |
+| Katana (cuts, Blade Mode, parry) | six slashes, blade mode, blade cut | one arc test, a swing on the viewmodel | extend the guest's Katana to the host's slashes and Blade Mode (research first: how much of `katana/*` is Roger-bound) |
+| Time Slow (Q) and Bullet Time (Q with the minigun) | the world at 10% or 3% for the host's run | edge bit 1 is ignored (host-only) | the guest's Q must work: the host applies it to the shared world (see below) |
+| Teleport (E) | 18 m, landing search, warp | done (free) | the host's warp shown to the guest (S10) |
+| EMP (R) | charge 0.8 s, 36 m pulse, T-Rex stun | edge bit 4 ignored | guest's R runs the host's EMP with the guest as source |
+| Grappling hook (G) | hook, reel in, zip | none | new input bit and host-side run with the guest as shooter |
+| Telekinesis (C) | lifts and throws a car | none | new input bit; needs a per-player hold state |
+| Jetpack (Space) | flies | done (no flames or smoke on the figures; shots from the air aim from the ground) | S10 flames, 14b |
+| Invincible (V) | yes | done | none |
+| Drive the car, passenger seat, revive | drives; F revives | passenger seat and revive | no work: the guest stays the passenger (owner, 2026-10-06) |
+| Energy bar, segments, refills | 10 segments, rewards, costs | `p.energy` is tracked; costs only on the Black Hole | every ability is free for the guest (owner, 2026-10-06); the energy bar stays for the Black Hole Gun, which the host pays for too (R-031), and is free for both while `ENERGY.infinite` holds |
+| Zip, daze, freeze, EMP hits on the Roger | yes | partial | check with C0 |
+
+  - Work, once the table is complete (each its own Coder call, SEPARATE, using the `hero-weapons-combo` and `enemy-immunity-system` skills): the input protocol grows from `abil` bits 1, 2, 4, 8, 16 by further bits or an additive `ability` field for G, C and the charge (part of version 4); each ability runs on the host through the host's existing system with the guest as the actor (an actor id on `ctx.systems.emp`, `grapple`, `telekinesis`, `abilities`; this is the same "shooter" idea as C1, applied to abilities) and is announced to the guest through `fx` so both screens draw it (Subtasks 4 to 10). Time Slow is a world setting on the host: the guest's Q slows the host's world, and the guest's screen slows with it (decision 9), with the tint and the muffled sound on both screens; each Roger's own movement and aim stay at full speed inside it, as the host's Roger's do. A second Q while one is active is refused. The guest's local copy takes the world scale from the snapshot (`env`) so its effects and the interpolation clock agree.
+  - Depends on: C1 (the shooter or actor shape), Subtask 1 (protocol version 4 and the new input fields), Subtask 3 (emit). The audit step has no dependency and can start at once.
+  - Risks / edge cases: R-049 (wheel order), R-051 (Katana), R-053 and R-054 (damage only on the host; every hit through `enemies.hit` or the health API), R-031, R-047 (per-instance state, actor ids reset with the player), R-048 caps (EMP, grapple and telekinesis effects share the pools), one telekinesis hold per player, a shared slow world (a second Q is refused while one is active), the interpolation clock and the guest's prediction while the world is slowed (the guest's own Roger is not slowed, so its prediction keeps its real-time step; remote entities slow with the host's), energy as one bar per player.
+  - Classification: the audit LOW-RISK; each power SEPARATE. MANUAL STOP after the first ability (Q or R) that runs for a guest.
+
+- [ ] Subtask C7 (added 2026-10-06, decision 15): Retire the parallel guest weapon table. After C2, C3, C4 and the Subtask 17 powers work through the host's code paths, remove the duplicated numbers from `net/guestWeapons.js` (cooldown, range, type per weapon) so the guest and the host read one definition (`heroWeapons.js` and the shared weapon constants); keep only gating and pacing. Add a contract test that fails if a weapon exists for one player and not the other, or if their cooldown, range, damage, energy or ammo differ (the parity test over `WEAPONS` and the abilities). Update `tests/guest-weapons.test.mjs`, `net/shotFeedback.js` (it predicts from the same definition) and R-060, which this supersedes.
+  - Depends on: C2, C3, C4, 17. Risks / edge cases: R-049 (wheel order), R-051, R-030 and every protected weapon number are read, never changed; the prediction must still show a refused shot (the guest's own screen is predicted from the shared definition).
+  - Classification: SEPARATE (weapon contract). MANUAL STOP after it: every weapon, host and guest, in two browsers, same result.
+
+## Safety gates: which subtasks run alone, and where to stop
+- Run alone (never batched): C7, 17 (each power), C1, C2, C3, C4, C6, 1, 3, 4, 5, 6, 7, 8, 9, 10 (split per family), 11 (per family), 12 (per disaster), 13, 14b.
+- May batch in one Coder call (LOW-RISK, consecutive, in dependency order): 0 with C0, then 2, and 14a, and the per-subtask tests.
+- Decision gates (owner approval, not a visual check): after Subtask 1; after C1 (the shooter design); before C4 (the Black Hole rule); before C6 (friendly fire).
+- Mandatory manual stops: after C2 (first change to the weapons' shared code: host single-player regression and the guest killing people, in two browsers), after Subtask 4 (first end-to-end path), after Subtasks 7 and 8 (the highest-risk technique; the stop required by `full-autonomous-run`), after the first guest ability in Subtask 17, and the final gate (16).
+
+## Manual two-browser checklist (the owner; two computers)
+Setup: `npm run relay` (ws://localhost:8787) or the deployed relay; open the app with `?netdebug` on both; host a room, join as the guest; the host enters Hero Mode; keep the host window in the foreground. Same build on host, guest and relay.
+1. Baseline overlay (before the change): note the rows a second, the bytes a second and the ignored event kinds.
+2. The host fires, in turn, the rifle (a normal and a charged shot), the minigun, the railgun and the Fire Gun; the guest sees the bolt, the rounds with casings and sparks, the lightning, the flames, the muzzle, in step, with sound.
+3. The guest does the same; the host sees the same look it sees for its own shots; the guest sees its own once, not twice.
+4. Black Hole shot by the host, then by the guest: both see it open, pull, collapse; the lens warp and hum are present; a second shot makes the first collapse; nobody's camera is moved by the lens.
+5. The host starts a tornado: the guest sees it come down, grow, move, lean, and rope out when the host neutralises it; sky, rain and wind change with the storm; leave the room and start a normal run on the guest's browser (no stray meshes or particles, R-047).
+6. Explosions (tanker, fuel station) and lightning are seen and heard on the guest.
+7. Jetpack: shots from the air start at the figure's height (Subtask 14b); the flames show on both figures.
+8. Single-player regression on each browser: a normal run, Hero Mode, each weapon, the Black Hole, Restart; look and frame rate as before (compare `?bench=1&scenario=hero&render=0&seconds=40` before and after).
+9. Overlay again: bytes a second stay well under the 162 KiB/s note, no `fx` overflow, no events dropped by the relay's bucket.
+10. Rejoin, Restart, Leave and Reset leave nothing behind.
+11. Combat (guest as shooter): each weapon at a townsperson, a car, a building behind a wall, an enemy, and the host's Roger (Hero on, shield over, Invincible off): who dies, burns or is hurt must equal what the host's own weapon does to the same target; a shot behind a wall stops at the wall.
+12. Combat (host as shooter): the host's weapons at the guest: health drops, the guest's hit flash and arrow show; a guest down is revivable.
+13. Black Hole: the guest opens a hole at about 12 m, 30 m and 60 m: the result matches the owner's rule (Clarification 14) and the guest sees the hole and any warning; the same from the host onto the guest.
+14. Powers (the owner's principle): the guest uses, in turn, the rifle charge and MEGA BEAM, Time Slow (Q) and Bullet Time, Teleport (E), EMP (R), the grappling hook (G), telekinesis (C), the jetpack (Space) and Invincible (V), and each does what it does for the host's Roger, seen and heard on both screens; nothing the host's Roger can do is missing for the guest.
+
+## Other things that make sense (found while reading)
+- The guest's shots from the air aim from ground height (`EYE`, `net/system.js:1006-1090`): Subtask 14b.
+- The railgun cooldown disagreement, 1.6 s versus 0.2 s: Subtask 14c, owner decides.
+- The host's teleport warp, a jetpack flame and smoke on the figures, a Katana swing on the other screen, guest hit markers and sound for host events: covered by Subtask 10 and 14d.
+- Cars are drawn flat at ground height with no tilt, and only when moving (`net/system.js:1195-1205`); a car thrown by the funnel looks wrong: Subtask 11.
+- The partner's Time Slow and Bullet Time are host-only; show a tint and play the sound, do not slow the guest.
+- The guest's own idle town runs its own people and street traffic with its own randomness: possible duplicate cars under the proxies (hypothesis; Subtask 0 and 13).
+- `CLAUDE.md`'s test list does not name `relay.integration`, `client` and `room` (noted before).
+
+## Clarifications
+All fourteen were answered by the owner on 2026-10-06 (see "Owner's decisions" near the top: yes or the recommended default for each, 8 and 13 explicitly yes, and the governing principle that the guest has every power the host has). The recommended-default text that stood here is replaced by those decisions.
+
+Answered 2026-10-06: the guest does not drive (passenger only); a second Q is refused while one is active; Time Slow works for both players and **only the world slows, for now** (neither Roger is slowed; the other Roger is not affected); every ability is free for the guest **and for the host**. The owner's note: the energy was set to infinity at some point and the cost values are disabled for now. Confirmed in the code: `ENERGY.infinite` is `true` (`player/energy.js:37`), so no ability, on the host or the guest, spends energy today, and the guest's Black Hole code already honours the flag (`!ENERGY.infinite`, `net/system.js`). The cost numbers stay in `.claude/rules.md` as the values that apply if the flag is ever turned off (a later change, not part of this plan). **No protected number changes and nothing is open.**
