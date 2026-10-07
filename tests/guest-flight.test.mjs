@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newAir, stepAir, jetHeld } from '../src/app/tornado/engine/net/flight.js';
+import { newAir, stepAir, jetHeld, eyeAt } from '../src/app/tornado/engine/net/flight.js';
 import { JETPACK } from '../src/app/tornado/engine/hero/jetpack.js';
 
 const fly = (st, jet, dt = 0.05, ground = 0, up = true) => stepAir(st, { jet, up }, dt, ground, JETPACK);
@@ -63,4 +63,14 @@ test('jetHeld: needs the Space bit and a guest who can move', () => {
   assert.equal(jetHeld({ abil: 1 | 8 }, true, 16), false);
   assert.equal(jetHeld({ abil: 16 | 1 }, true, 16), true);
   assert.equal(jetHeld({ abil: 16 }, false, 16), false);
+});
+
+test('eyeAt: eye height on the ground, plus the altitude in the air', () => {
+  assert.equal(eyeAt(0, 1.4), 1.4);
+  assert.ok(Math.abs(eyeAt(12.5, 1.4) - 13.9) < 1e-9);
+});
+
+test('eyeAt: a missing or negative altitude counts as the ground', () => {
+  assert.equal(eyeAt(undefined, 1.4), 1.4);
+  assert.equal(eyeAt(-3, 1.4), 1.4);
 });

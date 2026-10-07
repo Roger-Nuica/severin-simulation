@@ -16,7 +16,7 @@ import { flameWanted, flameMuzzle } from './mirrorRules.js';
 import { withJetBit, jetWanted, guestBurning, climbFrom, scoreMarker, HIT_MARK_SECONDS } from './figureFx.js';
 import { HERO } from '../hero/config.js';
 import { JETPACK } from '../hero/jetpack.js';
-import { stepAir, jetHeld } from './flight.js';
+import { stepAir, jetHeld, eyeAt } from './flight.js';
 import { TELEPORT } from '../player/teleport.js';
 import { newPrediction, viewPoint, predictFrame, recordSent, reconcile } from './prediction.js';
 import { stepRun, aimDirection } from '../hero/walk.js';
@@ -1174,10 +1174,11 @@ export function createNetSystem(ctx) {
    * @param {number} yaw Aim yaw, radians.
    * @param {number} pitch Aim pitch, radians.
    * @param {number} range
+   * @param {number} oy Eye height (`eyeAt` of the guest's altitude).
    * @returns {{e: any, kind: any, t: number}|null}
    */
-  function scan(p, yaw, pitch, range) {
-    const ox = p.x, oy = EYE, oz = p.z;
+  function scan(p, yaw, pitch, range, oy) {
+    const ox = p.x, oz = p.z;
     const cp = Math.cos(pitch);
     const dx = Math.sin(yaw) * cp, dy = Math.sin(pitch), dz = Math.cos(yaw) * cp;
     /** @type {{e: any, kind: any, t: number}|null} */
@@ -1205,7 +1206,8 @@ export function createNetSystem(ctx) {
    * 5 m of where the ray ends.
    * @param {string} id The shooter.
    * @param {string} weapon
-   * @param {number} ox Origin x (the eye is at `EYE`).
+   * @param {number} ox Origin x.
+   * @param {number} oy Origin height (the eye: `eyeAt` of the altitude).
    * @param {number} oz Origin z.
    * @param {number} dx Unit direction.
    * @param {number} dy
@@ -1214,13 +1216,13 @@ export function createNetSystem(ctx) {
    * @param {number} range The weapon's range.
    * @returns {void}
    */
-  function dbgShot(id, weapon, ox, oz, dx, dy, dz, hit, range) {
+  function dbgShot(id, weapon, ox, oy, oz, dx, dy, dz, hit, range) {
     if (!dbg || !dbgRayO || !dbgRayD) return;
     const h = hero();
     let aim = 'traceAim n/a';
     let reach = hit ? hit.t : range;
     if (h && typeof h.traceAim === 'function') {
-      dbgRayO.set(ox, EYE, oz);
+      dbgRayO.set(ox, oy, oz);
       dbgRayD.set(dx, dy, dz);
       const a = h.traceAim(dbgRayO, dbgRayD);
       aim = `traceAim ${a.kind} at ${fixed1(a.t)} m`;
@@ -1233,7 +1235,7 @@ export function createNetSystem(ctx) {
       if (Math.hypot(person.mesh.position.x - ix, person.mesh.position.z - iz) > 5) continue;
       if (person.mesh.name.startsWith('coop_player_')) avatars++; else near++;
     }
-    dbg.combat(`shot ${id} ${weapon} from ${fixed1(ox)},${fixed1(oz)} dir ${fixed1(dx)},${fixed1(dy)},${fixed1(dz)}: scan ${hit ? `${hit.kind.kind} at ${fixed1(hit.t)} m` : 'none'}; ${aim}; people within 5 m of impact ${near} (+${avatars} avatars)`);
+    dbg.combat(`shot ${id} ${weapon} from ${fixed1(ox)},${fixed1(oy)},${fixed1(oz)} dir ${fixed1(dx)},${fixed1(dy)},${fixed1(dz)}: scan ${hit ? `${hit.kind.kind} at ${fixed1(hit.t)} m` : 'none'}; ${aim}; people within 5 m of impact ${near} (+${avatars} avatars)`);
   }
 
   /** @param {number} points @param {string} id */
@@ -1250,7 +1252,7 @@ export function createNetSystem(ctx) {
    * line of fire, arc or cone are hurt through health.damagePlayer (friendly
    * fire is on, R-053).
    * @param {import('./players.js').Player} p
-   * @param {{cd: number, flame: {tick: number}}} a
+   * @param {{cd: number, alt: number, flame: {tick: number}}} a
    * @param {import('./protocol.js').PlayerInput} input the latest input (aim direction)
    * @param {number} dt
    * @param {import('./guestWeapons.js').Trigger} trigger the pull being acted on (weapon and raised state when it was made)
@@ -1262,6 +1264,8 @@ export function createNetSystem(ctx) {
     // The weapon must be raised first (the Katana excepted): no shot, no cooldown spent.
     if (verdict === 'unraised' || verdict === 'none') return;
     const ox = p.x, oz = p.z;
+    // The eye rides the jetpack: shots from the air start at eye height above the guest's feet.
+    const oy = eyeAt(a.alt, EYE);
     // Aiming, the shot goes where the guest looks; on foot (the Katana's
     // cut), straight ahead of the body.
     const yaw = input.aim ? input.yaw : p.heading;
@@ -1271,7 +1275,7 @@ export function createNetSystem(ctx) {
     if (verdict === 'flame') {
       // Held: the same flame, sound and burning as Roger's, from the guest.
       aimVec.set(dx, dy, dz);
-      muzzleVec.set(ox, EYE, oz);
+      muzzleVec.set(ox, oy, oz);
       hero().guestFlame(a.flame, dt, muzzleVec, aimVec);
       return;
     }
@@ -1279,22 +1283,22 @@ export function createNetSystem(ctx) {
     if (name === 'rifle' || name === 'minigun' || name === 'railgun') {
       const w = /** @type {typeof GUEST_WEAPONS.rifle} */ (GUEST_WEAPONS[name]);
       a.cd = w.cooldown;
-      const hit = scan(p, yaw, pitch, w.range);
-      if (dbg) { dbgShot(p.id, name, ox, oz, dx, dy, dz, hit, w.range); if (hit) dbg.fire(trigger.weapon, 2); }
+      const hit = scan(p, yaw, pitch, w.range, oy);
+      if (dbg) { dbgShot(p.id, name, ox, oy, oz, dx, dy, dz, hit, w.range); if (hit) dbg.fire(trigger.weapon, 2); }
       // What the host sees of the guest's shot: one tracer in the shared round
       // pool, from just ahead of the guest's eye to where the ray ends. Cosmetic
       // (no hit, no casing, no sound, no particles); the damage is the call below.
       const reach = hit ? hit.t : w.range;
-      muzzleVec.set(ox + dx * 0.8, EYE - 0.2 + dy * 0.8, oz + dz * 0.8);
-      tracerEnd.set(ox + dx * reach, EYE + dy * reach, oz + dz * reach);
+      muzzleVec.set(ox + dx * 0.8, oy - 0.2 + dy * 0.8, oz + dz * 0.8);
+      tracerEnd.set(ox + dx * reach, oy + dy * reach, oz + dz * reach);
       // All three go through the mirror (the minigun's round with casings and sparks, the rail bolt, the
       // rifle's plasma beam, each with its cue), as on the guest's screen.
       if (name === 'minigun') mirror.drawGuestShot('bullet', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
       else if (name === 'railgun') mirror.drawGuestShot('rail', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
       else mirror.drawGuestShot('plasma', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
-      if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: EYE + dy * hit.t, z: oz + dz * hit.t } })) { if (dbg) dbg.fire(trigger.weapon, 3); credit(KILL_SCORE, p.id); }
+      if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: oy + dy * hit.t, z: oz + dz * hit.t } })) { if (dbg) dbg.fire(trigger.weapon, 3); credit(KILL_SCORE, p.id); }
       // Friendly fire (D4): the partner in the line of fire, if nearer than the enemy hit.
-      hurtRay(p.id, ox, EYE, oz, dx, dy, dz, hit ? hit.t : w.range, w.type);
+      hurtRay(p.id, ox, oy, oz, dx, dy, dz, hit ? hit.t : w.range, w.type);
       // Last: what the guest's other screen is told of this shot (muzzleVec and tracerEnd are still the tracer's ends).
       announceGuestShot(name === 'rifle' ? 'plasma' : name === 'minigun' ? 'bullet' : 'rail', p.id, muzzleVec, tracerEnd, hit ? 'enemy' : '');
     } else if (name === 'katana') {
@@ -1347,10 +1351,10 @@ export function createNetSystem(ctx) {
       a.cd = HOLE_COOLDOWN;
       // Where the aim meets the ground, or the enemy it is on.
       let gx = 0, gz = 0, ok = false;
-      const hit = scan(p, yaw, pitch, 200);
+      const hit = scan(p, yaw, pitch, 200, oy);
       if (hit) { const q = hit.kind.position(hit.e); gx = q.x; gz = q.z; ok = true; }
       else if (dy < -0.02) {
-        const t = EYE / -dy;
+        const t = oy / -dy;
         gx = ox + dx * t; gz = oz + dz * t; ok = true;
       }
       if (!ok) { sendEvent('notice', { text: 'BLACK HOLE GUN — aim at the ground or a target' }, p.id); return; }
@@ -1364,7 +1368,7 @@ export function createNetSystem(ctx) {
       }
       if (result && !ENERGY.infinite) p.energy -= cost;
       if (result) {
-        muzzleVec.set(ox, EYE, oz);
+        muzzleVec.set(ox, oy, oz);
         tracerEnd.set(gx, 0, gz);
         announceGuestShot('holeShot', p.id, muzzleVec, tracerEnd, hit ? 'enemy' : 'ground', result === 'queued' ? 1 : 0);
       }
