@@ -77,6 +77,8 @@ export function createStormLifeSystem(ctx) {
     const stormOn = Sim.state.running || ctx.Chase.active || ctx.Possess.active;
     for (const tornado of ctx.tornadoes.active) {
       const v = tornado.Vortex;
+      // The co-op guest's picture of the host's funnel: birth stays 0 here.
+      if (v.remote) continue;
       const before = v.birth;
       // A funnel Hero Mode's laser has hit (engine/heroMode.js) ropes out
       // and stays gone -- the same retract as a storm standing down, several
@@ -129,6 +131,7 @@ export function createStormLifeSystem(ctx) {
     const wall = ctx.systems.flood.damWall();
     for (const tornado of ctx.tornadoes.active) {
       const v = tornado.Vortex;
+      if (v.remote) continue;
       const funnel = Sim.params.radius * (v.sizeMul || 1) + 4;
       if (Math.abs(v.center.z) > wall.halfWidth + funnel) continue;
       const minX = wall.x + funnel;

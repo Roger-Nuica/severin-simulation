@@ -9,6 +9,7 @@ import { PROTOCOL_VERSION, LIMITS, WEAPONS, SNAPSHOT_KINDS } from './protocol.js
 import { createFxRing, hitCode, HIT_CODES, aimRow, holeRow, twRow, envRow } from './fxOut.js';
 import { GUEST_WEAPONS, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrigger, coolDown, weaponAt } from './guestWeapons.js';
 import { createMirror } from './mirror.js';
+import { createFunnels } from './funnels.js';
 import { flameWanted, flameMuzzle } from './mirrorRules.js';
 import { HERO } from '../hero/config.js';
 import { JETPACK } from '../hero/jetpack.js';
@@ -122,6 +123,8 @@ export function createNetSystem(ctx) {
   const HIT_ENEMY = HIT_CODES.indexOf('enemy');
   /** The host's shots drawn here (net/mirror.js): the guest's snapshot rows, its own predicted shot, and a guest's shot on the host. One pool, released with the session. */
   const mirror = createMirror(ctx);
+  /** The host's tornado drawn by the guest's own funnels (funnels.js); idle on the host and outside a session. */
+  const funnels = createFunnels(ctx);
   /** The one payload a guest's shot is announced with (reused: the listener copies what it keeps). */
   const guestShotFx = { shooter: '1', kind: '', from: /** @type {any} */ (null), to: /** @type {any} */ (null), hit: '', extra: 0 };
 
@@ -339,6 +342,7 @@ export function createNetSystem(ctx) {
     buffer.clear();
     fxRing.clear();
     mirror.dispose();
+    funnels.release();
     if (dbg) { dbg.reset(); S.dbgAcc = S.dbgPingAcc = 0; S.dbgTornadoes = -1; S.dbgHole.open = false; S.dbgHole.shooter = '0'; S.dbgHole.at = 0; }
     S.tick = 0;
     S.peerScore = 0;
@@ -1379,9 +1383,9 @@ export function createNetSystem(ctx) {
     if (fx.length) out.fx = fx;
     /** @type {number[][]} */
     const tw = [];
-    ctx.tornadoes.active.forEach((/** @type {any} */ t, /** @type {number} */ i) => {
+    ctx.tornadoes.active.forEach((/** @type {any} */ t) => {
       const v = t.Vortex;
-      if (tw.length < LIMITS.maxTw) tw.push(twRow(i, v.birth, v.sizeMul, v.fade, v.leanX, v.leanZ));
+      if (tw.length < LIMITS.maxTw) tw.push(twRow(v.index, v.birth, v.sizeMul, v.fade, v.leanX, v.leanZ));
     });
     if (tw.length) out.tw = tw;
     const lens = ctx.systems.blackHole ? ctx.systems.blackHole.lensInfo() : null;
@@ -1411,8 +1415,8 @@ export function createNetSystem(ctx) {
       const seat = p.seat;
       rows.players.push([Number(p.id), r2(clamp(p.x)), r2(clamp(p.z)), r2(p.heading), p.state === 'up' ? 0 : p.state === 'down' ? 1 : 2, p.weapon, Math.round(p.energy), seat ? seat.vehicle : -1, seat ? seat.seat : -1]);
     }
-    ctx.tornadoes.active.forEach((/** @type {any} */ t, /** @type {number} */ i) => {
-      if (rows.tornadoes.length < cap) rows.tornadoes.push([i, r2(clamp(t.Vortex.center.x)), r2(clamp(t.Vortex.center.z)), r2(Sim.params.radius)]);
+    ctx.tornadoes.active.forEach((/** @type {any} */ t) => {
+      if (rows.tornadoes.length < cap) rows.tornadoes.push([t.Vortex.index, r2(clamp(t.Vortex.center.x)), r2(clamp(t.Vortex.center.z)), r2(Sim.params.radius)]);
     });
     ctx.systems.enemies.each((/** @type {any} */ e, /** @type {any} */ kind) => {
       if (kind.kind !== 'terminator' && kind.kind !== 'pursuer') return;
@@ -1539,6 +1543,7 @@ export function createNetSystem(ctx) {
         S.aimRows = Array.isArray(msg.aim) ? msg.aim : null;
         S.holeRow = Array.isArray(msg.hole) && Array.isArray(msg.hole[0]) ? msg.hole[0] : null;
         S.holeFresh = true;
+        funnels.feed(msg.tw);
         S.altTarget.clear();
         if (Array.isArray(msg.alt)) for (const r of msg.alt) S.altTarget.set(r[0], r[1]);
         reconcileOwn(msg);
@@ -1561,6 +1566,7 @@ export function createNetSystem(ctx) {
         if (Number.isFinite(d.seed)) applySeed(d.seed >>> 0);
         S.pred = newPrediction();
         mirror.reset();
+        funnels.release();
         enterPeerView();
         say('You are ROGER 2: W S run, A D turn, right-click raises the weapon (then the mouse looks). Hero asks the host to bring you in.');
         setStatus();
@@ -1738,10 +1744,6 @@ export function createNetSystem(ctx) {
       const box = new THREE.Mesh(keepGeo(new THREE.BoxGeometry(2, 1.3, 4.5)), mat(0x4a90e2));
       box.position.y = 0.8;
       g.add(box);
-    } else {
-      const cone = new THREE.Mesh(keepGeo(new THREE.CylinderGeometry(1, 0.15, 1, 20, 1, true)), mat(0x8c96a3, 0.45));
-      cone.position.y = 0.5;
-      g.add(cone);
     }
     return g;
   }
@@ -2149,6 +2151,7 @@ export function createNetSystem(ctx) {
     // The host's shots, on the snapshot clock (the round pool steps here, for the guest's own shot too).
     mirror.update(s.t, dt);
     driveHole(dt);
+    funnels.drive(s.kinds.tornadoes, dt);
     roared = false;
     // Own avatar from the prediction while it runs (else from the host's row).
     const pv = S.pred.active && S.buttons.aim ? viewPoint(S.pred) : null;
@@ -2160,6 +2163,8 @@ export function createNetSystem(ctx) {
     }
     for (const [id, to] of S.altTarget) if (!S.altNow.has(id)) S.altNow.set(id, to);
     for (const [kind, rows] of Object.entries(s.kinds)) {
+      // The tornado is not a proxy: the guest's own funnels draw it (funnels.drive above).
+      if (kind === 'tornadoes') continue;
       let map = S.proxies.get(kind);
       if (!map) { map = new Map(); S.proxies.set(kind, map); }
       for (const [id, obj] of [...map]) {
@@ -2169,10 +2174,7 @@ export function createNetSystem(ctx) {
         const mine = kind === 'players' && String(id) === S.myId;
         let obj = map.get(id);
         if (!obj) { obj = makeProxy(kind, id); map.set(id, obj); S.proxyRoot.add(obj); }
-        if (kind === 'tornadoes') {
-          obj.position.set(row[1], 0, row[2]);
-          obj.scale.set(row[3], 140, row[3]);
-        } else if (kind === 'aliens' || kind === 'ships') {
+        if (kind === 'aliens' || kind === 'ships') {
           obj.position.set(row[1], row[2], row[3]);
           obj.rotation.y = row[4];
         } else {
@@ -2385,11 +2387,12 @@ export function createNetSystem(ctx) {
     if (S.role === 'peer') {
       const cam = Sim.three.camera.position;
       const inScene = !!S.proxyRoot && S.proxyRoot.parent === Sim.three.scene;
-      const tw = S.proxies.get('tornadoes');
-      lines.push(`tornado proxies: ${tw ? tw.size : 0}; proxyRoot ${S.proxyRoot ? (inScene ? 'in scene' : 'NOT in scene') : 'missing'}`);
-      if (tw) {
-        for (const [id, o] of tw) lines.push(`  tornado #${id}: x ${fixed1(o.position.x)} z ${fixed1(o.position.z)} radius ${fixed1(o.scale.x)} distance to camera ${fixed1(Math.hypot(o.position.x - cam.x, o.position.z - cam.z))} m visible ${o.visible}`);
-      }
+      lines.push(`proxyRoot ${S.proxyRoot ? (inScene ? 'in scene' : 'NOT in scene') : 'missing'}; the tornado is drawn by the guest's own funnels:`);
+      funnels.shown().forEach((f, id) => {
+        if (!f.on) return;
+        const v = ctx.tornadoes.instances[id] && ctx.tornadoes.instances[id].Vortex;
+        lines.push(`  funnel #${id}: x ${fixed1(f.x)} z ${fixed1(f.z)} radius ${fixed1(f.radius)} birth ${f.birth.toFixed(2)} size ${f.sizeMul.toFixed(2)} fade ${f.fade.toFixed(2)} distance to camera ${fixed1(Math.hypot(f.x - cam.x, f.z - cam.z))} m visible ${v && v.group ? v.group.visible : 'n/a'}`);
+      });
       lines.push(`guest pools: flames ${flames ? 'exist' : 'none'}, mirror fx waiting ${mirror.waiting()} (the flames pool exposes no live count)`);
     }
     const caps = ctx.systems.caps;

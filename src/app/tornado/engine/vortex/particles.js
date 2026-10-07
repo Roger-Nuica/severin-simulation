@@ -41,7 +41,7 @@ export function createVortexParticles(ctx, S, api) {
   // Wedge (engine/wedge.js) shares the same extra breathing a Fujiwhara
   // merge's agitation already drives, rather than getting a second knob:
   // both are "this funnel is bigger and angrier than an ordinary one".
-  const chaos = S.Vortex.agitation + S.Vortex.wedge + (1 - S.Vortex.birth) * 1.5;
+  const chaos = S.Vortex.agitation + S.Vortex.wedge + (1 - (S.Vortex.remote ? S.Vortex.remote.birth : S.Vortex.birth)) * 1.5;
   const wobble = SWIRL.wobble * (1 + MONSTER.wobbleBoost * chaos);
   const breatheT = t * (1.3 + 2 * chaos);
   const height = S.Vortex.height;

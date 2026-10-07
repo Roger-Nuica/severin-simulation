@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
 import { installChurn } from './funnelChurn.js';
 import { createFunnelBandTexture, createSoftDotTexture } from '../utils/textures.js';
-import { BIRTH, SUB_CLAMP, FUNNEL_HEIGHT_STEPS, FUNNEL_RADIAL_SEGMENTS, CORE, SKIRT, FLASH, FUNNEL_LOOK, SWIRL, CROWN, WANDER, MONSTER, START_SEPARATION, START_SEED_ATTEMPTS } from './vortex/config.js';
+import { BIRTH, SUB_CLAMP, FUNNEL_HEIGHT_STEPS, FUNNEL_RADIAL_SEGMENTS, CORE, SKIRT, FLASH, FUNNEL_LOOK, SWIRL, CROWN, WANDER, MONSTER, START_SEPARATION, START_SEED_ATTEMPTS, REMOTE_MONSTER_AT } from './vortex/config.js';
 import { createVortexLook } from './vortex/look.js';
 import { createVortexShape } from './vortex/shape.js';
 import { createSubVortices } from './vortex/subVortices.js';
@@ -42,6 +42,7 @@ export { BIRTH } from './vortex/config.js';
  *   Vortex: Object,
  *   initVortex: () => void,
  *   setActive: (on: boolean, others: Object[]) => void,
+ *   setRemote: (remote: Object|null) => void,
  *   updateFunnelGeometry: (dt: number, t: number) => void,
  *   updateSubVortices: (dt: number, t: number) => void,
  *   applySubVortexForce: (pos: THREE.Vector3, velocity: THREE.Vector3, dt: number) => void,
@@ -223,7 +224,15 @@ export function createVortexSystem(ctx, { index = 0, detail = 1 } = {}) {
     leanX: 0,
     leanZ: 0,
     pinned: false,
-    monster: false
+    monster: false,
+    // Co-op guest only (net/system.js, net/funnelMirror.js): the host's funnel
+    // as this screen draws it ({x, z, radius, birth, sizeMul, fade, leanX,
+    // leanZ}), or null, which is every funnel of a single-player run and of the
+    // host. While set, updateVortexVisuals draws from it instead of wandering,
+    // and `birth` (what every gameplay reader sees) stays 0, so the force
+    // field, capture, damage and hero daze find no tornado here: it is a
+    // picture of the host's.
+    remote: /** @type {null|{x: number, z: number, radius: number, birth: number, sizeMul: number, fade: number, leanX: number, leanZ: number}} */ (null)
   };
 
   // Every function of every module, by name, for the others to call.
@@ -579,6 +588,8 @@ export function createVortexSystem(ctx, { index = 0, detail = 1 } = {}) {
    */
   function setActive(on, others) {
     if (S.primary) return;
+    // The guest's mirror owns a remote funnel's presence (setRemote, tornadoes.js syncRemote).
+    if (S.Vortex.remote) return;
     S.Vortex.active = on;
     if (S.Vortex.group) S.Vortex.group.visible = on;
     clearMergeState();
@@ -604,6 +615,32 @@ export function createVortexSystem(ctx, { index = 0, detail = 1 } = {}) {
     S.Vortex.center.set(start.x, 0, start.z);
     S.Vortex.wanderPlaced = true;
     if (S.Vortex.group) S.Vortex.group.position.copy(S.Vortex.center);
+    S.Vortex.flashPeak = 0;
+    for (const sub of S.Vortex.subVortices) {
+      sub.active = false;
+      sub.mesh.visible = false;
+    }
+  }
+
+  /**
+   * Hands this funnel to the co-op guest's mirror, or takes it back. While
+   * `remote` is set the funnel is drawn from it (updateVortexVisuals) and does
+   * nothing else: `birth` is held at 0, so nothing in the guest's own town feels
+   * it. Either way it ends hidden with a clean merge state; the primary then
+   * goes back to its own wander path, an Outbreak extra stays switched off until
+   * setActive. The caller (tornadoes.js setRemote) rebuilds the active set.
+   * @param {null|{x: number, z: number, radius: number, birth: number, sizeMul: number, fade: number, leanX: number, leanZ: number}} remote
+   * @returns {void}
+   */
+  function setRemote(remote) {
+    S.Vortex.remote = remote;
+    S.Vortex.birth = 0;
+    S.Vortex.wanderPlaced = false;
+    clearMergeState();
+    if (!S.primary) {
+      S.Vortex.active = false;
+      if (S.Vortex.group) S.Vortex.group.visible = false;
+    }
     S.Vortex.flashPeak = 0;
     for (const sub of S.Vortex.subVortices) {
       sub.active = false;
@@ -666,7 +703,12 @@ export function createVortexSystem(ctx, { index = 0, detail = 1 } = {}) {
     // two sine layers momentarily line up, the target briefly outruns
     // anything drivable; the cap keeps the funnel beatable by the chase car
     // (CHASE_TUNE.maxSpeed, now 34) and it catches up once the target slows.
-    if (S.Vortex.pinned) {
+    const remote = S.Vortex.remote;
+    if (remote) {
+      // The host's funnel (co-op guest): the mirror has placed it already.
+      S.Vortex.center.set(remote.x, 0, remote.z);
+      S.Vortex.wanderPlaced = true;
+    } else if (S.Vortex.pinned) {
       // A Fujiwhara merge is steering this funnel (engine/fujiwhara.js),
       // which has already placed center; the wander phases above keep
       // advancing so the path picks up again smoothly afterwards.
@@ -682,6 +724,13 @@ export function createVortexSystem(ctx, { index = 0, detail = 1 } = {}) {
       const k = gap > maxStep ? maxStep / gap : 1;
       S.Vortex.center.set(S.Vortex.center.x + toX * k, 0, S.Vortex.center.z + toZ * k);
     }
+    if (remote) {
+      S.Vortex.sizeMul = remote.sizeMul;
+      S.Vortex.fade = remote.fade;
+      S.Vortex.leanX = remote.leanX;
+      S.Vortex.leanZ = remote.leanZ;
+      S.Vortex.monster = remote.sizeMul >= REMOTE_MONSTER_AT;
+    }
     S.Vortex.group.position.copy(S.Vortex.center);
 
     // sizeMul and fade are 1 outside a Fujiwhara merge. A merged monster
@@ -692,11 +741,12 @@ export function createVortexSystem(ctx, { index = 0, detail = 1 } = {}) {
     // condensation lowering out of the cloud with its top held at the cloud
     // base, then -- once it has touched the ground -- swelling out to its
     // full width, overshooting a little and settling.
-    const birth = api.birthShape(S.Vortex.birth);
+    const birthNow = remote ? remote.birth : S.Vortex.birth;
+    const birth = api.birthShape(birthNow);
     S.Vortex.presence = S.Vortex.fade * birth.alpha;
     S.Vortex.groundPresence = S.Vortex.fade * birth.ground;
-    S.Vortex.group.visible = S.Vortex.active && S.Vortex.birth > 0.001;
-    const scale = (p.radius / 14) * S.Vortex.sizeMul * (0.15 + 0.85 * S.Vortex.fade) * birth.width;
+    S.Vortex.group.visible = S.Vortex.active && birthNow > 0.001;
+    const scale = ((remote ? remote.radius : p.radius) / 14) * S.Vortex.sizeMul * (0.15 + 0.85 * S.Vortex.fade) * birth.width;
     const fullHeight = 1 + (S.Vortex.sizeMul - 1) * 0.5;
     const heightScale = Math.max(0.001, fullHeight * birth.drop);
     S.Vortex.group.scale.set(scale, heightScale, scale);
@@ -747,6 +797,7 @@ export function createVortexSystem(ctx, { index = 0, detail = 1 } = {}) {
     Vortex: S.Vortex,
     initVortex,
     setActive,
+    setRemote,
     updateFunnelGeometry: api.updateFunnelGeometry,
     updateSubVortices: api.updateSubVortices,
     applySubVortexForce: api.applySubVortexForce,

@@ -33,6 +33,7 @@
  * @property {(pos: import('three').Vector3, velocity: import('three').Vector3, dt: number) => void} applySubVortexForce
  * @property {(end: import('three').Vector3, power: number) => void} onLightningStrike
  * @property {(on: boolean, others: Object[]) => void} setActive
+ * @property {(remote: Object|null) => void} setRemote
  * @property {() => void} clearMergeState
  * @property {Object} groundFx the instance's groundFx system
  */
@@ -48,7 +49,9 @@
  *   setCount: (n: number) => void,
  *   retire: (instance: TornadoInstance) => void,
  *   spawnExtra: () => boolean,
- *   count: () => number
+ *   count: () => number,
+ *   setRemote: (index: number, remote: Object|null) => void,
+ *   syncRemote: () => void
  * }}
  */
 export function createTornadoRegistry(ctx) {
@@ -149,12 +152,47 @@ export function createTornadoRegistry(ctx) {
     return false;
   }
 
+  /**
+   * Co-op guest: hands one funnel to the host's state (vortex.js `remote`), or
+   * takes it back to a normal local one (null). A funnel in play on the guest
+   * takes part in the active set only while the host's is (syncRemote); the
+   * funnel stays inert for gameplay either way (vortex.js: birth held at 0).
+   * @param {number} index
+   * @param {Object|null} remote
+   * @returns {void}
+   */
+  function setRemote(index, remote) {
+    const inst = instances[index];
+    if (!inst) return;
+    inst.setRemote(remote);
+    rebuildActive();
+  }
+
+  /**
+   * Co-op guest, every frame: an Outbreak funnel is in the active set exactly
+   * while the host's is on this screen (`remote.on`); the primary always is.
+   * Rebuilds the set only when something changed.
+   * @returns {void}
+   */
+  function syncRemote() {
+    let changed = false;
+    for (const inst of instances) {
+      const v = inst.Vortex;
+      if (!v.remote || v.index === 0) continue;
+      if (v.active === v.remote.on) continue;
+      v.active = v.remote.on;
+      if (v.group) v.group.visible = v.active;
+      changed = true;
+    }
+    if (changed) rebuildActive();
+  }
+
   /** @returns {number} */
   function count() {
     return active.length;
   }
 
-  const registry = { instances, active, activeVortices, register, nearest, setCount, retire, spawnExtra, count };
+  const registry = { instances, active, activeVortices, register, nearest, setCount, retire, spawnExtra, count, setRemote, syncRemote };
   ctx.tornadoes = registry;
   return registry;
 }
