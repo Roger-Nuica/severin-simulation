@@ -62,13 +62,13 @@ export function createOffsetEstimator(windowSize = OFFSET_WINDOW, slew = OFFSET_
 }
 
 /** Columns holding angles (wrapped when blended), by kind. */
-const ANGLE_COL = { players: [3], terminators: [3], aliens: [4], ships: [4], vehicles: [3], cars: [4, 5, 6], giants: [3], replicator: [3], clones: [3] };
+const ANGLE_COL = { players: [3], terminators: [3], aliens: [4], ships: [4], vehicles: [3], cars: [4, 5, 6], giants: [3], replicator: [3], clones: [3], figures: [5] };
 /** Columns that blend linearly, by kind (everything after the id). */
-const WIDTH = { players: 9, tornadoes: 4, terminators: 5, aliens: 5, ships: 5, vehicles: 5, cars: 8, giants: 7, replicator: 8, clones: 6 };
+const WIDTH = { players: 9, tornadoes: 4, terminators: 5, aliens: 5, ships: 5, vehicles: 5, cars: 8, giants: 7, replicator: 8, clones: 6, figures: 9 };
 /** Columns that are discrete and take the nearer snapshot's value, by kind. */
-const DISCRETE = { players: [4, 5, 7, 8], terminators: [4], cars: [7], giants: [4] };
+const DISCRETE = { players: [4, 5, 7, 8], terminators: [4], cars: [7], giants: [4], figures: [1, 6] };
 /** Optional kinds (additive, absent from an older host): interpolated like the rest, an empty map when absent. */
-const OPTIONAL_KINDS = ['cars', 'giants', 'replicator', 'clones'];
+const OPTIONAL_KINDS = ['cars', 'giants', 'replicator', 'clones', 'figures'];
 
 /** @param {number} a @param {number} b @param {number} k */
 const lerp = (a, b, k) => a + (b - a) * k;

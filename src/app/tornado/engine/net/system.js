@@ -31,6 +31,8 @@ import { dressAsRoger, rogerLimbs, newOwned, disposeRoger } from '../hero/rogerL
 import { poseWalk, lieAngle, mapJoints } from './terminatorPose.js';
 import { poseAlienWalk, spinSaucer, ALIEN_STRIDE } from './alienPose.js';
 import { giantRow, fallPose, poseTrex, poseYeti, GIANT } from './giantPose.js';
+import { FIGURE, hankRow, havocRow, samuraiRow, newHankPose, hankWant, hankGlow, applyHank, poseHavoc, poseSamurai } from './figurePose.js';
+import { GUNNER } from '../gunner/config.js';
 import { cloneRows, replicatorRow, poseOriginal, writeClones, newReplicaScratch, easeHeat, standingCount, glowLevels } from './replicatorPose.js';
 import { eulerYXZ, carClass, pickCars, carRow, poseCar, colourIndex } from './carPose.js';
 import { ALIENS } from '../aliens/config.js';
@@ -1467,6 +1469,24 @@ export function createNetSystem(ctx) {
   }
 
   /**
+   * Hank Granite, HAVOC and the samurai as `figures` rows (at most 14), built
+   * only while a guest is in the room and one of them is on the field.
+   * @returns {number[][]}
+   */
+  function figureRows() {
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    /** @type {number[][]} */
+    const out = [];
+    const hank = ctx.systems.actionHero && ctx.systems.actionHero.replicaState();
+    if (hank) out.push(hankRow(hank, clamp));
+    const gunners = ctx.systems.gunner && ctx.systems.gunner.replicaState();
+    if (gunners) for (const u of gunners) if (out.length < LIMITS.maxFigures) out.push(havocRow(idOf(u.key) + 1, u, clamp));
+    const squad = ctx.systems.spaceship && ctx.systems.spaceship.replicaState();
+    if (squad) for (const u of squad) if (out.length < LIMITS.maxFigures) out.push(samuraiRow(idOf(u.key) + 1, u, clamp));
+    return out;
+  }
+
+  /**
    * Patient Zero's original and its clones as `replicator` and `clones` rows,
    * built only while a guest is in the room and one of them is on the field.
    * @returns {{replicator: number[][], clones: number[][]}}
@@ -1546,6 +1566,7 @@ export function createNetSystem(ctx) {
     const live = fxLive();
     const giants = live ? giantRows() : [];
     const replica = live ? replicaRows() : { replicator: [], clones: [] };
+    const figures = live ? figureRows() : [];
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
@@ -1555,6 +1576,7 @@ export function createNetSystem(ctx) {
       ...(giants.length ? { giants } : {}),
       ...(replica.replicator.length ? { replicator: replica.replicator } : {}),
       ...(replica.clones.length ? { clones: replica.clones } : {}),
+      ...(figures.length ? { figures } : {}),
       ...(live ? worldRows(h) : {})
     };
   }
@@ -1838,6 +1860,9 @@ export function createNetSystem(ctx) {
     if (obj.userData.owned) disposeRoger(obj, obj.userData.owned);
     // The Yeti's fur strands are instanced meshes with a buffer of their own per clone.
     if (obj.userData.giant) obj.traverse((/** @type {any} */ c) => { if (c.isInstancedMesh) c.dispose(); });
+    // HAVOC's heat and visor and a samurai's slash trail are made for each figure.
+    const fig = obj.userData.figure;
+    if (fig && fig.own) for (const m of fig.own) m.dispose();
   }
 
   /** @type {{template: any, joints: any}|null} the real Terminator, built once per session (its geometry and materials are shared by every proxy) */
@@ -1986,6 +2011,84 @@ export function createNetSystem(ctx) {
     kit.unit.originalMat.userData.tint.value.setRGB(1, 1, 1).lerp(c.heatTint, g.originalHeat);
   }
 
+  /** @type {{hank: any, havoc: any, samurai: any}} Hank's template, HAVOC's kit and the samurai's kit, each built on first sight (geometry and materials released in `clearProxies`) */
+  const figureKits = { hank: null, havoc: null, samurai: null };
+
+  /**
+   * One Hank, HAVOC or samurai for a proxy, from the host's own builders
+   * (`actionHero`, `gunner`, `spaceship` `.buildGuestModel`). Null when the
+   * system is absent.
+   * @param {number} type FIGURE.*
+   * @param {number} variant The samurai's armour colour.
+   * @returns {{root: THREE.Object3D, data: any}|null}
+   */
+  function figureFor(type, variant) {
+    if (type === FIGURE.hank) {
+      let kit = figureKits.hank;
+      if (!kit) {
+        const sys = ctx.systems.actionHero;
+        const unit = sys && sys.buildGuestModel ? sys.buildGuestModel() : null;
+        if (!unit) return null;
+        for (const g of unit.geometries) keepGeo(g);
+        for (const m of unit.materials) keepMat(m);
+        kit = figureKits.hank = unit;
+      }
+      const root = kit.root.clone(true);
+      return { root, data: { joints: mapJoints(kit.root, root, kit.joints), kit, has: newHankPose(), want: newHankPose(), run: newRunCycle() } };
+    }
+    if (type === FIGURE.havoc) {
+      let kit = figureKits.havoc;
+      if (!kit) {
+        const sys = ctx.systems.gunner;
+        const unit = sys && sys.buildGuestModel ? sys.buildGuestModel() : null;
+        if (!unit) return null;
+        for (const g of unit.geometries) keepGeo(g);
+        for (const m of unit.materials) keepMat(m);
+        kit = figureKits.havoc = unit;
+      }
+      const look = kit.build();
+      return { root: look.root, data: { parts: look, own: look.own, run: newRunCycle() } };
+    }
+    let kit = figureKits.samurai;
+    if (!kit) {
+      const sys = ctx.systems.spaceship;
+      kit = sys && sys.buildGuestModel ? sys.buildGuestModel() : null;
+      if (!kit) return null;
+      figureKits.samurai = kit;
+    }
+    const rig = kit.build(variant);
+    return { root: rig.root, data: { parts: rig, consts: kit.consts, own: [rig.trailMat], run: newRunCycle() } };
+  }
+
+  /**
+   * Poses a Hank, HAVOC or samurai proxy from an interpolated `figures` row.
+   * @param {THREE.Object3D} obj The proxy.
+   * @param {number[]} row
+   * @param {number} dt
+   * @param {number} t Snapshot clock, seconds.
+   * @returns {void}
+   */
+  function poseFigure(obj, row, dt, t) {
+    obj.position.set(row[2], row[3], row[4]);
+    obj.rotation.set(0, row[5], 0);
+    const fd = obj.userData.figure;
+    if (!fd) return;
+    const type = row[1];
+    if (type === FIGURE.hank) {
+      const amount = stepRunCycle(fd.run, row[2], row[4], dt, fd.kit.stride, fd.kit.speed);
+      hankWant(row[6], row[7], row[8], fd.run.phase, amount, t, fd.want);
+      applyHank(fd.joints, fd.has, fd.want, dt);
+      fd.kit.magma.emissiveIntensity = hankGlow(row[6], row[7]);
+    } else if (type === FIGURE.havoc) {
+      const amount = stepRunCycle(fd.run, row[2], row[4], dt, 7 / GUNNER.walkSpeed, GUNNER.walkSpeed);
+      poseHavoc(fd.parts, row[6], row[7], row[8], fd.run.phase, amount, t, dt);
+    } else {
+      const c = fd.consts;
+      const amount = stepRunCycle(fd.run, row[2], row[4], dt, 1.5, c.runSpeed);
+      obj.rotation.x = poseSamurai(fd.parts, c, row[6], row[7], fd.run.phase, amount).tilt;
+    }
+  }
+
   /** @type {Map<number, THREE.Object3D>} the real car, one template per body colour, built on first sight (shared geometry; each colour's paint is released in `clearProxies`) */
   const carKits = new Map();
 
@@ -2010,8 +2113,8 @@ export function createNetSystem(ctx) {
     return template.clone(true);
   }
 
-  /** @param {string} kind @param {number} [id] Player id, for the players kind. @param {number} [colour] Body colour, for the cars kind. @returns {THREE.Object3D} */
-  function makeProxy(kind, id = 0, colour = 0) {
+  /** @param {string} kind @param {number} [id] Player id, for the players kind. @param {number} [colour] Body colour, for the cars kind; the actor type for figures. @param {number} [variant] The samurai's armour colour. @returns {THREE.Object3D} */
+  function makeProxy(kind, id = 0, colour = 0, variant = 0) {
     if (kind === 'players') return makeRogerProxy(id);
     const g = new THREE.Group();
     const mat = (/** @type {number} */ c, o = 1) => /** @type {THREE.Material} */ (keepMat(new THREE.MeshStandardMaterial({ color: c, transparent: o < 1, opacity: o, roughness: 0.7 })));
@@ -2074,6 +2177,17 @@ export function createNetSystem(ctx) {
       } else {
         const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(2, 8, 4, 8)), mat(id === GIANT.yeti ? 0xdfeaf5 : 0x4f7a3a));
         body.position.y = 5;
+        g.add(body);
+      }
+    } else if (kind === 'figures') {
+      const fig = figureFor(colour, variant);
+      if (fig) {
+        g.rotation.order = 'YXZ';
+        g.add(fig.root);
+        g.userData.figure = fig.data;
+      } else {
+        const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(0.4, 1.6, 4, 8)), mat(colour === FIGURE.samurai ? 0x8e1b1b : colour === FIGURE.havoc ? 0x4a5240 : 0x8d8780));
+        body.position.y = 1.2;
         g.add(body);
       }
     } else if (kind === 'vehicles') {
@@ -2341,6 +2455,8 @@ export function createNetSystem(ctx) {
     termKit = null;
     carKits.clear();
     giantKits[0] = giantKits[1] = null;
+    if (figureKits.samurai) figureKits.samurai.release();
+    figureKits.hank = figureKits.havoc = figureKits.samurai = null;
     aliensKit.alien = aliensKit.saucer = null;
   }
 
@@ -2572,11 +2688,13 @@ export function createNetSystem(ctx) {
       for (const [id, row] of rows) {
         const mine = kind === 'players' && String(id) === S.myId;
         let obj = map.get(id);
-        if (!obj) { obj = makeProxy(kind, id, kind === 'cars' ? row[7] : 0); map.set(id, obj); S.proxyRoot.add(obj); }
+        if (!obj) { obj = makeProxy(kind, id, kind === 'cars' ? row[7] : kind === 'figures' ? row[1] : 0, kind === 'figures' ? row[8] : 0); map.set(id, obj); S.proxyRoot.add(obj); }
         if (kind === 'cars') {
           poseCar(obj, row);
         } else if (kind === 'giants') {
           poseGiant(obj, row, dt, s.t);
+        } else if (kind === 'figures') {
+          poseFigure(obj, row, dt, s.t);
         } else if (kind === 'replicator') {
           const rd = obj.userData.replica;
           if (rd) {

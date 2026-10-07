@@ -72,7 +72,7 @@ const FALLING = 4;
 /**
  * @param {Object} ctx
  * @returns {{initGunners: () => void, updateGunners: (dt: number, rawDt: number) => void, resetGunners: () => void,
- *   disposeGunners: () => void, send: () => boolean, count: () => number, caughtCount: () => number, positions: () => THREE.Vector3[], returnedHits: () => number, debug: () => Object[]}}
+ *   disposeGunners: () => void, send: () => boolean, buildGuestModel: () => any, replicaState: () => any[], count: () => number, caughtCount: () => number, positions: () => THREE.Vector3[], returnedHits: () => number, debug: () => Object[]}}
  */
 export function createGunnerSystem(ctx) {
   const { Sim } = ctx;
@@ -913,8 +913,34 @@ export function createGunnerSystem(ctx) {
     button = null;
   }
 
+  /**
+   * The co-op guest's HAVOC (net/system.js): the model's shared kit, and a
+   * function making one gunner from it (each has its own heat and visor
+   * materials, as here). Nothing is added to the scene and no state is touched.
+   * @returns {{kit: ReturnType<typeof buildGunnerKit>, build: () => ReturnType<typeof buildGunner>, geometries: THREE.BufferGeometry[], materials: THREE.Material[]}}
+   */
+  function buildGuestModel() {
+    const own = buildGunnerKit();
+    return { kit: own, build: () => buildGunner(own), geometries: own.all.geos, materials: own.all.mats };
+  }
+
+  /**
+   * What the guest needs to draw each HAVOC still on the field (`figures`
+   * rows, net/figurePose.js). Read-only.
+   * @returns {{key: object, x: number, y: number, z: number, yaw: number, phase: string, stunned: boolean, spin: number, heat: number, dying: boolean, dead: number}[]}
+   */
+  function replicaState() {
+    const out = [];
+    for (const u of units) {
+      if (u.gone) continue;
+      const p = u.look.root.position;
+      out.push({ key: u, x: p.x, y: p.y, z: p.z, yaw: u.yaw, phase: u.phase, stunned: u.stun > 0, spin: u.spin, heat: u.heat, dying: u.dying, dead: u.dead });
+    }
+    return out;
+  }
+
   return {
-    initGunners, updateGunners, resetGunners, disposeGunners, send,
+    initGunners, updateGunners, resetGunners, disposeGunners, send, buildGuestModel, replicaState,
     count: () => units.filter((u) => !u.dying && !u.gone).length,
     /** Where each HAVOC still up is (the minimap, ui/minimap.js). */
     positions: () => units.filter((u) => !u.dying && !u.gone).map((u) => u.look.root.position),

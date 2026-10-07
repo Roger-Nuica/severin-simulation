@@ -52,6 +52,8 @@ export const LIMITS = {
   /** Patient Zero's original (one) and its clones (PZ.maxClones, CAPS.perKind.patientZeroClone). */
   maxReplicator: 1,
   maxClones: 50,
+  /** Hank (1), HAVOC (GUNNER.max 3) and the samurai (SAMURAI.count 10). */
+  maxFigures: 14,
   maxAim: 8,
   maxEnv: 1
 };
@@ -85,7 +87,7 @@ export const FX_KINDS = ['bullet', 'rail', 'plasma', 'mega', 'fire', 'holeShot',
 export const FX_COLUMNS = ['id', 'kind', 'shooter', 'x', 'y', 'z', 'a', 'b', 'c', 'extra'];
 
 /** Row widths of the additive snapshot fields (`fx` is the widest). */
-export const EXTRA_ROW_WIDTH = { fx: 10, tw: 6, hole: 4, aim: 4, env: 7, cars: 8, giants: 7, replicator: 8, clones: 6 };
+export const EXTRA_ROW_WIDTH = { fx: 10, tw: 6, hole: 4, aim: 4, env: 7, cars: 8, giants: 7, replicator: 8, clones: 6, figures: 9 };
 
 const CODE_RE = new RegExp(`^[${ROOM.codeAlphabet}]{${ROOM.codeLength}}$`);
 
@@ -207,12 +209,13 @@ export function validateInput(msg) {
  *   giants       [id, x, z, heading, state, a, b]  (the cyber T-Rex id 0 and Yeti id 1, while one is on the field; net/giantPose.js)
  *   replicator   [id 0, x, z, heading, attack, evolve, grown, flare]  (Patient Zero's original, while it stands; evolve 0 none, 0..1 changing, 1 evolved; net/replicatorPose.js)
  *   clones       [id, x, z, heading, attack, grown]  (its clones, up to 50; grown 0..1 is how far built or come apart)
- * Caps: fx 24, tw 8, hole 1, aim 8, env 1, cars 64, giants 2, replicator 1, clones 50. Unknown fx kinds are dropped by
+ *   figures      [id, type, x, y, z, heading, state, a, b]  (Hank Granite id 0, HAVOC and the samurai; type 0 Hank, 1 HAVOC, 2 samurai; net/figurePose.js)
+ * Caps: fx 24, tw 8, hole 1, aim 8, env 1, cars 64, giants 2, replicator 1, clones 50, figures 14. Unknown fx kinds are dropped by
  * `sanitizeFx`, not an error. Built and read by later subtasks; no row here
  * widens an existing one.
  * @typedef {{type:'snapshot', v:number, room:string, tick:number, t:number,
  *   score:number, players:number[][], tornadoes:number[][], terminators:number[][],
- *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][], ack?:number[][], alt?:number[][], fx?:number[][], tw?:number[][], hole?:number[][], aim?:number[][], env?:number[][], cars?:number[][], giants?:number[][], replicator?:number[][], clones?:number[][]}} Snapshot
+ *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][], ack?:number[][], alt?:number[][], fx?:number[][], tw?:number[][], hole?:number[][], aim?:number[][], env?:number[][], cars?:number[][], giants?:number[][], replicator?:number[][], clones?:number[][], figures?:number[][]}} Snapshot
  */
 const ROW_WIDTH = { players: 9, tornadoes: 4, terminators: 5, aliens: 5, ships: 5, vehicles: 5 };
 
@@ -275,7 +278,7 @@ export function validateSnapshot(msg) {
  */
 function validateExtraFields(msg, b) {
   /** @type {Record<string, number>} */
-  const caps = { fx: LIMITS.maxFx, tw: LIMITS.maxTw, hole: LIMITS.maxHole, aim: LIMITS.maxAim, env: LIMITS.maxEnv, cars: LIMITS.maxPerKind, giants: LIMITS.maxGiants, replicator: LIMITS.maxReplicator, clones: LIMITS.maxClones };
+  const caps = { fx: LIMITS.maxFx, tw: LIMITS.maxTw, hole: LIMITS.maxHole, aim: LIMITS.maxAim, env: LIMITS.maxEnv, cars: LIMITS.maxPerKind, giants: LIMITS.maxGiants, replicator: LIMITS.maxReplicator, clones: LIMITS.maxClones, figures: LIMITS.maxFigures };
   for (const name of Object.keys(caps)) {
     const rows = msg[name];
     if (rows === undefined) continue;
@@ -327,6 +330,11 @@ function extraRowOk(name, r, b) {
     case 'clones':
       return Number.isInteger(r[0]) && r[0] >= 0 && Math.abs(r[1]) <= b && Math.abs(r[2]) <= b
         && inRange(r[3], -Math.PI * 4, Math.PI * 4) && inRange(r[4], 0, 1) && inRange(r[5], 0, 1);
+    case 'figures':
+      return Number.isInteger(r[0]) && r[0] >= 0 && Number.isInteger(r[1]) && r[1] >= 0 && r[1] <= 2
+        && Math.abs(r[2]) <= b && inRange(r[3], -50, 2000) && Math.abs(r[4]) <= b
+        && inRange(r[5], -Math.PI * 4, Math.PI * 4) && Number.isInteger(r[6]) && r[6] >= 0 && r[6] <= 5
+        && inRange(r[7], 0, 10) && inRange(r[8], 0, 3);
     default: return false;
   }
 }

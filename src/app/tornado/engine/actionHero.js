@@ -4,6 +4,7 @@ import { createSoftDotTexture } from '../utils/textures.js';
 import { createParticlePool, pointScaleFor, markPoolDirty, disposeParticlePool } from './particlePool.js';
 import { HANK, MOVES, moveAt, showLength, isRecord, throwScore, bossChoice } from './hank/moves.js';
 import { buildHank, buildBoulder } from './hank/model.js';
+import { HANK_STATE } from './net/figurePose.js';
 
 /**
  * ===========================================================================
@@ -82,7 +83,9 @@ const LABELS = 8;
  *   initActionHero: () => void,
  *   updateActionHero: (dt: number, rawDt: number) => void,
  *   resetActionHero: () => void,
- *   disposeActionHero: () => void
+ *   disposeActionHero: () => void,
+ *   buildGuestModel: () => any,
+ *   replicaState: () => any
  * }}
  */
 export function createActionHeroSystem(ctx) {
@@ -1178,5 +1181,52 @@ export function createActionHeroSystem(ctx) {
     labelPool = [];
   }
 
-  return { start, active: () => !!scene, placeCamera, initActionHero, updateActionHero, resetActionHero, disposeActionHero };
+  /**
+   * The co-op guest's Hank (net/system.js): his own model, built for the guest
+   * to clone, with the joints and the material his pose moves. Nothing is
+   * added to the scene and no state is touched; the geometry and materials
+   * are the guest's to release.
+   * @returns {{root: THREE.Object3D, joints: Record<string, THREE.Object3D>, magma: THREE.MeshStandardMaterial, stride: number, speed: number, geometries: THREE.BufferGeometry[], materials: THREE.Material[]}}
+   */
+  function buildGuestModel() {
+    const h = buildHank();
+    return {
+      root: h.group,
+      joints: { torso: h.torso, hip0: h.hips[0], hip1: h.hips[1], sh0: h.shoulders[0], sh1: h.shoulders[1], el0: h.elbows[0], el1: h.elbows[1] },
+      magma: h.magma, stride: 1.4, speed: HANK.boss.speed, geometries: h.geometries, materials: h.materials
+    };
+  }
+
+  /**
+   * What the guest needs to draw him (a `figures` row, net/figurePose.js), or
+   * null while he is not on the field. Read-only.
+   * @returns {{x: number, y: number, z: number, heading: number, state: number, a: number, b: number}|null}
+   */
+  function replicaState() {
+    if (!hank || !hank.group.visible) return null;
+    const g = hank.group;
+    const out = { x: g.position.x, y: g.position.y, z: g.position.z, heading: g.rotation.y, state: HANK_STATE.standing, a: 0, b: 0 };
+    if (crumbling >= 0) {
+      out.state = HANK_STATE.crumble;
+      out.a = Math.min(1, crumbling / HANK.outro);
+    } else if (boss) {
+      if (boss.state === 'wind') { out.state = HANK_STATE.wind; out.a = Math.min(1, boss.t / HANK.boss.windUp); }
+      else if (boss.state === 'recover') out.state = HANK_STATE.after;
+      else if (boss.state === 'throw') out.state = HANK_STATE.throw;
+      else if (boss.state === 'stagger') out.state = HANK_STATE.stagger;
+    } else if (scene && scene.landed) {
+      // The show: the punch for the next one, winding up and just after.
+      const i = scene.next;
+      if (i < MOVES.length) {
+        const lt = scene.t - moveAt(i);
+        const wind = MOVES[i].wind;
+        out.b = i === 0 ? 0 : 1;
+        if (lt > -wind && lt < 0) { out.state = HANK_STATE.wind; out.a = 1 + lt / wind; }
+        else if (lt >= 0 && lt < 0.6) out.state = HANK_STATE.after;
+      }
+    } else if (!scene) return null;
+    return out;
+  }
+
+  return { start, active: () => !!scene, placeCamera, initActionHero, updateActionHero, resetActionHero, disposeActionHero, buildGuestModel, replicaState };
 }
