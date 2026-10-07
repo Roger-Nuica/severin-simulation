@@ -3,7 +3,9 @@ import * as THREE from 'three';
 import { createBullets } from '../hero/bullets.js';
 import { newFxQueue, dueFx } from './fxQueue.js';
 import { unpackExtra } from './fxOut.js';
-import { playedKind, shotEnd, takeRows, cueDue, CUE_GAP, RAIL_POWER } from './mirrorRules.js';
+import { playedKind, shotEnd, takeRows, cueDue, CUE_GAP, RAIL_POWER, beamLook } from './mirrorRules.js';
+import { HERO } from '../hero/config.js';
+import { buildBeamMeshes, placeBeamMesh, fadeBeamMeshes, buildRingMeshes, placeRingMeshes, ringsTotal } from '../hero/plasmaBeam.js';
 
 /**
  * ===========================================================================
@@ -24,6 +26,14 @@ import { playedKind, shotEnd, takeRows, cueDue, CUE_GAP, RAIL_POWER } from './mi
  * own shot never comes back from the host (the queue drops its `shooter`), so
  * nothing is drawn twice.
  *
+ * The rifle's shot (`plasma`) and the MEGA BEAM (`mega`) are the host's own beam
+ * (`hero/plasmaBeam.js`: core, sheath, halo, the splash where it lands and the
+ * mega rings), drawn from the row's two ends and burnt out on the host's own
+ * timings, with the host's `playPlasma` and `playSonicBoom` cues. Visual only:
+ * no `plasmaHit`, no damage, no score, no neutralise or chip, and no shake or
+ * flash on this camera from someone else's beam (owner decision 10). A small
+ * fixed set of `BEAMS` is made on the first one and released with the session.
+ *
  * One small pool of rounds per instance, made on first use and released with
  * the session (R-047, R-048): `ROUNDS` bullets and `CASINGS` casings are about
  * the own and the partner's minigun in flight at once; sparks check
@@ -36,6 +46,8 @@ import { playedKind, shotEnd, takeRows, cueDue, CUE_GAP, RAIL_POWER } from './mi
 export const ROUNDS = 48;
 /** Casings alive at once (4 s each; the oldest is reused). */
 export const CASINGS = 40;
+/** Beams alive at once: the own and the partner's rifle (0.55 s each, one shot every 0.35 s) with room to spare. */
+export const BEAMS = 3;
 /** The sparks need this much of the shared particle budget (`caps.particleRoom()`). */
 const SPARK_ROOM = 24;
 
@@ -44,8 +56,8 @@ const SPARK_ROOM = 24;
  * @returns {{
  *   feed: (rows: ReadonlyArray<number[]>|undefined, hostT: number, ownId: number) => void,
  *   update: (renderT: number|null, dt: number) => void,
- *   drawOwn: (kind: 'bullet'|'rail', from: THREE.Vector3, to: THREE.Vector3) => void,
- *   drawGuestShot: (kind: 'bullet'|'rail', from: THREE.Vector3, to: THREE.Vector3, hit: number) => void,
+ *   drawOwn: (kind: 'bullet'|'rail'|'plasma', from: THREE.Vector3, to: THREE.Vector3) => void,
+ *   drawGuestShot: (kind: 'bullet'|'rail'|'plasma', from: THREE.Vector3, to: THREE.Vector3, hit: number) => void,
  *   tracer: (from: THREE.Vector3, to: THREE.Vector3) => void,
  *   reset: () => void,
  *   dispose: () => void,
@@ -59,7 +71,26 @@ export function createMirror(ctx) {
   /** The landing of each round in flight: one record per pool slot, in firing order (the pool reuses its slots round-robin). */
   const hits = Array.from({ length: ROUNDS }, () => ({ kind: 'ground', obj: null, at: new THREE.Vector3() }));
   let nextHit = 0;
-  const lastCue = { bullet: -Infinity, rail: -Infinity };
+  const lastCue = { bullet: -Infinity, rail: -Infinity, plasma: -Infinity, mega: -Infinity };
+  /**
+   * The beams (made on first use): the meshes, and per beam the seconds it burns, its width and its ends.
+   * @type {{beam: THREE.Group, splash: THREE.Mesh, t: number, life: number, width: number, mega: boolean, from: THREE.Vector3, to: THREE.Vector3}[]|null}
+   */
+  let beams = null;
+  let nextBeam = 0;
+  /** @type {THREE.Mesh[]|null} */
+  let rings = null;
+  let ringT = 0;
+  const ringFrom = new THREE.Vector3();
+  const ringTo = new THREE.Vector3();
+  /** Geometries and materials this instance made, disposed with it. @type {THREE.BufferGeometry[]} */
+  const geos = [];
+  /** @type {THREE.Material[]} */
+  const mats = [];
+  const kit = {
+    keepGeo: /** @type {any} */ ((/** @type {THREE.BufferGeometry} */ g) => { geos.push(g); return g; }),
+    keepMat: /** @type {any} */ ((/** @type {THREE.Material} */ m) => { mats.push(m); return m; })
+  };
   const end = { x: 0, y: 0, z: 0, kind: '' };
   const from = new THREE.Vector3();
   const to = new THREE.Vector3();
@@ -109,8 +140,70 @@ export function createMirror(ctx) {
   }
 
   /**
+   * One plasma beam, from the muzzle to where the ray ended, with the host's look. No hit is
+   * resolved and the camera is left alone (owner decision 10).
+   * @param {THREE.Vector3} a muzzle @param {THREE.Vector3} b recorded end @param {number} hit a HIT_CODES index
+   * @param {boolean} mega @param {number} extra charge in hundredths of a second
+   * @returns {void}
+   */
+  function beam(a, b, hit, mega, extra) {
+    shotEnd(a, b, hit, end);
+    if (!beams) {
+      const scene = ctx.Sim.three.scene;
+      beams = [];
+      for (let i = 0; i < BEAMS; i++) {
+        const m = buildBeamMeshes(scene, kit);
+        beams.push({ beam: m.beam, splash: m.splash, t: 0, life: 1, width: 1, mega: false, from: new THREE.Vector3(), to: new THREE.Vector3() });
+      }
+    }
+    const e = beams[nextBeam];
+    nextBeam = (nextBeam + 1) % BEAMS;
+    const look = beamLook(mega, extra, HERO);
+    e.t = e.life = look.life;
+    e.width = look.width;
+    e.mega = mega;
+    e.from.copy(a);
+    e.to.set(end.x, end.y, end.z);
+    e.beam.visible = true;
+    e.splash.visible = end.kind !== 'sky';
+    e.splash.position.copy(e.to);
+    placeBeamMesh(e.beam, e.from, e.to, dir);
+    fadeBeamMeshes(e.beam, e.splash, 1, e.width, mega);
+    if (mega) {
+      if (!rings) rings = buildRingMeshes(ctx.Sim.three.scene, kit);
+      ringFrom.copy(e.from);
+      ringTo.copy(e.to);
+      ringT = ringsTotal();
+    }
+  }
+
+  /** Burns the beams down and runs the rings (no allocation). @param {number} dt */
+  function stepBeams(dt) {
+    if (beams) {
+      for (const e of beams) {
+        if (e.t <= 0) continue;
+        e.t -= dt;
+        if (e.t <= 0) { e.beam.visible = e.splash.visible = false; continue; }
+        fadeBeamMeshes(e.beam, e.splash, Math.max(0, e.t / e.life), e.width, e.mega);
+      }
+    }
+    if (rings && ringT > 0) {
+      ringT -= dt;
+      if (ringT <= 0) for (const r of rings) r.visible = false;
+      else placeRingMeshes(rings, ringsTotal() - ringT, ringFrom, ringTo, dir);
+    }
+  }
+
+  /** Hides every beam and ring now. */
+  function hideBeams() {
+    if (beams) for (const e of beams) { e.t = 0; e.beam.visible = e.splash.visible = false; }
+    if (rings) for (const r of rings) r.visible = false;
+    ringT = 0;
+  }
+
+  /**
    * The cue of a kind, through this computer's own hero sound, at most once per `CUE_GAP`.
-   * @param {'bullet'|'rail'} kind
+   * @param {'bullet'|'rail'|'plasma'|'mega'} kind
    * @returns {void}
    */
   function cue(kind) {
@@ -119,7 +212,14 @@ export function createMirror(ctx) {
     lastCue[kind] = now;
     const snd = ctx.systems.heroSound;
     if (!snd) return;
-    if (kind === 'bullet') snd.playBullet(); else snd.playZap();
+    if (kind === 'bullet') snd.playBullet();
+    else if (kind === 'rail') snd.playZap();
+    else {
+      // The host's own pair for the rifle: the shot's sound and the sonic boom, louder for the MEGA BEAM.
+      const mega = kind === 'mega';
+      snd.playPlasma(mega ? HERO.megaBeamSeconds : HERO.beamSeconds);
+      if (ctx.systems.cues) ctx.systems.cues.playSonicBoom(mega ? 1.4 : 0.75);
+    }
   }
 
   /**
@@ -132,8 +232,10 @@ export function createMirror(ctx) {
     if (!kind) return;
     from.set(row[3], row[4], row[5]);
     const b = rowTo.set(row[6], row[7], row[8]);
-    const hit = unpackExtra(row[9]).hit;
-    if (kind === 'bullet') round(from, b, hit); else bolt(from, b, hit);
+    const { hit, extra } = unpackExtra(row[9]);
+    if (kind === 'bullet') round(from, b, hit);
+    else if (kind === 'rail') bolt(from, b, hit);
+    else beam(from, b, hit, kind === 'mega', extra);
     cue(kind);
   }
 
@@ -151,26 +253,41 @@ export function createMirror(ctx) {
         for (const row of r.due) play(row);
       }
       if (rounds) rounds.update(dt, 1, noLanding);
+      stepBeams(dt);
     },
     drawOwn(kind, a, b) {
       // Predicted at the press: no hit is known, so the ray is cut at the ground or left in the sky. Its cue is the predicted one.
-      if (kind === 'bullet') round(a, b, 0); else bolt(a, b, 0);
+      if (kind === 'bullet') round(a, b, 0);
+      else if (kind === 'rail') bolt(a, b, 0);
+      else beam(a, b, 0, false, 0);
     },
     drawGuestShot(kind, a, b, hit) {
-      if (kind === 'bullet') round(a, b, hit); else bolt(a, b, hit);
+      if (kind === 'bullet') round(a, b, hit);
+      else if (kind === 'rail') bolt(a, b, hit);
+      else beam(a, b, hit, false, 0);
       cue(kind);
     },
-    /** A bare tracer (the rifle's and the Black Hole Gun's until their own subtasks): no hit, no casing, no cue. */
+    /** A bare tracer (the Black Hole Gun's until its own subtask): no hit, no casing, no cue. */
     tracer(a, b) { pool().fire(a, b, null, null, null); },
     reset() {
       queue = newFxQueue();
       if (rounds) rounds.clear();
-      lastCue.bullet = lastCue.rail = -Infinity;
+      lastCue.bullet = lastCue.rail = lastCue.plasma = lastCue.mega = -Infinity;
+      hideBeams();
     },
     dispose() {
       queue = newFxQueue();
       if (rounds) rounds.dispose();
       rounds = null;
+      if (beams) for (const e of beams) { ctx.Sim.three.scene.remove(e.beam, e.splash); }
+      if (rings) for (const r of rings) ctx.Sim.three.scene.remove(r);
+      for (const g of geos) g.dispose();
+      for (const m of mats) m.dispose();
+      geos.length = mats.length = 0;
+      beams = null;
+      rings = null;
+      nextBeam = 0;
+      ringT = 0;
     },
     waiting: () => queue.items.length
   };

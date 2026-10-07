@@ -1228,11 +1228,11 @@ export function createNetSystem(ctx) {
       const reach = hit ? hit.t : w.range;
       muzzleVec.set(ox + dx * 0.8, EYE - 0.2 + dy * 0.8, oz + dz * 0.8);
       tracerEnd.set(ox + dx * reach, EYE + dy * reach, oz + dz * reach);
-      // The rifle keeps its bare tracer until its own renderer; the minigun and railgun go through the mirror
-      // (the same round with casings and sparks, the same bolt, with the cue), as on the guest's screen.
+      // All three go through the mirror (the minigun's round with casings and sparks, the rail bolt, the
+      // rifle's plasma beam, each with its cue), as on the guest's screen.
       if (name === 'minigun') mirror.drawGuestShot('bullet', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
       else if (name === 'railgun') mirror.drawGuestShot('rail', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
-      else hero().guestTracer(muzzleVec, tracerEnd);
+      else mirror.drawGuestShot('plasma', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
       if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: EYE + dy * hit.t, z: oz + dz * hit.t } })) { if (dbg) dbg.fire(trigger.weapon, 3); credit(KILL_SCORE, p.id); }
       // Friendly fire (D4): the partner in the line of fire, if nearer than the enemy hit.
       hurtRay(p.id, ox, EYE, oz, dx, dy, dz, hit ? hit.t : w.range, w.type);
@@ -1838,8 +1838,8 @@ export function createNetSystem(ctx) {
   /**
    * The guest's own shot, drawn at the press from just ahead of its eye along
    * its aim, through the mirror (net/mirror.js): the minigun's round with its
-   * casing and sparks, the railgun's bolt, or, for the rifle and the Black Hole
-   * Gun until their own renderers, a bare tracer. Cosmetic and predicted like
+   * casing and sparks, the railgun's bolt, the rifle's plasma beam, or, for the
+   * Black Hole Gun until its own renderer, a bare tracer. Cosmetic and predicted like
    * the flash, so it shows even for a shot the host refuses; the host resolves
    * the shot and never sends it back (the mirror's queue drops it).
    * @param {string} key the wheel key that fired
@@ -1855,6 +1855,7 @@ export function createNetSystem(ctx) {
     tracerEnd.copy(cam.position).addScaledVector(viewVec, w.range);
     if (key === 'minigun') mirror.drawOwn('bullet', muzzleVec, tracerEnd);
     else if (key === 'railgun') mirror.drawOwn('rail', muzzleVec, tracerEnd);
+    else if (key === 'rifle') mirror.drawOwn('plasma', muzzleVec, tracerEnd);
     else mirror.tracer(muzzleVec, tracerEnd);
   }
 

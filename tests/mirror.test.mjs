@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { playedKind, cueDue, CUE_GAP, shotEnd, takeRows, PLAYED } from '../src/app/tornado/engine/net/mirrorRules.js';
+import { playedKind, cueDue, CUE_GAP, shotEnd, takeRows, PLAYED, beamLook } from '../src/app/tornado/engine/net/mirrorRules.js';
 import { FX_KINDS } from '../src/app/tornado/engine/net/protocol.js';
 import { HIT_CODES, packExtra } from '../src/app/tornado/engine/net/fxOut.js';
 import { newFxQueue, dueFx } from '../src/app/tornado/engine/net/fxQueue.js';
@@ -10,15 +10,15 @@ const row = (id, kind, shooter) => [id, FX_KINDS.indexOf(kind), shooter, 0, 1.4,
 const out = () => ({ x: 0, y: 0, z: 0, kind: '' });
 const code = (n) => HIT_CODES.indexOf(n);
 
-test('only the minigun round and the rail bolt are played in this build', () => {
-  assert.deepEqual([...PLAYED], ['bullet', 'rail']);
+test('the minigun round, the rail bolt and the plasma beam are played in this build', () => {
+  assert.deepEqual([...PLAYED], ['bullet', 'rail', 'plasma', 'mega']);
   for (const k of FX_KINDS) assert.equal(playedKind(FX_KINDS.indexOf(k)), PLAYED.includes(k) ? k : null);
   assert.equal(playedKind(99), null);
 });
 
-test('own shots draw through the mirror for the minigun and rail, a tracer for the rest', () => {
-  assert.deepEqual([...MIRROR_KEYS].sort(), ['minigun', 'railgun']);
-  assert.deepEqual([...TRACER_KEYS].sort(), ['blackhole', 'rifle']);
+test('own shots draw through the mirror for the minigun, rail and rifle, a tracer for the Black Hole Gun', () => {
+  assert.deepEqual([...MIRROR_KEYS].sort(), ['minigun', 'railgun', 'rifle']);
+  assert.deepEqual([...TRACER_KEYS].sort(), ['blackhole']);
   for (const k of MIRROR_KEYS) assert.ok(!TRACER_KEYS.has(k));
 });
 
@@ -53,4 +53,21 @@ test('a recorded hit keeps its kind and place (a person takes no sparks, a wall 
   const e = shotEnd({ x: 0, y: 2, z: 0 }, { x: 5, y: 3, z: 1 }, code('building'), out());
   assert.deepEqual([e.x, e.y, e.z, e.kind], [5, 3, 1, 'building']);
   assert.equal(shotEnd({ x: 0, y: 2, z: 0 }, { x: 5, y: 1, z: 1 }, code('person'), out()).kind, 'person');
+});
+
+test('the beam look follows the host rule: a mega is wide and long, a normal shot widens with the charge', () => {
+  const hero = { chargeSeconds: 2, megaWidth: 3.5, beamSeconds: 0.55, megaBeamSeconds: 1.1 };
+  assert.deepEqual(beamLook(true, 0, hero), { life: 1.1, width: 3.5 });
+  assert.deepEqual(beamLook(false, 0, hero), { life: 0.55, width: 1 });
+  assert.ok(Math.abs(beamLook(false, 100, hero).width - 1.175) < 1e-9);
+  assert.equal(beamLook(false, 9999, hero).width, 1.35);
+  assert.equal(beamLook(false, -5, hero).width, 1);
+});
+
+test('plasma and mega rows are played, with a cue gap each', () => {
+  assert.equal(playedKind(FX_KINDS.indexOf('plasma')), 'plasma');
+  assert.equal(playedKind(FX_KINDS.indexOf('mega')), 'mega');
+  assert.ok(CUE_GAP.plasma > 0 && CUE_GAP.mega > 0);
+  const { due } = dueFx(takeRows(newFxQueue(), [row(1, 'plasma', 1), row(2, 'mega', 0)], 5, 1), 10);
+  assert.deepEqual(due.map((r) => r[0]), [2]);
 });

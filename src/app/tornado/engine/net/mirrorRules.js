@@ -17,22 +17,38 @@ import { HIT_CODES } from './fxOut.js';
 import { pushFx } from './fxQueue.js';
 import { sanitizeFx } from './protocol.js';
 
-/** The `fx` kinds this subtask draws; the rest (plasma, mega, holeShot, cut, fire) wait for their own subtasks and are left unplayed. */
-export const PLAYED = Object.freeze(['bullet', 'rail']);
+/** The `fx` kinds this build draws; the rest (holeShot, cut, fire) wait for their own subtasks and are left unplayed. */
+export const PLAYED = Object.freeze(['bullet', 'rail', 'plasma', 'mega']);
 
-/** Least seconds between two cues of a kind (the minigun fires 18 a second: about every third round sounds). */
-export const CUE_GAP = Object.freeze({ bullet: 0.07, rail: 0.12 });
+/** Least seconds between two cues of a kind (the minigun fires 18 a second: about every third round sounds; the rifle's own cooldown is 0.35). */
+export const CUE_GAP = Object.freeze({ bullet: 0.07, rail: 0.12, plasma: 0.2, mega: 0.2 });
 
 /** The strike power of a rail bolt on this screen (presentation only): the host's own range is 0.8 to 1 (`strikeTargeting.js`). */
 export const RAIL_POWER = 1;
 
 /**
  * @param {number} kindIndex an `fx` row's kind column
- * @returns {'bullet'|'rail'|null} what this build draws for it, null for a kind it does not (yet)
+ * @returns {'bullet'|'rail'|'plasma'|'mega'|null} what this build draws for it, null for a kind it does not (yet)
  */
 export function playedKind(kindIndex) {
   const name = FX_KINDS[kindIndex];
-  return name === 'bullet' || name === 'rail' ? name : null;
+  return name === 'bullet' || name === 'rail' || name === 'plasma' || name === 'mega' ? name : null;
+}
+
+/**
+ * How a plasma row's beam looks, from the host's own rule (`hero/plasma.js` `firePlasma`):
+ * a mega beam is `megaWidth` wide and burns `megaSeconds`; a normal shot is a little
+ * wider the longer the trigger was held (`extra` is the charge in hundredths of a second).
+ * Plain numbers in, plain numbers out.
+ * @param {boolean} mega
+ * @param {number} extra the row's value above the hit code (charge seconds x 100; 0 for a guest's shot)
+ * @param {{chargeSeconds: number, megaWidth: number, beamSeconds: number, megaBeamSeconds: number}} hero the host's numbers (`HERO`)
+ * @returns {{life: number, width: number}} seconds the beam burns and its width factor
+ */
+export function beamLook(mega, extra, hero) {
+  if (mega) return { life: hero.megaBeamSeconds, width: hero.megaWidth };
+  const level = Math.min(hero.chargeSeconds, Math.max(0, extra / 100));
+  return { life: hero.beamSeconds, width: 1 + 0.35 * (level / hero.chargeSeconds) };
 }
 
 /**
