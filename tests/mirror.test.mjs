@@ -71,3 +71,26 @@ test('plasma and mega rows are played, with a cue gap each', () => {
   const { due } = dueFx(takeRows(newFxQueue(), [row(1, 'plasma', 1), row(2, 'mega', 0)], 5, 1), 10);
   assert.deepEqual(due.map((r) => r[0]), [2]);
 });
+
+import { flameWanted, flameMuzzle, AIM_FIRE_BIT } from '../src/app/tornado/engine/net/mirrorRules.js';
+
+test('a flame is drawn for a player whose Fire Gun bit is set, never for the viewer or a cleared bit', () => {
+  assert.equal(AIM_FIRE_BIT, 1);
+  assert.equal(flameWanted([0, 0, 0, 1], 1), true);
+  assert.equal(flameWanted([0, 0, 0, 3], 1), true);
+  assert.equal(flameWanted([0, 0, 0, 2], 1), false, 'the minigun spin alone is no flame');
+  assert.equal(flameWanted([0, 0, 0, 0], 1), false);
+  assert.equal(flameWanted([1, 0, 0, 1], 1), false, 'the own flame draws itself');
+  assert.equal(flameWanted(undefined, 1), false);
+});
+
+test('the flame leaves the eye plus the player\'s height, along the row\'s aim', () => {
+  const o = { mx: 0, my: 0, mz: 0, dx: 0, dy: 0, dz: 0 };
+  flameMuzzle(o, 10, 20, 0, 0, 0, 1.4);
+  assert.deepEqual([o.dx, o.dy, o.dz], [0, 0, 1]);
+  assert.ok(Math.abs(o.mx - 10) < 1e-9 && Math.abs(o.my - 1.2) < 1e-9 && Math.abs(o.mz - 20.8) < 1e-9);
+  flameMuzzle(o, 0, 0, 12, Math.PI / 2, Math.PI / 6, 1.4);
+  assert.ok(Math.abs(Math.hypot(o.dx, o.dy, o.dz) - 1) < 1e-9);
+  assert.ok(o.dx > 0 && o.dy > 0, 'yaw 90 degrees faces +x, pitch up looks up');
+  assert.ok(o.my > 12 + 1.2, 'in the air the muzzle is at the figure\'s height');
+});

@@ -100,3 +100,40 @@ export function shotEnd(from, to, hit, out) {
  * @returns {import('./fxQueue.js').FxQueue}
  */
 export const takeRows = (queue, rows, hostT, ownId) => pushFx(queue, sanitizeFx(rows), hostT, ownId);
+
+/** The `aim` row's firing bit for the Fire Gun (`net/fxOut.js` `aimRow`: 1 Fire Gun firing, 2 minigun spinning). */
+export const AIM_FIRE_BIT = 1;
+
+/**
+ * Does this `aim` row ask this screen to draw a flame? The Fire Gun bit is set, and the row is
+ * not the viewer's own (its own flame is predicted at the press and draws itself; the host's row
+ * for it would double it). A flame is state: no row, or the bit clear, is no flame.
+ * @param {ReadonlyArray<number>|undefined} row [playerId, yaw, pitch, firingBits]
+ * @param {number} ownId the viewer's player id (-1 when unknown)
+ * @returns {boolean}
+ */
+export const flameWanted = (row, ownId) => !!row && row[0] !== ownId && ((row[3] | 0) & AIM_FIRE_BIT) !== 0;
+
+/**
+ * Where a player's flame leaves, from the interpolated position and the row's aim: the muzzle
+ * is 0.8 m along the aim from the eye and 0.2 m below it (the guest's own flame and the host's
+ * shots use the same offset), the eye at `eye` above the player's height `alt` (the jetpack).
+ * Writes into `out` (no allocation).
+ * @param {{mx: number, my: number, mz: number, dx: number, dy: number, dz: number}} out muzzle and unit direction
+ * @param {number} x @param {number} z the player's ground position
+ * @param {number} alt metres above the ground (0 on foot)
+ * @param {number} yaw radians (0 faces +z) @param {number} pitch radians
+ * @param {number} eye eye height above the player's feet
+ * @param {number} [ahead] metres from the eye to the muzzle along the aim
+ * @returns {typeof out}
+ */
+export function flameMuzzle(out, x, z, alt, yaw, pitch, eye, ahead = 0.8) {
+  const cp = Math.cos(pitch);
+  out.dx = Math.sin(yaw) * cp;
+  out.dy = Math.sin(pitch);
+  out.dz = Math.cos(yaw) * cp;
+  out.mx = x + out.dx * ahead;
+  out.my = alt + eye - 0.2 + out.dy * ahead;
+  out.mz = z + out.dz * ahead;
+  return out;
+}

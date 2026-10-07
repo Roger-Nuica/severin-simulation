@@ -9,6 +9,7 @@ import { PROTOCOL_VERSION, LIMITS, WEAPONS, SNAPSHOT_KINDS } from './protocol.js
 import { createFxRing, hitCode, HIT_CODES, aimRow, holeRow, twRow, envRow } from './fxOut.js';
 import { GUEST_WEAPONS, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrigger, coolDown, weaponAt } from './guestWeapons.js';
 import { createMirror } from './mirror.js';
+import { flameWanted, flameMuzzle } from './mirrorRules.js';
 import { HERO } from '../hero/config.js';
 import { JETPACK } from '../hero/jetpack.js';
 import { stepAir, jetHeld } from './flight.js';
@@ -200,6 +201,8 @@ export function createNetSystem(ctx) {
     /** Heights of the players' feet (metres), newest snapshot and the eased value drawn, by player id (the jetpack). */
     altTarget: new Map(),
     altNow: new Map(),
+    /** The newest snapshot's `aim` rows ([id, yaw, pitch, bits]); null when it carried none (the flames' state, so a cleared bit stops a flame within one snapshot). */
+    aimRows: null,
     /** The own authoritative position in the last snapshot, and when E was last pressed (to show the warp). */
     lastAuth: null,
     tpAt: 0,
@@ -338,6 +341,7 @@ export function createNetSystem(ctx) {
     S.pred = newPrediction();
     S.altTarget.clear();
     S.altNow.clear();
+    S.aimRows = null;
     S.lastAuth = null;
     S.predStats = { snaps: 0, blends: 0, last: 0, worst: 0 };
     S.peerHp.clear();
@@ -1523,6 +1527,7 @@ export function createNetSystem(ctx) {
         dbg.snapshotArrived(performance.now(), mine);
       }
       if (buffer.push(msg, performance.now() / 1000).ok) {
+        S.aimRows = Array.isArray(msg.aim) ? msg.aim : null;
         S.altTarget.clear();
         if (Array.isArray(msg.alt)) for (const r of msg.alt) S.altTarget.set(r[0], r[1]);
         reconcileOwn(msg);
@@ -1859,22 +1864,62 @@ export function createNetSystem(ctx) {
     else mirror.tracer(muzzleVec, tracerEnd);
   }
 
+  /** @type {{mx: number, my: number, mz: number, dx: number, dy: number, dz: number}} scratch: one flame's muzzle and direction */
+  const flameAt = { mx: 0, my: 0, mz: 0, dx: 0, dy: 0, dz: 0 };
+  /** The roar has been asked for this frame (one `fireGun` voice per screen: the own flame first, else the first partner's). */
+  let roared = false;
+
   /**
-   * The Fire Gun's flame from the guest's muzzle: the same particles and
-   * roar as the host's, in the guest's own pool. Cosmetic: the burning is
-   * the host's `guestFlame`.
+   * One Fire Gun flame from `muzzleVec` along `viewVec`, into the guest's one shared pool
+   * (its own predicted flame and the host's partner flames; the pool and its
+   * `particleRoom()` gate are `createTrexFlames`'). Cosmetic: the burning is the host's
+   * `guestFlame`. The pool is stepped once a frame by `stepFlames`.
+   * @param {number} dt real seconds
+   * @returns {void}
+   */
+  function emitFlame(dt) {
+    if (!flames) { flames = createTrexFlames(ctx, { size: FIRE_GUN.flameSize, alpha: FIRE_GUN.flameAlpha, name: 'guest_fire_gun_flames' }); flames.init(); }
+    flames.emit(muzzleVec, viewVec, Math.round(FIRE_GUN.rate * dt + Math.random()));
+    if (!roared) { roared = true; ctx.systems.creatureSounds.loop('fireGun', muzzleVec, 0.9); }
+  }
+
+  /**
+   * The guest's own flame, from its camera.
    * @param {THREE.Camera} cam the guest's camera, already looking
    * @param {number} dt real seconds
    * @returns {void}
    */
   function breatheFlame(cam, dt) {
-    if (!flames) { flames = createTrexFlames(ctx, { size: FIRE_GUN.flameSize, alpha: FIRE_GUN.flameAlpha, name: 'guest_fire_gun_flames' }); flames.init(); }
     cam.getWorldDirection(viewVec);
     muzzleVec.copy(cam.position).addScaledVector(viewVec, 0.8 + FIRE_GUN.ahead);
     muzzleVec.y -= 0.2;
-    flames.emit(muzzleVec, viewVec, Math.round(FIRE_GUN.rate * dt + Math.random()));
-    flames.update(dt);
-    ctx.systems.creatureSounds.loop('fireGun', muzzleVec, 0.9);
+    emitFlame(dt);
+  }
+
+  /**
+   * The other players' flames, from the newest snapshot's `aim` rows: each player whose Fire Gun
+   * bit is set (not the guest's own: `flameWanted`) breathes from their interpolated position at
+   * their real height, along the row's aim. State, not events: a clear bit or a vanished row
+   * emits nothing. Then the shared pool is stepped, once.
+   * @param {Map<number, number[]>|undefined} players the interpolated `players` rows
+   * @param {number} dt real seconds
+   * @returns {void}
+   */
+  function stepFlames(players, dt) {
+    const rows = S.aimRows;
+    if (rows && players) {
+      const own = S.myId ? Number(S.myId) : -1;
+      for (const r of rows) {
+        if (!flameWanted(r, own)) continue;
+        const p = players.get(r[0]);
+        if (!p || p[4] !== 0) continue;
+        flameMuzzle(flameAt, p[1], p[2], S.altNow.get(r[0]) || 0, r[1], r[2], EYE);
+        muzzleVec.set(flameAt.mx + flameAt.dx * FIRE_GUN.ahead, flameAt.my + flameAt.dy * FIRE_GUN.ahead, flameAt.mz + flameAt.dz * FIRE_GUN.ahead);
+        viewVec.set(flameAt.dx, flameAt.dy, flameAt.dz);
+        emitFlame(dt);
+      }
+    }
+    if (flames) flames.update(dt);
   }
 
   /** Takes every viewmodel out of the scene (their geometry is released with `S.geos`). @returns {void} */
@@ -2077,6 +2122,7 @@ export function createNetSystem(ctx) {
     S.peerScore = s.score;
     // The host's shots, on the snapshot clock (the round pool steps here, for the guest's own shot too).
     mirror.update(s.t, dt);
+    roared = false;
     // Own avatar from the prediction while it runs (else from the host's row).
     const pv = S.pred.active && S.buttons.aim ? viewPoint(S.pred) : null;
     // Heights ease towards the newest snapshot's (the jetpack), and settle to the ground.
@@ -2141,12 +2187,12 @@ export function createNetSystem(ctx) {
       if (step.shot) playShotCue(step.shot);
       if (step.shot && (MIRROR_KEYS.has(step.shot) || TRACER_KEYS.has(step.shot))) drawShot(step.shot, cam, weaponAt(S.weapon));
       if (step.flame) breatheFlame(cam, dt);
-      else if (flames) flames.update(dt);
       placeViewmodel(cam, shownKey(S.buttons.aim, me[4] === 0, S.weapon), k0.up || k0.down || k0.left || k0.right, dt);
       const mine = S.proxies.get('players');
       const own = mine && mine.get(Number(S.myId));
       if (own) own.visible = !camPose.firstPerson;
     }
+    stepFlames(s.kinds.players, dt);
     drawHud();
   }
 
