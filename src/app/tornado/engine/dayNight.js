@@ -1,6 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
 import { fitShadowCameraToBox, SHADOW_BOUNDS } from './scene.js';
+import { unsmooth } from './net/skyMirror.js';
 
 /**
  * ===========================================================================
@@ -64,6 +65,7 @@ const LAMP_OFF_COLOUR = new THREE.Color(0x8d8a80);
  * @typedef {Object} DayNightState
  * @property {boolean} day the selected mode
  * @property {number} daylight 0 (night) .. 1 (day), eased towards the selected mode
+ * @property {number|null} follow a co-op guest shows the host's daylight (net/skyMirror.js); null otherwise
  */
 
 /**
@@ -81,7 +83,7 @@ export function createDayNightSystem(ctx) {
   const { Sim } = ctx;
 
   /** @type {DayNightState} */
-  const DayNight = { day: false, daylight: 0 };
+  const DayNight = { day: false, daylight: 0, follow: null };
   ctx.DayNight = DayNight;
 
   // Linear transition progress; `daylight` is its smoothstep.
@@ -217,9 +219,14 @@ export function createDayNightSystem(ctx) {
    */
   function updateDayNight(dt) {
     if (!lights) return;
-    const target = DayNight.day ? 1 : 0;
-    const step = dt / TRANSITION_SECONDS;
-    progress = target > progress ? Math.min(target, progress + step) : Math.max(target, progress - step);
+    if (DayNight.follow !== null) {
+      // A co-op guest: the host's (already eased) daylight, no local ease.
+      progress = unsmooth(DayNight.follow);
+    } else {
+      const target = DayNight.day ? 1 : 0;
+      const step = dt / TRANSITION_SECONDS;
+      progress = target > progress ? Math.min(target, progress + step) : Math.max(target, progress - step);
+    }
     DayNight.daylight = THREE.MathUtils.smoothstep(progress, 0, 1);
     if (recovery >= 0) recovery += dt;
     if (DayNight.daylight !== applied) {

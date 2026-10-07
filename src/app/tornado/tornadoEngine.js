@@ -1147,6 +1147,8 @@ export function createSimulation(container) {
       ? Math.min(stormTarget, Sim.state.stormRamp + stormRampStep)
       : Math.max(stormTarget, Sim.state.stormRamp - stormRampStep);
 
+    // Co-op guest: the host's storm, wind and daylight, before they are read.
+    ctx.systems.net.applySky(rawDt);
     updateDayNight(dt);
     updateAtmosphere();
     updateBrightness(rawDt);

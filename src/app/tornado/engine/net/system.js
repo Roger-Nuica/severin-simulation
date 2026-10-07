@@ -10,6 +10,7 @@ import { createFxRing, hitCode, HIT_CODES, aimRow, holeRow, twRow, envRow } from
 import { GUEST_WEAPONS, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrigger, coolDown, weaponAt } from './guestWeapons.js';
 import { createMirror } from './mirror.js';
 import { createFunnels } from './funnels.js';
+import { createSky } from './skyMirror.js';
 import { flameWanted, flameMuzzle } from './mirrorRules.js';
 import { HERO } from '../hero/config.js';
 import { JETPACK } from '../hero/jetpack.js';
@@ -125,6 +126,8 @@ export function createNetSystem(ctx) {
   const mirror = createMirror(ctx);
   /** The host's tornado drawn by the guest's own funnels (funnels.js); idle on the host and outside a session. */
   const funnels = createFunnels(ctx);
+  /** The host's sky (storm, wind, daylight, Time Slow look) on the guest's screen (skyMirror.js); idle on the host. */
+  const sky = createSky(ctx);
   /** The one payload a guest's shot is announced with (reused: the listener copies what it keeps). */
   const guestShotFx = { shooter: '1', kind: '', from: /** @type {any} */ (null), to: /** @type {any} */ (null), hit: '', extra: 0 };
 
@@ -343,6 +346,7 @@ export function createNetSystem(ctx) {
     fxRing.clear();
     mirror.dispose();
     funnels.release();
+    sky.release();
     if (dbg) { dbg.reset(); S.dbgAcc = S.dbgPingAcc = 0; S.dbgTornadoes = -1; S.dbgHole.open = false; S.dbgHole.shooter = '0'; S.dbgHole.at = 0; }
     S.tick = 0;
     S.peerScore = 0;
@@ -1544,6 +1548,7 @@ export function createNetSystem(ctx) {
         S.holeRow = Array.isArray(msg.hole) && Array.isArray(msg.hole[0]) ? msg.hole[0] : null;
         S.holeFresh = true;
         funnels.feed(msg.tw);
+        sky.feed(Array.isArray(msg.env) ? msg.env[0] : null);
         S.altTarget.clear();
         if (Array.isArray(msg.alt)) for (const r of msg.alt) S.altTarget.set(r[0], r[1]);
         reconcileOwn(msg);
@@ -1563,6 +1568,7 @@ export function createNetSystem(ctx) {
         S.peerReadyShown = true;
         // The same town as the host's first: the reset it triggers puts the
         // panel and the camera back to defaults, which the peer view then locks.
+        sky.release();
         if (Number.isFinite(d.seed)) applySeed(d.seed >>> 0);
         S.pred = newPrediction();
         mirror.reset();
@@ -2441,6 +2447,17 @@ export function createNetSystem(ctx) {
     }
   }
 
+  /**
+   * The guest's sky, from the newest `env` row; called by the frame before
+   * the day and night and atmosphere updates so it lags no frame. A no-op
+   * on the host and outside a session.
+   * @param {number} rawDt real seconds
+   * @returns {void}
+   */
+  function applySky(rawDt) {
+    if (S.client && S.role === 'peer' && S.peerReadyShown) sky.apply(rawDt);
+  }
+
   /** @param {number} rawDt */
   function updateNet(rawDt) {
     if (S.toastTimer > 0) {
@@ -2495,7 +2512,7 @@ export function createNetSystem(ctx) {
   }
 
   return {
-    initNet, updateNet, resetNet, disposeNet,
+    initNet, updateNet, applySky, resetNet, disposeNet,
     isPeerView: () => S.role === 'peer' && S.peerReadyShown,
     fxLive,
     pickTarget, catchPlayer, interceptRogerDeath, coopActive,
