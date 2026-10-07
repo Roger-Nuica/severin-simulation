@@ -34,13 +34,23 @@
  *                               size 0..1 (player/energy.js BLAST_SIZE);
  *                               source is the thing that blew, once each.
  *                               Roger near it takes energy (player/energy.js).
+ *   weaponFx  {shooter, kind,   a shot, cut or blast the co-op host may show
+ *             from, to, hit,    its guest (net/system.js turns it into an `fx`
+ *             extra}            row): shooter is the room id ('0' host, '1'
+ *                               guest), kind one of protocol.js FX_KINDS,
+ *                               from and to {x, y, z}, hit the traceAim kind
+ *                               string, extra a small number (net/fxOut.js).
+ *                               One reused object per emitter: a listener
+ *                               must copy what it keeps. Emitted last, after
+ *                               the weapon's own logic, and only while a
+ *                               guest is in the room (hero/weaponFx.js).
  *   playerHurt {amount,         Roger lost health and is still alive (never
  *              position}        an instant kill; health/system.js): the HUD
  *                               flashes red and points at `position` (an
  *                               {x, y, z} or null) (hero/screen.js hurtFlash).
  */
 
-export const EVENTS = ['announce', 'notice', 'empPulse', 'rogerKill', 'explosion', 'playerHurt'];
+export const EVENTS = ['announce', 'notice', 'empPulse', 'rogerKill', 'explosion', 'weaponFx', 'playerHurt'];
 
 /**
  * @returns {{

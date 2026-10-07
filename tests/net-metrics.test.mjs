@@ -181,3 +181,11 @@ test('net metrics without kinds still reports and ignores row counts', () => {
   m.roll(0); m.roll(1000);
   assert.match(m.report(1000).join('\n'), /per second: snapshots 0\.0 \| snap bytes 0\.0 \| events 0\.0 \| event bytes 0\.0/);
 });
+
+test('host fx totals show in the report and are forgotten on reset', () => {
+  const m = createNetMetrics({ weapons: 6 });
+  m.fx(18, 15, 1, 2);
+  assert.ok(m.report(0).some((l) => l === 'host fx rows: emitted 18, sent 15, dropped 1, waiting 2'));
+  m.reset();
+  assert.ok(m.report(0).some((l) => l === 'host fx rows: emitted 0, sent 0, dropped 0, waiting 0'));
+});

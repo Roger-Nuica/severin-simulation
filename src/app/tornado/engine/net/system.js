@@ -6,6 +6,7 @@ import { createSnapshotBuffer } from './interp.js';
 import { createEventEmitter, createEventDeduper } from './events.js';
 import { createPlayerRegistry, REVIVE, FRIENDLY_FIRE } from './players.js';
 import { PROTOCOL_VERSION, LIMITS, WEAPONS, SNAPSHOT_KINDS } from './protocol.js';
+import { createFxRing, hitCode, aimRow, holeRow, twRow, envRow } from './fxOut.js';
 import { GUEST_WEAPONS, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrigger, coolDown, weaponAt } from './guestWeapons.js';
 import { createBullets } from '../hero/bullets.js';
 import { HERO } from '../hero/config.js';
@@ -113,6 +114,10 @@ export function createNetSystem(ctx) {
   /** Scratch for the combat diagnostic's `traceAim` call (only made with `?netdebug`). */
   const dbgRayO = dbg ? new THREE.Vector3() : null;
   const dbgRayD = dbg ? new THREE.Vector3() : null;
+  /** The host's `fx` rows waiting for the next snapshot (fxOut.js): fixed size, nothing allocated per shot. */
+  const fxRing = createFxRing();
+  /** The one payload a guest's shot is announced with (reused: the listener copies what it keeps). */
+  const guestShotFx = { shooter: '1', kind: '', from: /** @type {any} */ (null), to: /** @type {any} */ (null), hit: '', extra: 0 };
 
   const S = {
     /** @type {ReturnType<typeof createRelayClient>|null} */
@@ -320,6 +325,7 @@ export function createNetSystem(ctx) {
     deduper.reset();
     emitter.reset();
     buffer.clear();
+    fxRing.clear();
     if (dbg) { dbg.reset(); S.dbgAcc = S.dbgPingAcc = 0; S.dbgTornadoes = -1; S.dbgHole.open = false; S.dbgHole.shooter = '0'; S.dbgHole.at = 0; }
     S.tick = 0;
     S.peerScore = 0;
@@ -518,6 +524,43 @@ export function createNetSystem(ctx) {
     Sim.three.scene.remove(a.obj.mesh);
     disposeRoger(a.obj.mesh, a.owned);
     S.avatars.delete(id);
+  }
+
+  /**
+   * @returns {boolean} the host has a guest in the room, so the weapons' `weaponFx`
+   * announcements are worth building (no allocation: the per-shot gate).
+   */
+  function fxLive() {
+    return S.role === 'host' && players.count() > 1;
+  }
+
+  /**
+   * A weapon announced a shot (`weaponFx`, engine/events.js): into the ring for
+   * the next snapshot. The payload is the emitter's reused object, so it is read
+   * here and never kept. Nothing outside a room with a guest.
+   * @param {{shooter: string, kind: string, from: {x: number, y: number, z: number}|null, to: {x: number, y: number, z: number}|null, hit: string, extra: number}} e
+   * @returns {void}
+   */
+  function onWeaponFx(e) {
+    if (!fxLive() || !e.from || !e.to) return;
+    fxRing.push(e.kind, Number(e.shooter), e.from.x, e.from.y, e.from.z, e.to.x, e.to.y, e.to.z, hitCode(e.hit), e.extra);
+  }
+
+  /**
+   * A guest's shot, announced on the same bus as the host's own, with the guest as shooter.
+   * @param {string} kind @param {string} id the guest's room id
+   * @param {THREE.Vector3} from @param {THREE.Vector3} to
+   * @param {string} hit the `traceAim` kind, or '' @param {number} [extra]
+   * @returns {void}
+   */
+  function announceGuestShot(kind, id, from, to, hit, extra = 0) {
+    guestShotFx.shooter = id;
+    guestShotFx.kind = kind;
+    guestShotFx.from = from;
+    guestShotFx.to = to;
+    guestShotFx.hit = hit;
+    guestShotFx.extra = extra;
+    ctx.events.emit('weaponFx', guestShotFx);
   }
 
   /** @returns {boolean} a guest is in the room */
@@ -1184,6 +1227,8 @@ export function createNetSystem(ctx) {
       if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: EYE + dy * hit.t, z: oz + dz * hit.t } })) { if (dbg) dbg.fire(trigger.weapon, 3); credit(KILL_SCORE, p.id); }
       // Friendly fire (D4): the partner in the line of fire, if nearer than the enemy hit.
       hurtRay(p.id, ox, EYE, oz, dx, dy, dz, hit ? hit.t : w.range, w.type);
+      // Last: what the guest's other screen is told of this shot (muzzleVec and tracerEnd are still the tracer's ends).
+      announceGuestShot(name === 'rifle' ? 'plasma' : name === 'minigun' ? 'bullet' : 'rail', p.id, muzzleVec, tracerEnd, hit ? 'enemy' : '');
     } else if (name === 'katana') {
       a.cd = KATANA.cooldown;
       // A cut in front of the guest: the nearest enemy inside the arc takes a blade hit.
@@ -1225,6 +1270,9 @@ export function createNetSystem(ctx) {
         ctx.systems.people.explodePerson(person);
         credit(IMPACT_SCORE, p.id);
       }
+      muzzleVec.set(ox, EYE, oz);
+      tracerEnd.set(ox + Math.sin(yaw) * KATANA.reach, EYE, oz + Math.cos(yaw) * KATANA.reach);
+      announceGuestShot('cut', p.id, muzzleVec, tracerEnd, target || person ? 'enemy' : '');
     } else if (name === 'blackhole') {
       a.cd = HOLE_COOLDOWN;
       // Where the aim meets the ground, or the enemy it is on.
@@ -1245,6 +1293,11 @@ export function createNetSystem(ctx) {
         dbg.combat(`blackhole ${p.id}: ${result || 'refused'} centre ${fixed1(gx)},${fixed1(gz)} shooter-to-centre ${fixed1(Math.hypot(gx - ox, gz - oz))} m, scan ${hit ? hit.kind.kind : 'ground'}`);
       }
       if (result && !ENERGY.infinite) p.energy -= cost;
+      if (result) {
+        muzzleVec.set(ox, EYE, oz);
+        tracerEnd.set(gx, 0, gz);
+        announceGuestShot('holeShot', p.id, muzzleVec, tracerEnd, hit ? 'enemy' : 'ground', result === 'queued' ? 1 : 0);
+      }
     }
   }
 
@@ -1264,6 +1317,57 @@ export function createNetSystem(ctx) {
     if (own > 0.05) rows.push([0, Math.round(own * 100) / 100]);
     for (const [id, a] of S.avatars) if (a.alt > 0.05) rows.push([Number(id), Math.round(a.alt * 100) / 100]);
     return rows.slice(0, LIMITS.maxPerKind);
+  }
+
+  /**
+   * The `aim` rows (version 4): [playerId, yaw, pitch, firing bits] for each player in the run.
+   * The host's Roger reads its live aim and weapon state; a guest's comes from its own input
+   * (bits: 1 Fire Gun firing, 2 minigun spinning).
+   * @param {any} h heroMode
+   * @returns {number[][]}
+   */
+  function aimRows(h) {
+    /** @type {number[][]} */
+    const rows = [];
+    const pose = h.rogerPose();
+    if (pose) {
+      const d = h.rogerAim();
+      rows.push(aimRow(0, d ? Math.atan2(d.x, d.z) : pose.heading, d ? Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)) : 0, h.rogerFireBits()));
+    }
+    for (const p of players.list()) {
+      if (p.id === '0' || rows.length >= LIMITS.maxAim || !S.avatars.has(p.id) || !p.input) continue;
+      const input = p.input;
+      const firing = input.fire && input.aim && p.state === 'up';
+      const w = WEAPONS[input.weapon];
+      rows.push(aimRow(Number(p.id), input.aim ? input.yaw : p.heading, input.aim ? input.pitch : 0, firing ? (w === 'fire' ? 1 : w === 'minigun' ? 2 : 0) : 0));
+    }
+    return rows;
+  }
+
+  /**
+   * The version 4 world fields (`fx`, `tw`, `hole`, `aim`, `env`), built only when
+   * a guest is in the room. Empty `fx`, `tw` and `hole` are left out (absent means none).
+   * @param {any} h heroMode
+   * @returns {{fx?: number[][], tw?: number[][], hole?: number[][], aim?: number[][], env?: number[][]}}
+   */
+  function worldRows(h) {
+    /** @type {{fx?: number[][], tw?: number[][], hole?: number[][], aim?: number[][], env?: number[][]}} */
+    const out = {};
+    const fx = fxRing.drain(LIMITS.maxFx);
+    if (fx.length) out.fx = fx;
+    /** @type {number[][]} */
+    const tw = [];
+    ctx.tornadoes.active.forEach((/** @type {any} */ t, /** @type {number} */ i) => {
+      const v = t.Vortex;
+      if (tw.length < LIMITS.maxTw) tw.push(twRow(i, v.birth, v.sizeMul, v.fade, v.leanX, v.leanZ));
+    });
+    if (tw.length) out.tw = tw;
+    const lens = ctx.systems.blackHole ? ctx.systems.blackHole.lensInfo() : null;
+    if (lens) out.hole = [holeRow(lens.x, lens.z, lens.age, lens.closing >= 0)];
+    const aim = aimRows(h);
+    if (aim.length) out.aim = aim;
+    out.env = [envRow(Sim.state.running, Sim.state.stormRamp, Sim.params.intensity, Sim.params.windSpeed, Sim.params.radius, ctx.DayNight ? ctx.DayNight.daylight : 0, ctx.GameFeel ? ctx.GameFeel.timeScale : 1)];
+    return out;
   }
 
   /** @returns {import('./protocol.js').Snapshot} */
@@ -1332,7 +1436,8 @@ export function createNetSystem(ctx) {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
       alt: altRows(h),
-      ack: gate.acks((id) => id !== '0' && !!players.get(id))
+      ack: gate.acks((id) => id !== '0' && !!players.get(id)),
+      ...(fxLive() ? worldRows(h) : {})
     };
   }
 
@@ -2181,6 +2286,7 @@ export function createNetSystem(ctx) {
     // Replicate the host's headline events (cosmetic ones stay local).
     ctx.events.on('announce', ({ title, sub }) => sendEvent('announce', { title: String(title).slice(0, 80), sub: String(sub).slice(0, 120) }));
     ctx.events.on('notice', ({ text }) => sendEvent('notice', { text: String(text).slice(0, 120) }));
+    ctx.events.on('weaponFx', onWeaponFx);
     ctx.events.on('explosion', ({ x, z, size }) => sendEvent('explosion', { x: Math.round(x), z: Math.round(z), size: Math.round(size * 100) / 100 }));
     setStatus();
   }
@@ -2223,6 +2329,7 @@ export function createNetSystem(ctx) {
     const now = performance.now();
     if (S.role === 'host') {
       dbg.hostFrameAt(now);
+      dbg.fx(fxRing.emitted(), fxRing.sent(), fxRing.dropped(), fxRing.pending());
       // Hole opens and tornado births, seen by their state (no hook in those systems).
       const open = !!(ctx.systems.blackHole && ctx.systems.blackHole.isOpen());
       if (open && !S.dbgHole.open) {
@@ -2304,6 +2411,7 @@ export function createNetSystem(ctx) {
   return {
     initNet, updateNet, resetNet, disposeNet,
     isPeerView: () => S.role === 'peer' && S.peerReadyShown,
+    fxLive,
     pickTarget, catchPlayer, interceptRogerDeath, coopActive,
     notifyDamage, hitGuestsArea, splashGuests, hurtRay, hurtSector, hurtArea,
     /** For tests and the HUD. */

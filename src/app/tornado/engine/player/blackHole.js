@@ -85,7 +85,7 @@ export const HOLE = {
  *   fire: (x: number, z: number) => 'opened'|'queued'|false,
  *   isOpen: () => boolean,
  *   caughtCount: () => number,
- *   lensInfo: () => {x: number, y: number, z: number, reach: number, strength: number}|null,
+ *   lensInfo: () => {x: number, y: number, z: number, reach: number, strength: number, age: number, closing: number}|null,
  *   initBlackHole: () => void,
  *   updateBlackHole: (dt: number) => void,
  *   resetBlackHole: () => void,
@@ -500,11 +500,14 @@ export function createBlackHoleSystem(ctx) {
    * little past the visible swirl, LOOK.swirlRadius), and how strongly --
    * the same 0..1 opening/closing curve the look and matter use, so the
    * lens swells and fades with everything else rather than snapping.
-   * @returns {{x: number, y: number, z: number, reach: number, strength: number}|null}
+   * `age` (seconds since it opened) and `closing` (seconds since the collapse
+   * began, or negative while open) are read-only extras for the co-op `hole`
+   * row (net/system.js); the lens pass ignores them.
+   * @returns {{x: number, y: number, z: number, reach: number, strength: number, age: number, closing: number}|null}
    */
   function lensInfo() {
     if (!hole) return null;
-    return { x: hole.x, y: hole.y, z: hole.z, reach: LOOK.swirlRadius * 1.4, strength: hole.size };
+    return { x: hole.x, y: hole.y, z: hole.z, reach: LOOK.swirlRadius * 1.4, strength: hole.size, age: hole.t, closing: hole.closing };
   }
 
   return { fire, isOpen: () => !!hole, caughtCount: () => caught.length, lensInfo, initBlackHole, updateBlackHole, resetBlackHole, disposeBlackHole };

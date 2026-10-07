@@ -247,6 +247,8 @@ export function createNetMetrics(opts) {
   const eventsIgnored = createReasonCounts();
   const eventsDropped = createReasonCounts();
   const hostCounts = createCounters(3);
+  /** Host `fx` ring totals, set from the ring each frame: emitted, sent in a snapshot, dropped (overwritten unsent), waiting. */
+  const fxTotals = [0, 0, 0, 0];
   const combatRing = createLineRing(COMBAT_LINES);
   let lastSnapAt = 0;
   let lastFrameAt = 0;
@@ -304,6 +306,11 @@ export function createNetMetrics(opts) {
     eventDropped(kind) { eventsDropped.add(kind); },
     /** @param {0|1|2} what 0 own shot (a weapon call into the net), 1 black hole opened, 2 tornado born */
     host(what) { hostCounts.add(what); },
+    /**
+     * The host's `fx` ring totals so far this session (the ring owns the counts).
+     * @param {number} emitted rows pushed @param {number} sent rows drained into snapshots @param {number} dropped rows overwritten before they were sent @param {number} waiting rows still in the ring
+     */
+    fx(emitted, sent, dropped, waiting) { fxTotals[0] = emitted; fxTotals[1] = sent; fxTotals[2] = dropped; fxTotals[3] = waiting; },
     /** A combat line for the ring; repeated `key`s fold into one. @param {string} line @param {string} [key] */
     combat(line, key) { combatRing.push(line, key); },
     /** @returns {string[]} the ring, oldest first */
@@ -352,6 +359,7 @@ export function createNetMetrics(opts) {
       lines.push(`events IGNORED (no handler or duplicate): ${kindLine(eventsIgnored)}`);
       lines.push(`events dropped by the host's emitter: ${kindLine(eventsDropped)}`);
       lines.push(`host: own weapon calls into net (rays, sectors, areas, splashes) ${hostCounts.get(0)}, hole opens ${hostCounts.get(1)}, tornado births ${hostCounts.get(2)}`);
+      lines.push(`host fx rows: emitted ${fxTotals[0]}, sent ${fxTotals[1]}, dropped ${fxTotals[2]}, waiting ${fxTotals[3]}`);
       return lines;
     },
     /** Once a second, from the overlay's tick: closes the current rate window. @param {number} now */
@@ -363,6 +371,7 @@ export function createNetMetrics(opts) {
       lastSnapAt = lastFrameAt = lastSendAt = lastInputAt = 0;
       pingId = pingAt = pongs = acksSeen = 0;
       rates.clear(); eventsIn.clear(); eventsIgnored.clear(); eventsDropped.clear(); hostCounts.clear(); combatRing.clear();
+      fxTotals.fill(0);
     }
   };
 }

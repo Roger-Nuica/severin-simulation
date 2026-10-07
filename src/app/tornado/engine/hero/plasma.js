@@ -6,6 +6,7 @@ import { PERSON, CHARACTERS } from '../scale.js';
 import { chipTarget, fullHealth } from '../health/enemyDamage.js';
 import { insideMuzzleGuard, mayHurtPlayer, splashAmount } from '../health/friendlyFire.js';
 import { HEALTH } from '../health/config.js';
+import { createWeaponFx } from './weaponFx.js';
 
 /**
  * ===========================================================================
@@ -23,6 +24,8 @@ import { HEALTH } from '../health/config.js';
  */
 export function createHeroPlasma(ctx, S, api) {
   const { Sim, container } = ctx;
+  /** Announces the rifle's shots to the co-op guest (hero/weaponFx.js); nothing happens outside a room with a guest. */
+  const weaponFx = createWeaponFx(ctx);
 
   /**
    * The trigger goes down: the charge starts. The rifle has no ammunition
@@ -454,6 +457,7 @@ export function createHeroPlasma(ctx, S, api) {
       ctx.systems.gamefeel.addShake(0.9, 0.35);
     }
     if (hit.kind !== 'sky') plasmaHit(hit, S.beamTo, mega);
+    weaponFx.announce(mega ? 'mega' : 'plasma', cam.position, S.beamTo, hit.kind, Math.round(level * 100));
   }
 
   /**
