@@ -71,7 +71,7 @@ export function createMirror(ctx) {
   /** The landing of each round in flight: one record per pool slot, in firing order (the pool reuses its slots round-robin). */
   const hits = Array.from({ length: ROUNDS }, () => ({ kind: 'ground', obj: null, at: new THREE.Vector3() }));
   let nextHit = 0;
-  const lastCue = { bullet: -Infinity, rail: -Infinity, plasma: -Infinity, mega: -Infinity };
+  const lastCue = { bullet: -Infinity, rail: -Infinity, plasma: -Infinity, mega: -Infinity, holeShot: -Infinity };
   /**
    * The beams (made on first use): the meshes, and per beam the seconds it burns, its width and its ends.
    * @type {{beam: THREE.Group, splash: THREE.Mesh, t: number, life: number, width: number, mega: boolean, from: THREE.Vector3, to: THREE.Vector3}[]|null}
@@ -203,7 +203,7 @@ export function createMirror(ctx) {
 
   /**
    * The cue of a kind, through this computer's own hero sound, at most once per `CUE_GAP`.
-   * @param {'bullet'|'rail'|'plasma'|'mega'} kind
+   * @param {'bullet'|'rail'|'plasma'|'mega'|'holeShot'} kind
    * @returns {void}
    */
   function cue(kind) {
@@ -213,7 +213,7 @@ export function createMirror(ctx) {
     const snd = ctx.systems.heroSound;
     if (!snd) return;
     if (kind === 'bullet') snd.playBullet();
-    else if (kind === 'rail') snd.playZap();
+    else if (kind === 'rail' || kind === 'holeShot') snd.playZap();
     else {
       // The host's own pair for the rifle: the shot's sound and the sonic boom, louder for the MEGA BEAM.
       const mega = kind === 'mega';
@@ -233,6 +233,8 @@ export function createMirror(ctx) {
     from.set(row[3], row[4], row[5]);
     const b = rowTo.set(row[6], row[7], row[8]);
     const { hit, extra } = unpackExtra(row[9]);
+    // The Black Hole Gun's shot is its zap alone, as on the host (flash and zap, no world trace): the hole is the `hole` row's.
+    if (kind === 'holeShot') { cue(kind); return; }
     if (kind === 'bullet') round(from, b, hit);
     else if (kind === 'rail') bolt(from, b, hit);
     else beam(from, b, hit, kind === 'mega', extra);
@@ -267,12 +269,12 @@ export function createMirror(ctx) {
       else beam(a, b, hit, false, 0);
       cue(kind);
     },
-    /** A bare tracer (the Black Hole Gun's until its own subtask): no hit, no casing, no cue. */
+    /** A bare tracer: no hit, no casing, no cue. No weapon uses it now (the Black Hole Gun's shot is its flash and zap, as on the host). */
     tracer(a, b) { pool().fire(a, b, null, null, null); },
     reset() {
       queue = newFxQueue();
       if (rounds) rounds.clear();
-      lastCue.bullet = lastCue.rail = lastCue.plasma = lastCue.mega = -Infinity;
+      lastCue.bullet = lastCue.rail = lastCue.plasma = lastCue.mega = lastCue.holeShot = -Infinity;
       hideBeams();
     },
     dispose() {

@@ -112,3 +112,62 @@ export function holeAt(age, closing) {
   }
   return Math.min(1, size);
 }
+
+/**
+ * @typedef {{on: boolean, done: boolean, x: number, z: number, age: number, closing: number}} HoleClock
+ * The guest's own clock for the host's Black Hole: the wire `hole` row carries a 0/1
+ * closing flag, not the seconds, so the collapse is timed here from when the flag flips.
+ */
+
+/** @returns {HoleClock} a clock with no hole (call on `welcome` and in `endSession`) */
+export const newHoleClock = () => ({ on: false, done: false, x: 0, z: 0, age: 0, closing: -1 });
+
+/** Age drift (s) past which a new row re-sets the guest's own age (it counts on between rows). */
+export const HOLE_AGE_SNAP = 0.3;
+
+/**
+ * One frame of the clock, changed in place (no allocation). `row` is the newest `hole` row
+ * [x, z, age, closing 0|1] or null/undefined when the snapshot had none; `fresh` is true on
+ * the first frame after a new snapshot brought it. Age and the collapse count on by `dt`
+ * between rows. The flag flipping 0 to 1 starts the collapse at 0 s; a hole that is new
+ * (the flag back to 0, an age that went back, a different place) restarts the clock; once the
+ * collapse has run `HOLE_CLOSE_SECONDS` the hole is done and stays so until a new one opens
+ * or the row goes (so a host row that outlives the collapse does not reopen it).
+ * @param {HoleClock} c
+ * @param {ReadonlyArray<number>|null|undefined} row
+ * @param {boolean} fresh
+ * @param {number} dt seconds
+ * @returns {boolean} the hole is on screen (draw it at `c.x`, `c.z`, `c.age`, `c.closing`)
+ */
+export function stepHoleClock(c, row, fresh, dt) {
+  if (!row || row.length < 4) {
+    c.on = false;
+    c.done = false;
+    c.closing = -1;
+    return false;
+  }
+  if (c.on) {
+    c.age += dt;
+    if (c.closing >= 0) c.closing += dt;
+  }
+  const flag = row[3] ? 1 : 0;
+  if (fresh) {
+    if (c.done && !flag) c.done = false;
+    if (c.on && (flag === 0 && c.closing >= 0 || row[2] < c.age - 1 || Math.abs(row[0] - c.x) + Math.abs(row[1] - c.z) > 0.5)) c.on = false;
+    if (!c.done) {
+      if (!c.on) {
+        c.on = true;
+        c.age = row[2];
+        c.closing = flag ? 0 : -1;
+      } else if (flag && c.closing < 0) c.closing = 0;
+      else if (!flag && Math.abs(row[2] - c.age) > HOLE_AGE_SNAP) c.age = row[2];
+    }
+    c.x = row[0];
+    c.z = row[1];
+  }
+  if (c.on && c.closing >= HOLE_CLOSE_SECONDS) {
+    c.on = false;
+    c.done = true;
+  }
+  return c.on;
+}

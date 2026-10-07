@@ -17,6 +17,7 @@ import { TELEPORT } from '../player/teleport.js';
 import { newPrediction, viewPoint, predictFrame, recordSent, reconcile } from './prediction.js';
 import { stepRun, aimDirection } from '../hero/walk.js';
 import { HOLE } from '../player/blackHole.js';
+import { newHoleClock, stepHoleClock } from './fxQueue.js';
 import { ENERGY } from '../player/energy.js';
 import { IMPACT_SCORE } from '../damage/config.js';
 import { HEALTH } from '../health/config.js';
@@ -203,6 +204,10 @@ export function createNetSystem(ctx) {
     altNow: new Map(),
     /** The newest snapshot's `aim` rows ([id, yaw, pitch, bits]); null when it carried none (the flames' state, so a cleared bit stops a flame within one snapshot). */
     aimRows: null,
+    /** The newest snapshot's `hole` row ([x, z, age, closing 0|1]) or null, whether it came this frame, and the clock that times the collapse from the flag flipping (the Black Hole mirrored on this screen). */
+    holeRow: null,
+    holeFresh: false,
+    holeClock: newHoleClock(),
     /** The own authoritative position in the last snapshot, and when E was last pressed (to show the warp). */
     lastAuth: null,
     tpAt: 0,
@@ -342,6 +347,10 @@ export function createNetSystem(ctx) {
     S.altTarget.clear();
     S.altNow.clear();
     S.aimRows = null;
+    S.holeRow = null;
+    S.holeFresh = false;
+    S.holeClock = newHoleClock();
+    if (ctx.systems.blackHole) ctx.systems.blackHole.mirrorOff(true);
     S.lastAuth = null;
     S.predStats = { snaps: 0, blends: 0, last: 0, worst: 0 };
     S.peerHp.clear();
@@ -1528,6 +1537,8 @@ export function createNetSystem(ctx) {
       }
       if (buffer.push(msg, performance.now() / 1000).ok) {
         S.aimRows = Array.isArray(msg.aim) ? msg.aim : null;
+        S.holeRow = Array.isArray(msg.hole) && Array.isArray(msg.hole[0]) ? msg.hole[0] : null;
+        S.holeFresh = true;
         S.altTarget.clear();
         if (Array.isArray(msg.alt)) for (const r of msg.alt) S.altTarget.set(r[0], r[1]);
         reconcileOwn(msg);
@@ -1843,8 +1854,8 @@ export function createNetSystem(ctx) {
   /**
    * The guest's own shot, drawn at the press from just ahead of its eye along
    * its aim, through the mirror (net/mirror.js): the minigun's round with its
-   * casing and sparks, the railgun's bolt, the rifle's plasma beam, or, for the
-   * Black Hole Gun until its own renderer, a bare tracer. Cosmetic and predicted like
+   * casing and sparks, the railgun's bolt, or the rifle's plasma beam. (The Black
+   * Hole Gun's shot is its flash and zap alone, as on the host.) Cosmetic and predicted like
    * the flash, so it shows even for a shot the host refuses; the host resolves
    * the shot and never sends it back (the mirror's queue drops it).
    * @param {string} key the wheel key that fired
@@ -1861,7 +1872,22 @@ export function createNetSystem(ctx) {
     if (key === 'minigun') mirror.drawOwn('bullet', muzzleVec, tracerEnd);
     else if (key === 'railgun') mirror.drawOwn('rail', muzzleVec, tracerEnd);
     else if (key === 'rifle') mirror.drawOwn('plasma', muzzleVec, tracerEnd);
-    else mirror.tracer(muzzleVec, tracerEnd);
+  }
+
+  /**
+   * The host's Black Hole on this screen: its `hole` row drives the render-only copy in
+   * `player/blackHole.js` (`mirror`), timed here (the collapse from the closing flag
+   * flipping). Off when the row is gone. No play: the hole's pull is the host's.
+   * @param {number} dt
+   * @returns {void}
+   */
+  function driveHole(dt) {
+    const bh = ctx.systems.blackHole;
+    if (!bh) return;
+    const c = S.holeClock;
+    const on = stepHoleClock(c, S.holeRow, S.holeFresh, dt);
+    S.holeFresh = false;
+    if (on) bh.mirror(c.x, c.z, c.age, c.closing); else bh.mirrorOff();
   }
 
   /** @type {{mx: number, my: number, mz: number, dx: number, dy: number, dz: number}} scratch: one flame's muzzle and direction */
@@ -2122,6 +2148,7 @@ export function createNetSystem(ctx) {
     S.peerScore = s.score;
     // The host's shots, on the snapshot clock (the round pool steps here, for the guest's own shot too).
     mirror.update(s.t, dt);
+    driveHole(dt);
     roared = false;
     // Own avatar from the prediction while it runs (else from the host's row).
     const pv = S.pred.active && S.buttons.aim ? viewPoint(S.pred) : null;

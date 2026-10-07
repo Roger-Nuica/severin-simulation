@@ -67,6 +67,25 @@ export const HOLE = {
 };
 
 /**
+ * The drawn size (0..1+) of a hole `t` seconds after it opened and, once
+ * collapsing, `closing` seconds after the collapse began (negative while
+ * open): the same curve `updateBlackHole` applies, for the co-op guest's
+ * render-only copy (`mirror`). Pure.
+ * @param {number} t
+ * @param {number} closing
+ * @returns {number}
+ */
+export function holeSize(t, closing) {
+  let size = Math.min(1, Math.max(0, t) / HOLE.openSeconds);
+  size = size * size * (3 - 2 * size);
+  if (closing >= 0) {
+    const u = Math.min(1, closing / HOLE.closeSeconds);
+    size *= u < 0.25 ? 1 + 0.25 * (u / 0.25) : 1.25 * Math.pow(1 - (u - 0.25) / 0.75, 2);
+  }
+  return Math.min(1, size);
+}
+
+/**
  * @typedef {import('../effects/consumables.js').Consumable} Consumable
  * @typedef {Object} Caught
  * @property {Consumable} entry
@@ -86,6 +105,8 @@ export const HOLE = {
  *   isOpen: () => boolean,
  *   caughtCount: () => number,
  *   lensInfo: () => {x: number, y: number, z: number, reach: number, strength: number, age: number, closing: number}|null,
+ *   mirror: (x: number, z: number, age: number, closingSeconds: number) => void,
+ *   mirrorOff: (quiet?: boolean) => void,
  *   initBlackHole: () => void,
  *   updateBlackHole: (dt: number) => void,
  *   resetBlackHole: () => void,
@@ -115,6 +136,16 @@ export function createBlackHoleSystem(ctx) {
   let fading = [];
   /** @type {{entry: Consumable, pin: THREE.Vector3}[]} being dissolved where they stand */
   let cutting = [];
+  /**
+   * The co-op guest's render-only copy of the host's hole (`mirror`): where it
+   * is, how old, how long since the collapse began, and the radii the look,
+   * matter and wind read. No hazard, no caught set: nothing here touches play.
+   * @type {{x: number, y: number, z: number, t: number, closing: number, size: number,
+   *   escape: number, influence: number, horizon: number}|null}
+   */
+  let ghost = null;
+  /** Reused for `lensInfo` while mirroring (no allocation per frame). */
+  const ghostLens = { x: 0, y: 0, z: 0, reach: LOOK.swirlRadius * 1.4, strength: 0, age: 0, closing: -1 };
   /** @type {Set<any>} everything it has hold of */
   const held = new Set();
   const scratch = new THREE.Vector3();
@@ -413,6 +444,7 @@ export function createBlackHoleSystem(ctx) {
   function updateBlackHole(dt) {
     if (dt <= 0) return;
     if (!hole || !look) {
+      if (ghost && look) { stepGhost(dt); return; }
       if (matter) matter.step(dt, null, 0);
       if (ctx.systems.holeSound) ctx.systems.holeSound.updateHum(0, 0, 0, 0, 0);
       if (look) look.updateShockwave(dt);
@@ -460,8 +492,83 @@ export function createBlackHoleSystem(ctx) {
     ctx.systems.lightPool.requestLight({ x: hole.x, y: hole.y - 4, z: hole.z, colour: 0x8a5bff, intensity: 4 * size * (1 + 0.15 * Math.sin(hole.t * 1.9)), distance: 80, priority: 4 });
   }
 
+  /**
+   * One frame of the guest's copy: look, ambient matter, wind streaks, the hum
+   * and the light, from the host's age and collapse time. Render only (R-031:
+   * the hole's play is the host's); nothing is pulled, caught, scored or hurt.
+   * @param {number} dt
+   * @returns {void}
+   */
+  function stepGhost(dt) {
+    const g = ghost;
+    if (!g || !look) return;
+    if (g.closing >= HOLE.closeSeconds) { mirrorOff(false); return; }
+    g.size = holeSize(g.t, g.closing);
+    look.group.position.set(g.x, g.y, g.z);
+    look.update(g.t, g.size, Sim.three.camera);
+    look.updateShockwave(dt);
+    if (matter) {
+      if (g.closing < 0) matter.ambient(dt, g, g.t);
+      matter.step(dt, g, g.t);
+    }
+    if (wind) wind.step(dt, g, g.size);
+    if (ctx.systems.holeSound) ctx.systems.holeSound.updateHum(g.size, 0, g.x, g.y, g.z);
+    ctx.systems.lightPool.requestLight({ x: g.x, y: g.y - 4, z: g.z, colour: 0x8a5bff, intensity: 4 * g.size * (1 + 0.15 * Math.sin(g.t * 1.9)), distance: 80, priority: 4 });
+  }
+
+  /**
+   * Co-op guest only: draws the host's hole here from its `hole` row, render
+   * only. Call every frame while the row is present; ignored while a real hole
+   * is open here. The look, ambient matter, wind, lens, hum and open sound
+   * only: never `reach`, `capture`, `drawIn`, dissolve, hazards, consumables,
+   * damage or score. Moves no camera (the lens is a screen-space pass).
+   * @param {number} x
+   * @param {number} z
+   * @param {number} age seconds since it opened
+   * @param {number} closingSeconds seconds since the collapse began, negative while open
+   * @returns {void}
+   */
+  function mirror(x, z, age, closingSeconds) {
+    if (hole || !look) return;
+    if (!ghost) {
+      ghost = {
+        x, y: HOLE.height, z, t: age, closing: closingSeconds, size: 0,
+        escape: HOLE.escape, influence: HOLE.influence, horizon: HOLE.horizon
+      };
+      look.group.visible = true;
+      if (ctx.systems.holeSound && closingSeconds < 0) ctx.systems.holeSound.playOpen(x, HOLE.height, z);
+      return;
+    }
+    ghost.x = x;
+    ghost.z = z;
+    ghost.t = age;
+    ghost.closing = closingSeconds;
+  }
+
+  /**
+   * Ends the guest's copy. Not quiet: it winks out with the host's flash-less
+   * shockwave ring and close sound; quiet (session end, reset): just gone.
+   * @param {boolean} [quiet]
+   * @returns {void}
+   */
+  function mirrorOff(quiet = false) {
+    if (!ghost) return;
+    const g = ghost;
+    ghost = null;
+    if (look) look.group.visible = false;
+    if (wind) wind.clear();
+    if (quiet) {
+      if (matter) matter.clear();
+    } else if (look) look.pulse(g.x, g.y, g.z);
+    if (ctx.systems.holeSound) {
+      if (!quiet) ctx.systems.holeSound.playClose(g.x, g.y, g.z);
+      ctx.systems.holeSound.updateHum(0, 0, g.x, g.y, g.z);
+    }
+  }
+
   /** @returns {void} */
   function resetBlackHole() {
+    mirrorOff(true);
     caught = [];
     fading = [];
     cutting = [];
@@ -506,9 +613,14 @@ export function createBlackHoleSystem(ctx) {
    * @returns {{x: number, y: number, z: number, reach: number, strength: number, age: number, closing: number}|null}
    */
   function lensInfo() {
-    if (!hole) return null;
+    if (!hole) {
+      if (!ghost) return null;
+      ghostLens.x = ghost.x; ghostLens.y = ghost.y; ghostLens.z = ghost.z;
+      ghostLens.strength = ghost.size; ghostLens.age = ghost.t; ghostLens.closing = ghost.closing;
+      return ghostLens;
+    }
     return { x: hole.x, y: hole.y, z: hole.z, reach: LOOK.swirlRadius * 1.4, strength: hole.size, age: hole.t, closing: hole.closing };
   }
 
-  return { fire, isOpen: () => !!hole, caughtCount: () => caught.length, lensInfo, initBlackHole, updateBlackHole, resetBlackHole, disposeBlackHole };
+  return { fire, isOpen: () => !!hole, caughtCount: () => caught.length, lensInfo, mirror, mirrorOff, initBlackHole, updateBlackHole, resetBlackHole, disposeBlackHole };
 }

@@ -17,22 +17,22 @@ import { HIT_CODES } from './fxOut.js';
 import { pushFx } from './fxQueue.js';
 import { sanitizeFx } from './protocol.js';
 
-/** The `fx` kinds this build draws; the rest (holeShot, cut, fire) wait for their own subtasks and are left unplayed. */
-export const PLAYED = Object.freeze(['bullet', 'rail', 'plasma', 'mega']);
+/** The `fx` kinds this build draws; the rest (cut, fire) wait for their own subtasks and are left unplayed. A `holeShot` is its zap only: the hole itself comes from the `hole` row. */
+export const PLAYED = Object.freeze(['bullet', 'rail', 'plasma', 'mega', 'holeShot']);
 
 /** Least seconds between two cues of a kind (the minigun fires 18 a second: about every third round sounds; the rifle's own cooldown is 0.35). */
-export const CUE_GAP = Object.freeze({ bullet: 0.07, rail: 0.12, plasma: 0.2, mega: 0.2 });
+export const CUE_GAP = Object.freeze({ bullet: 0.07, rail: 0.12, plasma: 0.2, mega: 0.2, holeShot: 0.2 });
 
 /** The strike power of a rail bolt on this screen (presentation only): the host's own range is 0.8 to 1 (`strikeTargeting.js`). */
 export const RAIL_POWER = 1;
 
 /**
  * @param {number} kindIndex an `fx` row's kind column
- * @returns {'bullet'|'rail'|'plasma'|'mega'|null} what this build draws for it, null for a kind it does not (yet)
+ * @returns {'bullet'|'rail'|'plasma'|'mega'|'holeShot'|null} what this build draws for it, null for a kind it does not (yet)
  */
 export function playedKind(kindIndex) {
   const name = FX_KINDS[kindIndex];
-  return name === 'bullet' || name === 'rail' || name === 'plasma' || name === 'mega' ? name : null;
+  return name === 'bullet' || name === 'rail' || name === 'plasma' || name === 'mega' || name === 'holeShot' ? name : null;
 }
 
 /**

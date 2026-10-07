@@ -11,14 +11,14 @@ const out = () => ({ x: 0, y: 0, z: 0, kind: '' });
 const code = (n) => HIT_CODES.indexOf(n);
 
 test('the minigun round, the rail bolt and the plasma beam are played in this build', () => {
-  assert.deepEqual([...PLAYED], ['bullet', 'rail', 'plasma', 'mega']);
+  assert.deepEqual([...PLAYED], ['bullet', 'rail', 'plasma', 'mega', 'holeShot']);
   for (const k of FX_KINDS) assert.equal(playedKind(FX_KINDS.indexOf(k)), PLAYED.includes(k) ? k : null);
   assert.equal(playedKind(99), null);
 });
 
-test('own shots draw through the mirror for the minigun, rail and rifle, a tracer for the Black Hole Gun', () => {
+test('own shots draw through the mirror for the minigun, rail and rifle; the Black Hole Gun draws no tracer', () => {
   assert.deepEqual([...MIRROR_KEYS].sort(), ['minigun', 'railgun', 'rifle']);
-  assert.deepEqual([...TRACER_KEYS].sort(), ['blackhole']);
+  assert.deepEqual([...TRACER_KEYS], []);
   for (const k of MIRROR_KEYS) assert.ok(!TRACER_KEYS.has(k));
 });
 
