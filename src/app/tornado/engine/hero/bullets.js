@@ -48,7 +48,7 @@ export const BULLETS = {
 
 /**
  * @param {Object} ctx
- * @param {{max?: number, casings?: number}} [opts] pool sizes: the bullets alive at most, and the casings (a tracer-only pool, a co-op guest's, asks for few)
+ * @param {{max?: number, casings?: number, sparkRoom?: () => boolean}} [opts] pool sizes: the bullets alive at most, and the casings (a tracer-only pool asks for few); `sparkRoom` (a co-op mirror's) says whether the shared particle budget has room for a landing's sparks, absent: always
  * @returns {{
  *   fire: (from: THREE.Vector3, to: THREE.Vector3, hit: BulletHit, eject: THREE.Vector3, side: THREE.Vector3) => void,
  *   setFrozen: (on: boolean) => void,
@@ -187,7 +187,7 @@ export function createBullets(ctx, opts = {}) {
       if (b.left <= 1e-3) {
         b.live = false;
         if (b.hit) {
-          if (b.hit.kind !== 'sky' && b.hit.kind !== 'person' && ++sparkCount % BULLETS.sparkEvery === 0) {
+          if (b.hit.kind !== 'sky' && b.hit.kind !== 'person' && ++sparkCount % BULLETS.sparkEvery === 0 && (!opts.sparkRoom || opts.sparkRoom())) {
             ctx.systems.explosions.spawnImpactBurst(b.hit.at, 0.2);
             if (b.hit.kind === 'ground' && ctx.systems.earthquake) ctx.systems.earthquake.kickDust(b.hit.at.x, b.hit.at.z, 0.4, 0.5);
           }

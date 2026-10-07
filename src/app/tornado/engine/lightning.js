@@ -81,7 +81,7 @@ const PRIMARY_STRIKE_RANGE = 60;
  *   disposeBolt: (boltMesh: THREE.Group) => void,
  *   resetLightningStrikes: () => void,
  *   flashScreen: (at: THREE.Vector3, power: number, tint?: string) => void,
- *   strikeAt: (end: THREE.Vector3, power: number, rail?: boolean) => void
+ *   strikeAt: (end: THREE.Vector3, power: number, rail?: boolean, still?: boolean) => void
  * }}
  */
 export function createLightningSystem(ctx) {
@@ -474,9 +474,11 @@ export function createLightningSystem(ctx) {
    * the spot. Presentation only: it hits nobody.
    * @param {THREE.Vector3} end
    * @param {number} power 0..1
+   * @param {boolean} [rail] the railgun's tamer flash
+   * @param {boolean} [still] no camera shake (a co-op partner's mirrored rail bolt, net/mirror.js)
    * @returns {void}
    */
-  function strikeAt(end, power, rail = false) {
+  function strikeAt(end, power, rail = false, still = false) {
     if (!Lightning.boltGroup) return;
     const start = boltOrigin(end);
     const distance = Sim.three.camera.position.distanceTo(end);
@@ -510,7 +512,7 @@ export function createLightningSystem(ctx) {
 
     // Only close, strong strikes are worth shaking the camera for — keeps
     // the effect an occasional punctuation mark rather than constant jitter.
-    if (power > 0.55) {
+    if (power > 0.55 && !still) {
       Lightning.shake.duration = 0.15 + power * 0.15;
       Lightning.shake.timer = Lightning.shake.duration;
       Lightning.shake.magnitude = (power - 0.55) * 0.6;

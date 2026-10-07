@@ -6,9 +6,9 @@ import { createSnapshotBuffer } from './interp.js';
 import { createEventEmitter, createEventDeduper } from './events.js';
 import { createPlayerRegistry, REVIVE, FRIENDLY_FIRE } from './players.js';
 import { PROTOCOL_VERSION, LIMITS, WEAPONS, SNAPSHOT_KINDS } from './protocol.js';
-import { createFxRing, hitCode, aimRow, holeRow, twRow, envRow } from './fxOut.js';
+import { createFxRing, hitCode, HIT_CODES, aimRow, holeRow, twRow, envRow } from './fxOut.js';
 import { GUEST_WEAPONS, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrigger, coolDown, weaponAt } from './guestWeapons.js';
-import { createBullets } from '../hero/bullets.js';
+import { createMirror } from './mirror.js';
 import { HERO } from '../hero/config.js';
 import { JETPACK } from '../hero/jetpack.js';
 import { stepAir, jetHeld } from './flight.js';
@@ -29,7 +29,7 @@ import { attachHeld } from '../hero/heldWeapons.js';
 import { heldKey } from './heldWeapon.js';
 import { fillKatana, buildKatanaView, placeKatanaViewIdle } from '../hero/katana/model.js';
 import { shownKey, swayOf, viewOffset } from './viewModel.js';
-import { newFeedback, stepFeedback, flashOpacity, SHOT_LOOK, SWING, swingAmount } from './shotFeedback.js';
+import { newFeedback, stepFeedback, flashOpacity, SHOT_LOOK, SWING, swingAmount, MIRROR_KEYS, TRACER_KEYS } from './shotFeedback.js';
 import { createTrexFlames } from '../trex/flames.js';
 import { FIRE_GUN } from '../hero/fireGun.js';
 import { createHeroRequests, heroRequestOutcome, mayRequestLock, HERO_FLAG_SECONDS } from './heroRequest.js';
@@ -116,6 +116,10 @@ export function createNetSystem(ctx) {
   const dbgRayD = dbg ? new THREE.Vector3() : null;
   /** The host's `fx` rows waiting for the next snapshot (fxOut.js): fixed size, nothing allocated per shot. */
   const fxRing = createFxRing();
+  /** The `HIT_CODES` index of an enemy hit (a guest shot the host found a target for). */
+  const HIT_ENEMY = HIT_CODES.indexOf('enemy');
+  /** The host's shots drawn here (net/mirror.js): the guest's snapshot rows, its own predicted shot, and a guest's shot on the host. One pool, released with the session. */
+  const mirror = createMirror(ctx);
   /** The one payload a guest's shot is announced with (reused: the listener copies what it keeps). */
   const guestShotFx = { shooter: '1', kind: '', from: /** @type {any} */ (null), to: /** @type {any} */ (null), hit: '', extra: 0 };
 
@@ -326,6 +330,7 @@ export function createNetSystem(ctx) {
     emitter.reset();
     buffer.clear();
     fxRing.clear();
+    mirror.dispose();
     if (dbg) { dbg.reset(); S.dbgAcc = S.dbgPingAcc = 0; S.dbgTornadoes = -1; S.dbgHole.open = false; S.dbgHole.shooter = '0'; S.dbgHole.at = 0; }
     S.tick = 0;
     S.peerScore = 0;
@@ -1223,7 +1228,11 @@ export function createNetSystem(ctx) {
       const reach = hit ? hit.t : w.range;
       muzzleVec.set(ox + dx * 0.8, EYE - 0.2 + dy * 0.8, oz + dz * 0.8);
       tracerEnd.set(ox + dx * reach, EYE + dy * reach, oz + dz * reach);
-      hero().guestTracer(muzzleVec, tracerEnd);
+      // The rifle keeps its bare tracer until its own renderer; the minigun and railgun go through the mirror
+      // (the same round with casings and sparks, the same bolt, with the cue), as on the guest's screen.
+      if (name === 'minigun') mirror.drawGuestShot('bullet', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
+      else if (name === 'railgun') mirror.drawGuestShot('rail', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
+      else hero().guestTracer(muzzleVec, tracerEnd);
       if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: EYE + dy * hit.t, z: oz + dz * hit.t } })) { if (dbg) dbg.fire(trigger.weapon, 3); credit(KILL_SCORE, p.id); }
       // Friendly fire (D4): the partner in the line of fire, if nearer than the enemy hit.
       hurtRay(p.id, ox, EYE, oz, dx, dy, dz, hit ? hit.t : w.range, w.type);
@@ -1517,6 +1526,8 @@ export function createNetSystem(ctx) {
         S.altTarget.clear();
         if (Array.isArray(msg.alt)) for (const r of msg.alt) S.altTarget.set(r[0], r[1]);
         reconcileOwn(msg);
+        // The host's discrete shots for the mirror; the guest's own shooter id is dropped there (drawn once, at the press).
+        mirror.feed(msg.fx, msg.t, S.myId ? Number(S.myId) : -1);
       }
       return;
     }
@@ -1533,6 +1544,7 @@ export function createNetSystem(ctx) {
         // panel and the camera back to defaults, which the peer view then locks.
         if (Number.isFinite(d.seed)) applySeed(d.seed >>> 0);
         S.pred = newPrediction();
+        mirror.reset();
         enterPeerView();
         say('You are ROGER 2: W S run, A D turn, right-click raises the weapon (then the mouse looks). Hero asks the host to bring you in.');
         setStatus();
@@ -1728,15 +1740,8 @@ export function createNetSystem(ctx) {
   const viewParts = new Map();
   /** The guest's own shot feedback (flash, recoil, barrel spin), predicted, cosmetic (shotFeedback.js). */
   let feedback = newFeedback();
-  /** @type {ReturnType<typeof createBullets>|null} the guest's own round pool, for its tracers (made on the first shot) */
-  let rounds = null;
   /** @type {ReturnType<typeof createTrexFlames>|null} the guest's own Fire Gun flames (cosmetic: no burning, made on first use) */
   let flames = null;
-  /** Tracers alive at once in the guest's own pool (the minigun's 0.09 s shots at up to 220 m, 320 m/s: about 8). */
-  const GUEST_TRACERS = 32;
-  /** The wheel keys whose shot draws a tracer: the three guns, and the Black Hole Gun's bolt. */
-  const TRACER_KEYS = new Set(['rifle', 'minigun', 'railgun', 'blackhole']);
-  const noLanding = () => {};
   const viewAt = { x: 0, y: 0, z: 0 };
   const viewVec = new THREE.Vector3();
   /** @type {{view: THREE.Group, holder: THREE.Group}|null} the Katana's first-person blade */
@@ -1831,22 +1836,26 @@ export function createNetSystem(ctx) {
   }
 
   /**
-   * One tracer from just ahead of the guest's eye along its aim, in its own
-   * round pool (hero/bullets.js, no hit, no casing: cosmetic; the host
-   * resolves the shot). Predicted like the flash, so it shows even for a shot
-   * the host refuses.
+   * The guest's own shot, drawn at the press from just ahead of its eye along
+   * its aim, through the mirror (net/mirror.js): the minigun's round with its
+   * casing and sparks, the railgun's bolt, or, for the rifle and the Black Hole
+   * Gun until their own renderers, a bare tracer. Cosmetic and predicted like
+   * the flash, so it shows even for a shot the host refuses; the host resolves
+   * the shot and never sends it back (the mirror's queue drops it).
+   * @param {string} key the wheel key that fired
    * @param {THREE.Camera} cam the guest's camera, already looking
    * @param {{range: number}|null} w the weapon's table entry
    * @returns {void}
    */
-  function drawTracer(cam, w) {
+  function drawShot(key, cam, w) {
     if (!w) return;
-    rounds = rounds || createBullets(ctx, { max: GUEST_TRACERS, casings: 0 });
     cam.getWorldDirection(viewVec);
     muzzleVec.copy(cam.position).addScaledVector(viewVec, 0.8);
     muzzleVec.y -= 0.2;
     tracerEnd.copy(cam.position).addScaledVector(viewVec, w.range);
-    rounds.fire(muzzleVec, tracerEnd, null, null, null);
+    if (key === 'minigun') mirror.drawOwn('bullet', muzzleVec, tracerEnd);
+    else if (key === 'railgun') mirror.drawOwn('rail', muzzleVec, tracerEnd);
+    else mirror.tracer(muzzleVec, tracerEnd);
   }
 
   /**
@@ -1871,8 +1880,6 @@ export function createNetSystem(ctx) {
   function clearViewmodels() {
     if (flames) flames.release();
     flames = null;
-    if (rounds) rounds.dispose();
-    rounds = null;
     for (const g of viewGroups.values()) g.removeFromParent();
     viewGroups.clear();
     viewParts.clear();
@@ -2067,6 +2074,8 @@ export function createNetSystem(ctx) {
     const s = buffer.sample(performance.now() / 1000);
     if (!s) return;
     S.peerScore = s.score;
+    // The host's shots, on the snapshot clock (the round pool steps here, for the guest's own shot too).
+    mirror.update(s.t, dt);
     // Own avatar from the prediction while it runs (else from the host's row).
     const pv = S.pred.active && S.buttons.aim ? viewPoint(S.pred) : null;
     // Heights ease towards the newest snapshot's (the jetpack), and settle to the ground.
@@ -2129,8 +2138,7 @@ export function createNetSystem(ctx) {
       const step = stepFeedback(feedback, { fire: S.buttons.fire || S.fireLatch.pending, aim: S.buttons.aim, up: me[4] === 0, weapon: S.weapon }, dt);
       feedback = step.fb;
       if (step.shot) playShotCue(step.shot);
-      if (step.shot && TRACER_KEYS.has(step.shot)) drawTracer(cam, weaponAt(S.weapon));
-      if (rounds) rounds.update(dt, 1, noLanding);
+      if (step.shot && (MIRROR_KEYS.has(step.shot) || TRACER_KEYS.has(step.shot))) drawShot(step.shot, cam, weaponAt(S.weapon));
       if (step.flame) breatheFlame(cam, dt);
       else if (flames) flames.update(dt);
       placeViewmodel(cam, shownKey(S.buttons.aim, me[4] === 0, S.weapon), k0.up || k0.down || k0.left || k0.right, dt);
@@ -2308,7 +2316,7 @@ export function createNetSystem(ctx) {
       if (tw) {
         for (const [id, o] of tw) lines.push(`  tornado #${id}: x ${fixed1(o.position.x)} z ${fixed1(o.position.z)} radius ${fixed1(o.scale.x)} distance to camera ${fixed1(Math.hypot(o.position.x - cam.x, o.position.z - cam.z))} m visible ${o.visible}`);
       }
-      lines.push(`guest pools: flames ${flames ? 'exist' : 'none'}, rounds ${rounds ? 'exist' : 'none'} (neither pool exposes a live count)`);
+      lines.push(`guest pools: flames ${flames ? 'exist' : 'none'}, mirror fx waiting ${mirror.waiting()} (the flames pool exposes no live count)`);
     }
     const caps = ctx.systems.caps;
     if (caps) lines.push(`shared particles: in use ${caps.particlesInUse()}, room ${caps.particleRoom()}`);
@@ -2365,6 +2373,7 @@ export function createNetSystem(ctx) {
     if (!S.client) return;
     if (dbg) debugTick(rawDt);
     const dt = Sim.state.paused ? 0 : rawDt;
+    if (S.role === 'host') mirror.update(null, rawDt);
     if (S.role === 'host' && S.client.state().status === 'in-room') {
       updateGuests(dt);
       // Shared mission state, when it changes (host-authoritative).
