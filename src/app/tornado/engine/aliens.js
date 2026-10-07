@@ -10,6 +10,7 @@ import { createAlienCrew } from './aliens/crew.js';
 import { createAlienWeapons } from './aliens/weapons.js';
 import { createAlienWaves } from './aliens/waves.js';
 import { createAlienMissiles } from './aliens/missiles.js';
+import { buildSaucer } from './spaceship.js';
 export { ALIEN_SKIN_GLOW } from './aliens/config.js';
 
 /**
@@ -784,8 +785,34 @@ export function createAliensSystem(ctx) {
     S.banner = null;
   }
 
+  /**
+   * The co-op guest's figures (net/system.js): the real alien (its geometry
+   * is the system's shared set) or the real saucer, built for a proxy
+   * template. `geometries` and `materials` are what the guest owns and
+   * releases; nothing is registered, nothing is on `Sim.objects` (R-048).
+   * @param {'alien'|'saucer'} which
+   * @returns {{root: THREE.Object3D, limbs: any, geometries: THREE.BufferGeometry[], materials: THREE.Material[]}|null}
+   */
+  function buildGuestModel(which) {
+    if (which === 'alien') {
+      if (!S.alienGeo) return null;
+      const a = api.buildAlien(false);
+      return { root: a.root, limbs: a.limbs, geometries: [], materials: [a.skin] };
+    }
+    const saucer = buildSaucer();
+    for (const leg of saucer.legs) leg.visible = false;
+    for (const mat of saucer.glow) /** @type {any} */ (mat).color.copy(ALIENS.glow);
+    const geometries = new Set();
+    const materials = new Set();
+    saucer.group.traverse((/** @type {any} */ child) => {
+      if (child.geometry) geometries.add(child.geometry);
+      if (child.material) materials.add(child.material);
+    });
+    return { root: saucer.group, limbs: null, geometries: [...geometries], materials: [...materials] };
+  }
+
   return {
-    initAliens, updateAliens, abductedCount, markers, riftShip, riftHold, riftDown,
+    initAliens, updateAliens, abductedCount, markers, riftShip, riftHold, riftDown, buildGuestModel,
     /** The co-op guest's drawing of the host's shots, laser bursts and missiles (net/mirror.js): the same builders, no hit, no homing, no harm (R-053). */
     showRay: api.showRay, showTracker: api.showTracker, showMissile: api.showMissile,
     /** For testing from the console: the ship's phase; a count of people taken set by hand, and its lift-off forced. */

@@ -29,6 +29,8 @@ import { glowLevel } from '../health/state.js';
 import { mayHurtPlayer, splashAmount, rayBodyDistance, inSector } from '../health/friendlyFire.js';
 import { dressAsRoger, rogerLimbs, newOwned, disposeRoger } from '../hero/rogerLook.js';
 import { poseWalk, lieAngle, mapJoints } from './terminatorPose.js';
+import { poseAlienWalk, spinSaucer, ALIEN_STRIDE } from './alienPose.js';
+import { ALIENS } from '../aliens/config.js';
 import { T800 } from '../terminator/config.js';
 import { rogerStyle, newRunCycle, stepRunCycle, swingLimbs, newCameraPose, followCamera, wheelHtml, wrapAngle, newFireLatch, fireLatchPress, fireLatchRelease, fireLatchSample } from './rogerView.js';
 import { createNetMetrics, isNetDebug, fixed1 } from './metrics.js';
@@ -1789,6 +1791,30 @@ export function createNetSystem(ctx) {
     return { root, joints: mapJoints(termKit.template, root, termKit.joints) };
   }
 
+  /** @type {Record<string, {template: THREE.Object3D, limbs: any}|null>} the real alien and the real saucer, each built once per session (shared geometry and materials) */
+  const aliensKit = { alien: null, saucer: null };
+
+  /**
+   * One alien or saucer figure for a proxy: a clone of the host's own model
+   * (`ctx.systems.aliens.buildGuestModel`), sharing the template's geometry
+   * and materials. Null when the system is absent.
+   * @param {'alien'|'saucer'} which
+   * @returns {{root: THREE.Object3D, limbs: any}|null}
+   */
+  function aliensFigure(which) {
+    let kit = aliensKit[which];
+    if (!kit) {
+      const sys = ctx.systems.aliens;
+      const unit = sys && sys.buildGuestModel ? sys.buildGuestModel(which) : null;
+      if (!unit) return null;
+      for (const g of unit.geometries) keepGeo(g);
+      for (const m of unit.materials) keepMat(m);
+      kit = aliensKit[which] = { template: unit.root, limbs: unit.limbs };
+    }
+    const root = kit.template.clone(true);
+    return { root, limbs: kit.limbs ? mapJoints(kit.template, root, kit.limbs) : null };
+  }
+
   /** @param {string} kind @param {number} [id] Player id, for the players kind. @returns {THREE.Object3D} */
   function makeProxy(kind, id = 0) {
     if (kind === 'players') return makeRogerProxy(id);
@@ -1807,12 +1833,25 @@ export function createNetSystem(ctx) {
         g.add(body);
       }
     } else if (kind === 'aliens') {
-      const body = new THREE.Mesh(keepGeo(new THREE.SphereGeometry(0.6, 10, 8)), mat(0x7bff7b));
-      body.position.y = 0.7;
-      g.add(body);
+      const fig = aliensFigure('alien');
+      if (fig) {
+        g.add(fig.root);
+        g.userData.limbs = fig.limbs;
+        g.userData.run = newRunCycle();
+      } else {
+        const body = new THREE.Mesh(keepGeo(new THREE.SphereGeometry(0.6, 10, 8)), mat(0x7bff7b));
+        body.position.y = 0.7;
+        g.add(body);
+      }
     } else if (kind === 'ships') {
-      const disc = new THREE.Mesh(keepGeo(new THREE.CylinderGeometry(14, 14, 3, 20)), mat(0x9aa4b2));
-      g.add(disc);
+      const fig = aliensFigure('saucer');
+      if (fig) {
+        g.add(fig.root);
+        g.userData.yaw = 0;
+      } else {
+        const disc = new THREE.Mesh(keepGeo(new THREE.CylinderGeometry(14, 14, 3, 20)), mat(0x9aa4b2));
+        g.add(disc);
+      }
     } else if (kind === 'vehicles') {
       const box = new THREE.Mesh(keepGeo(new THREE.BoxGeometry(2, 1.3, 4.5)), mat(0x4a90e2));
       box.position.y = 0.8;
@@ -2074,6 +2113,7 @@ export function createNetSystem(ctx) {
     S.geos = [];
     S.mats = [];
     termKit = null;
+    aliensKit.alien = aliensKit.saucer = null;
   }
 
   /**
@@ -2279,6 +2319,10 @@ export function createNetSystem(ctx) {
         if (kind === 'aliens' || kind === 'ships') {
           obj.position.set(row[1], row[2], row[3]);
           obj.rotation.y = row[4];
+          const al = obj.userData.limbs;
+          if (al) poseAlienWalk(al, obj.userData.run.phase, stepRunCycle(obj.userData.run, row[1], row[3], dt, ALIEN_STRIDE, ALIENS.walkSpeed));
+          // The row carries no saucer heading (always 0): it turns slowly, as the host's hovers.
+          if (kind === 'ships' && obj.userData.yaw !== undefined) obj.rotation.y = obj.userData.yaw = spinSaucer(obj.userData.yaw, dt);
         } else {
           const px = mine && pv ? pv.x : row[1], pz = mine && pv ? pv.z : row[2];
           obj.position.set(px, kind === 'players' ? (S.altNow.get(id) || 0) : 0, pz);
