@@ -261,6 +261,9 @@ Common rules for every subtask: functional style, every new function typed with 
   - Classification: SEPARATE: new design decisions (which models are shared, which actors first) and the entity caps (R-048: proxies share geometry, no `Sim.objects`).
   - Risks / edge cases: row width changes break an older strict check (additive kinds, never widen an existing row); proxies dispose with the session; the 64 rows per kind cap; animation is replicated state only (no local AI).
   - Acceptance: per family, the guest sees the actor with its real look and approximately its pose.
+  - [x] DONE 11a Terminators (files: `net/terminatorPose.js`, `net/system.js`, `tests/guest-terminator.test.mjs`): the guest clones one template of the host's real model (`ctx.systems.terminator.buildModel`, built lazily, geometry and materials shared, released in `clearProxies`); no `Sim.objects`, AI, registry or collision.
+    - Pose from replicated state only: walk cycle from the interpolated movement (`stepRunCycle`, host stride and speed), upright or lying from the existing state column; no row or protocol change (cap 64 unchanged).
+    - Not shown (no state in the row): the strike wind-up, blow and wind lean. Visual check in a real two-window session is unverified.
 
 - [ ] Subtask 12: The other disasters, one per Coder call, after the Subtask 8 stop. Order proposed (the owner confirms): explosions done in 10, then fires, flood and dam, earthquake and chasm, meteors, volcano and fissure, electric storm, downburst, Firenado and Lavanado. Each uses a `world` descriptor (event: start or stop with parameters; state row for what moves) and a render-only mirror of the existing visual code, never the damage half. Use the `disaster-system-change` skill for each: trace UI, registration, frame update, consumers, lifecycle, rules and performance.
   - Likely files: the disaster files listed in the inventory, `net/mirror.js`, `net/protocol.js`

@@ -28,6 +28,8 @@ import { HEALTH } from '../health/config.js';
 import { glowLevel } from '../health/state.js';
 import { mayHurtPlayer, splashAmount, rayBodyDistance, inSector } from '../health/friendlyFire.js';
 import { dressAsRoger, rogerLimbs, newOwned, disposeRoger } from '../hero/rogerLook.js';
+import { poseWalk, lieAngle, mapJoints } from './terminatorPose.js';
+import { T800 } from '../terminator/config.js';
 import { rogerStyle, newRunCycle, stepRunCycle, swingLimbs, newCameraPose, followCamera, wheelHtml, wrapAngle, newFireLatch, fireLatchPress, fireLatchRelease, fireLatchSample } from './rogerView.js';
 import { createNetMetrics, isNetDebug, fixed1 } from './metrics.js';
 import { createWeaponModels } from '../hero/weaponModels.js';
@@ -1765,15 +1767,45 @@ export function createNetSystem(ctx) {
     if (obj.userData.owned) disposeRoger(obj, obj.userData.owned);
   }
 
+  /** @type {{template: any, joints: any}|null} the real Terminator, built once per session (its geometry and materials are shared by every proxy) */
+  let termKit = null;
+
+  /**
+   * One Terminator figure for a proxy: a clone of the host's own model
+   * (terminator/model.js through `ctx.systems.terminator.buildModel`), sharing
+   * the template's geometry and materials. Null when the system is absent.
+   * @returns {{root: THREE.Object3D, joints: any}|null}
+   */
+  function terminatorFigure() {
+    if (!termKit) {
+      const sys = ctx.systems.terminator;
+      if (!sys || !sys.buildModel) return null;
+      const unit = sys.buildModel();
+      for (const g of unit.geometries) keepGeo(g);
+      for (const m of unit.materials) keepMat(m);
+      termKit = { template: unit.root, joints: unit.joints };
+    }
+    const root = termKit.template.clone(true);
+    return { root, joints: mapJoints(termKit.template, root, termKit.joints) };
+  }
+
   /** @param {string} kind @param {number} [id] Player id, for the players kind. @returns {THREE.Object3D} */
   function makeProxy(kind, id = 0) {
     if (kind === 'players') return makeRogerProxy(id);
     const g = new THREE.Group();
     const mat = (/** @type {number} */ c, o = 1) => /** @type {THREE.Material} */ (keepMat(new THREE.MeshStandardMaterial({ color: c, transparent: o < 1, opacity: o, roughness: 0.7 })));
     if (kind === 'terminators') {
-      const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(0.34, 1.4, 4, 8)), mat(0xc0392b));
-      body.position.y = 1.05;
-      g.add(body);
+      const fig = terminatorFigure();
+      if (fig) {
+        g.rotation.order = 'YXZ';
+        g.add(fig.root);
+        g.userData.joints = fig.joints;
+        g.userData.run = newRunCycle();
+      } else {
+        const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(0.34, 1.4, 4, 8)), mat(0xc0392b));
+        body.position.y = 1.05;
+        g.add(body);
+      }
     } else if (kind === 'aliens') {
       const body = new THREE.Mesh(keepGeo(new THREE.SphereGeometry(0.6, 10, 8)), mat(0x7bff7b));
       body.position.y = 0.7;
@@ -2041,6 +2073,7 @@ export function createNetSystem(ctx) {
     for (const m of S.mats) m.dispose();
     S.geos = [];
     S.mats = [];
+    termKit = null;
   }
 
   /**
@@ -2256,7 +2289,11 @@ export function createNetSystem(ctx) {
             // The weapon in hand from the row's weapon column (5); hidden down or seated (vehicle column 7).
             obj.userData.held.show(heldKey(row[5], row[4] === 0, row[7] >= 0));
           }
-          if (kind === 'terminators') obj.rotation.x = row[4] === 0 ? 0 : -Math.PI / 2 + 0.1;
+          if (kind === 'terminators') {
+            obj.rotation.x = lieAngle(row[4]);
+            const tj = obj.userData.joints;
+            if (tj) poseWalk(tj, obj.userData.run.phase, row[4] === 0 ? stepRunCycle(obj.userData.run, px, pz, dt, T800.stride / T800.scale, T800.speed) : 0);
+          }
         }
         if (mine) S.peerRow = row;
         else if (kind === 'players') partnerRows.set(id, row);
