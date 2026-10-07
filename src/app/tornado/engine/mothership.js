@@ -106,7 +106,10 @@ const UP = new THREE.Vector3(0, 1, 0);
  *   shipTarget: () => Object|null,
  *   musicWanted: () => boolean,
  *   resetMothership: () => void,
- *   disposeMothership: () => void
+ *   disposeMothership: () => void,
+ *   buildGuestModel: () => any,
+ *   replicaState: () => any,
+ *   localRoots: () => THREE.Object3D[]
  * }}
  */
 export function createMothershipSystem(ctx) {
@@ -665,7 +668,43 @@ export function createMothershipSystem(ctx) {
     wind.disposeWind();
   }
 
+  /**
+   * For the co-op guest (net/system.js, `flyers` rows): the same saucer at the
+   * same size, legs up, with its geometry and materials to release. Nothing is
+   * added to the scene and no state is touched; the beam, light and downwash
+   * are not part of it.
+   * @returns {{root: THREE.Object3D, geometries: THREE.BufferGeometry[], materials: THREE.Material[]}}
+   */
+  function buildGuestModel() {
+    const saucer = buildSaucer();
+    for (const leg of saucer.legs) leg.visible = false;
+    saucer.group.scale.setScalar(MOTHER.scale);
+    const geometries = new Set();
+    const materials = new Set();
+    saucer.group.traverse((/** @type {any} */ child) => {
+      child.castShadow = false;
+      if (child.geometry) geometries.add(child.geometry);
+      if (child.material) materials.add(child.material);
+    });
+    return { root: saucer.group, geometries: [...geometries], materials: [...materials] };
+  }
+
+  /**
+   * What the guest needs to draw it (a `flyers` row, net/flyerPose.js), or
+   * null while there is no ship. Read-only.
+   * @returns {{x: number, y: number, z: number, quaternion: THREE.Quaternion, phase: string}|null}
+   */
+  function replicaState() {
+    if (!ship || state.phase === 'idle') return null;
+    const p = ship.group.position;
+    return { x: p.x, y: p.y, z: p.z, quaternion: ship.group.quaternion, phase: state.phase };
+  }
+
+  /** The ship's own scene object, for the guest to hold back while the host's is drawn. @returns {THREE.Object3D[]} */
+  const localRoots = () => (ship ? [ship.group] : []);
+
   return {
-    initMothership, updateMothership, summon, dimming, shipTarget, musicWanted, resetMothership, disposeMothership
+    initMothership, updateMothership, summon, dimming, shipTarget, musicWanted, resetMothership, disposeMothership,
+    buildGuestModel, replicaState, localRoots
   };
 }

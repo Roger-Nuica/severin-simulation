@@ -56,9 +56,80 @@ function createLiveryTexture() {
 }
 
 /**
+ * The helicopter's model: the body, rotors, beacon and searchlight cone, and everything to release with it.
+ * Adds nothing to the scene (the host's system and the co-op guest each place their own).
+ * @returns {{root: THREE.Group, rotor: THREE.Group, tailRotor: THREE.Group, beacon: THREE.Mesh, beam: THREE.Mesh,
+ *   geometries: THREE.BufferGeometry[], materials: THREE.Material[], textures: THREE.Texture[]}}
+ */
+function buildChopperModel() {
+  /** @type {THREE.BufferGeometry[]} */
+  const geometries = [];
+  /** @type {THREE.Material[]} */
+  const materials = [];
+  /** @type {THREE.Texture[]} */
+  const textures = [];
+  const geo = (/** @type {THREE.BufferGeometry} */ g) => (geometries.push(g), g);
+  const mat = (/** @type {THREE.Material} */ m) => (materials.push(m), m);
+  const livery = createLiveryTexture();
+  textures.push(livery);
+  const white = mat(new THREE.MeshStandardMaterial({ color: 0xf2f4f8, roughness: 0.45, metalness: 0.2 }));
+  const blue = mat(new THREE.MeshStandardMaterial({ color: 0x1f5fbf, roughness: 0.5, metalness: 0.2 }));
+  const dark = mat(new THREE.MeshStandardMaterial({ color: 0x1b1f27, roughness: 0.6, metalness: 0.4 }));
+  const glass = mat(new THREE.MeshStandardMaterial({ color: 0x223448, roughness: 0.1, metalness: 0.7 }));
+  const side = mat(new THREE.MeshStandardMaterial({ map: livery, roughness: 0.45 }));
+  const blur = mat(new THREE.MeshBasicMaterial({ color: 0x9aa4b2, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide }));
+  const red = mat(new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 0.2, 0.15), toneMapped: false }));
+  const lightMat = mat(new THREE.MeshBasicMaterial({
+    color: 0xfff3cf, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending
+  }));
+  const root = new THREE.Group();
+  root.name = 'newsChopper';
+  /** @param {THREE.BufferGeometry} g @param {THREE.Material} m @param {number} x @param {number} y @param {number} z */
+  const add = (g, m, x, y, z, parent = /** @type {THREE.Object3D} */ (root)) => {
+    const mesh = new THREE.Mesh(geo(g), m);
+    mesh.position.set(x, y, z);
+    parent.add(mesh);
+    return mesh;
+  };
+  // The body: a rounded cabin, the livery on its flat sides, a glazed nose.
+  add(new THREE.CapsuleGeometry(0.95, 2.2, 4, 12).rotateX(Math.PI / 2), white, 0, 0, 0).scale.set(1, 0.95, 1);
+  for (const sx of [-1, 1]) {
+    const panel = add(new THREE.PlaneGeometry(2.6, 0.7), side, sx * 0.97, 0.05, -0.1);
+    panel.rotation.y = sx * Math.PI / 2;
+  }
+  add(new THREE.SphereGeometry(0.88, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2).rotateX(Math.PI / 2), glass, 0, 0.12, 1.25);
+  // The tail boom, fin and its stripe, the skids.
+  add(new THREE.CylinderGeometry(0.16, 0.32, 4.2, 8).rotateX(Math.PI / 2), white, 0, 0.35, -3.3);
+  add(new THREE.BoxGeometry(0.12, 1.2, 0.8), blue, 0, 0.9, -5.2);
+  add(new THREE.BoxGeometry(1.6, 0.08, 0.5), blue, 0, 0.4, -5.0);
+  for (const sx of [-1, 1]) {
+    add(new THREE.BoxGeometry(0.1, 0.1, 3.4), dark, sx * 0.85, -1.25, 0.1);
+    for (const z of [-0.8, 0.9]) add(new THREE.BoxGeometry(0.08, 0.5, 0.08), dark, sx * 0.7, -1.0, z);
+  }
+  // The main rotor: a mast, two long blades, and the blur of them spinning.
+  add(new THREE.CylinderGeometry(0.12, 0.12, 0.5, 8), dark, 0, 1.15, 0.1);
+  const rotor = new THREE.Group();
+  rotor.position.set(0, 1.42, 0.1);
+  root.add(rotor);
+  for (const a of [0, Math.PI / 2]) add(new THREE.BoxGeometry(0.22, 0.04, 9.2), dark, 0, 0, 0, rotor).rotation.y = a;
+  add(new THREE.CircleGeometry(4.6, 32).rotateX(-Math.PI / 2), blur, 0, 0.02, 0, rotor);
+  const tailRotor = new THREE.Group();
+  tailRotor.position.set(0.12, 0.95, -5.3);
+  root.add(tailRotor);
+  add(new THREE.BoxGeometry(0.04, 1.4, 0.12), dark, 0, 0, 0, tailRotor);
+  const beacon = add(new THREE.SphereGeometry(0.12, 8, 6), red, 0, 1.5, -5.4);
+  // The searchlight: a cone hanging from the nose, pointed by update().
+  const beam = add(new THREE.ConeGeometry(5, 46, 20, 1, true).translate(0, -23, 0), lightMat, 0, -0.9, 1.6);
+  root.traverse((o) => { o.castShadow = false; });
+  root.scale.setScalar(1.4);
+  return { root, rotor, tailRotor, beacon, beam, geometries, materials, textures };
+}
+
+/**
  * @param {Object} ctx
  * @returns {{initNewsChopper: () => void, updateNewsChopper: (dt: number) => void,
- *   resetNewsChopper: () => void, disposeNewsChopper: () => void, chasing: () => boolean}}
+ *   resetNewsChopper: () => void, disposeNewsChopper: () => void, chasing: () => boolean,
+ *   buildGuestModel: () => any, replicaState: () => any, localRoots: () => THREE.Object3D[]}}
  */
 export function createNewsChopperSystem(ctx) {
   const { Sim } = ctx;
@@ -88,60 +159,15 @@ export function createNewsChopperSystem(ctx) {
 
   /** @returns {void} */
   function initNewsChopper() {
-    const geo = (/** @type {THREE.BufferGeometry} */ g) => (geometries.push(g), g);
-    const mat = (/** @type {THREE.Material} */ m) => (materials.push(m), m);
-    const livery = createLiveryTexture();
-    textures.push(livery);
-    const white = mat(new THREE.MeshStandardMaterial({ color: 0xf2f4f8, roughness: 0.45, metalness: 0.2 }));
-    const blue = mat(new THREE.MeshStandardMaterial({ color: 0x1f5fbf, roughness: 0.5, metalness: 0.2 }));
-    const dark = mat(new THREE.MeshStandardMaterial({ color: 0x1b1f27, roughness: 0.6, metalness: 0.4 }));
-    const glass = mat(new THREE.MeshStandardMaterial({ color: 0x223448, roughness: 0.1, metalness: 0.7 }));
-    const side = mat(new THREE.MeshStandardMaterial({ map: livery, roughness: 0.45 }));
-    const blur = mat(new THREE.MeshBasicMaterial({ color: 0x9aa4b2, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide }));
-    const red = mat(new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 0.2, 0.15), toneMapped: false }));
-    const lightMat = mat(new THREE.MeshBasicMaterial({
-      color: 0xfff3cf, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending
-    }));
-    root = new THREE.Group();
-    root.name = 'newsChopper';
-    /** @param {THREE.BufferGeometry} g @param {THREE.Material} m @param {number} x @param {number} y @param {number} z */
-    const add = (g, m, x, y, z, parent = /** @type {THREE.Object3D} */ (root)) => {
-      const mesh = new THREE.Mesh(geo(g), m);
-      mesh.position.set(x, y, z);
-      parent.add(mesh);
-      return mesh;
-    };
-    // The body: a rounded cabin, the livery on its flat sides, a glazed nose.
-    add(new THREE.CapsuleGeometry(0.95, 2.2, 4, 12).rotateX(Math.PI / 2), white, 0, 0, 0).scale.set(1, 0.95, 1);
-    for (const sx of [-1, 1]) {
-      const panel = add(new THREE.PlaneGeometry(2.6, 0.7), side, sx * 0.97, 0.05, -0.1);
-      panel.rotation.y = sx * Math.PI / 2;
-    }
-    add(new THREE.SphereGeometry(0.88, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2).rotateX(Math.PI / 2), glass, 0, 0.12, 1.25);
-    // The tail boom, fin and its stripe, the skids.
-    add(new THREE.CylinderGeometry(0.16, 0.32, 4.2, 8).rotateX(Math.PI / 2), white, 0, 0.35, -3.3);
-    add(new THREE.BoxGeometry(0.12, 1.2, 0.8), blue, 0, 0.9, -5.2);
-    add(new THREE.BoxGeometry(1.6, 0.08, 0.5), blue, 0, 0.4, -5.0);
-    for (const sx of [-1, 1]) {
-      add(new THREE.BoxGeometry(0.1, 0.1, 3.4), dark, sx * 0.85, -1.25, 0.1);
-      for (const z of [-0.8, 0.9]) add(new THREE.BoxGeometry(0.08, 0.5, 0.08), dark, sx * 0.7, -1.0, z);
-    }
-    // The main rotor: a mast, two long blades, and the blur of them spinning.
-    add(new THREE.CylinderGeometry(0.12, 0.12, 0.5, 8), dark, 0, 1.15, 0.1);
-    rotor = new THREE.Group();
-    rotor.position.set(0, 1.42, 0.1);
-    root.add(rotor);
-    for (const a of [0, Math.PI / 2]) add(new THREE.BoxGeometry(0.22, 0.04, 9.2), dark, 0, 0, 0, rotor).rotation.y = a;
-    add(new THREE.CircleGeometry(4.6, 32).rotateX(-Math.PI / 2), blur, 0, 0.02, 0, rotor);
-    tailRotor = new THREE.Group();
-    tailRotor.position.set(0.12, 0.95, -5.3);
-    root.add(tailRotor);
-    add(new THREE.BoxGeometry(0.04, 1.4, 0.12), dark, 0, 0, 0, tailRotor);
-    beacon = add(new THREE.SphereGeometry(0.12, 8, 6), red, 0, 1.5, -5.4);
-    // The searchlight: a cone hanging from the nose, pointed by update().
-    beam = add(new THREE.ConeGeometry(5, 46, 20, 1, true).translate(0, -23, 0), lightMat, 0, -0.9, 1.6);
-    root.traverse((o) => { o.castShadow = false; });
-    root.scale.setScalar(1.4);
+    const m = buildChopperModel();
+    root = m.root;
+    rotor = m.rotor;
+    tailRotor = m.tailRotor;
+    beacon = m.beacon;
+    beam = m.beam;
+    geometries.push(...m.geometries);
+    materials.push(...m.materials);
+    textures.push(...m.textures);
     Sim.three.scene.add(root);
     resetNewsChopper();
   }
@@ -207,5 +233,27 @@ export function createNewsChopperSystem(ctx) {
     geometries.length = materials.length = textures.length = 0;
   }
 
-  return { initNewsChopper, updateNewsChopper, resetNewsChopper, disposeNewsChopper, chasing: () => chasing };
+  /**
+   * For the co-op guest (net/system.js, `flyers` rows): a second helicopter
+   * from the same builder, with the geometry, materials and livery texture to
+   * release. Nothing is added to the scene and no state is touched.
+   * @returns {ReturnType<typeof buildChopperModel>}
+   */
+  const buildGuestModel = () => buildChopperModel();
+
+  /**
+   * What the guest needs to draw it (a `flyers` row, net/flyerPose.js), or
+   * null before it exists. Read-only.
+   * @returns {{x: number, y: number, z: number, quaternion: THREE.Quaternion, chasing: boolean}|null}
+   */
+  function replicaState() {
+    if (!root) return null;
+    const p = root.position;
+    return { x: p.x, y: p.y, z: p.z, quaternion: root.quaternion, chasing };
+  }
+
+  /** The helicopter's own scene object, for the guest to hold back while the host's is drawn. @returns {THREE.Object3D[]} */
+  const localRoots = () => (root ? [root] : []);
+
+  return { initNewsChopper, updateNewsChopper, resetNewsChopper, disposeNewsChopper, chasing: () => chasing, buildGuestModel, replicaState, localRoots };
 }

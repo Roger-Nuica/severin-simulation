@@ -35,6 +35,8 @@ import { FIGURE, hankRow, havocRow, samuraiRow, newHankPose, hankWant, hankGlow,
 import { GUNNER } from '../gunner/config.js';
 import { cloneRows, replicatorRow, poseOriginal, writeClones, newReplicaScratch, easeHeat, standingCount, glowLevels } from './replicatorPose.js';
 import { eulerYXZ, carClass, pickCars, carRow, poseCar, colourIndex } from './carPose.js';
+import { FLYER, flyerId, flyerRow, poseFlyer, motherState, throttleState, headDown, headHeight, jetLook, chopperLook, spotlessLook } from './flyerPose.js';
+import { CHOPPER } from '../environment/newsChopper.js';
 import { ALIENS } from '../aliens/config.js';
 import { T800 } from '../terminator/config.js';
 import { rogerStyle, newRunCycle, stepRunCycle, swingLimbs, newCameraPose, followCamera, wheelHtml, wrapAngle, newFireLatch, fireLatchPress, fireLatchRelease, fireLatchSample } from './rogerView.js';
@@ -201,6 +203,12 @@ export function createNetSystem(ctx) {
     hostCars: false,
     /** The guest's own town cars, hidden while the host's are drawn from `cars` rows (put back on leaving). */
     hiddenCars: /** @type {THREE.Object3D[]} */ ([]),
+    /** The host sends the `flyers` kind (an older host does not: the guest's own cows, helicopter and jets then stay). */
+    hostFlyers: false,
+    /** The guest's own cows, helicopter, jets, mothership and Spotless, hidden while the host's are drawn from `flyers` rows (put back on leaving). */
+    hiddenSky: /** @type {THREE.Object3D[]} */ ([]),
+    /** Seconds since the guest's own sky was last held back (it is checked a few times a second). */
+    skyHideAcc: 1,
     hudHtml: '',
     hurtFlip: false,
     peerMission: /** @type {{id: string, value: number, goal: number, left: number}|null} */ (null),
@@ -386,6 +394,7 @@ export function createNetSystem(ctx) {
     S.predStats = { snaps: 0, blends: 0, last: 0, worst: 0 };
     S.peerHp.clear();
     S.hostCars = false;
+    S.hostFlyers = false;
     S.peerInv.clear();
     reviveShown.clear();
     partnerRows.clear();
@@ -1487,6 +1496,35 @@ export function createNetSystem(ctx) {
   }
 
   /**
+   * The mothership, Captain Spotless, the news helicopter, the GHOST jets and
+   * the cows as `flyers` rows (at most 14, most important first), built only
+   * while a guest is in the room. Each system hands over read-only state; the
+   * cows and the helicopter always exist, the rest only while they are out.
+   * @returns {number[][]}
+   */
+  function flyerRows() {
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    /** @type {number[][]} */
+    const out = [];
+    const sys = ctx.systems;
+    /** @param {number} type @param {number} index @param {{x: number, y: number, z: number}} s @param {{yaw: number, pitch: number, roll: number}} e @param {number} state @param {number} a */
+    const add = (type, index, s, e, state, a) => {
+      if (out.length < LIMITS.maxFlyers) out.push(flyerRow(type, index, { x: s.x, y: s.y, z: s.z, state, a }, e, clamp));
+    };
+    const mother = sys.mothership && sys.mothership.replicaState();
+    if (mother) add(FLYER.mothership, 0, mother, eulerYXZ(mother.quaternion), motherState(mother.phase), 0);
+    const cs = sys.cleaner && sys.cleaner.replicaState();
+    if (cs) add(FLYER.spotless, 0, { x: cs.x, y: 0, z: cs.z }, { yaw: cs.yaw, pitch: 0, roll: 0 }, 0, cs.u);
+    const chopper = sys.newsChopper && sys.newsChopper.replicaState();
+    if (chopper) add(FLYER.chopper, 0, chopper, eulerYXZ(chopper.quaternion), chopper.chasing ? 1 : 0, 0);
+    const jets = sys.airSupport && sys.airSupport.replicaState();
+    if (jets) for (const j of jets) add(FLYER.jet, j.index, j, eulerYXZ(j.quaternion), throttleState(j.throttle), j.vis);
+    const cows = sys.cows && sys.cows.replicaState();
+    if (cows) for (const c of cows) add(FLYER.cow, c.index, c, eulerYXZ(c.quaternion), c.lifted ? 1 : 0, headDown(c.headY));
+    return out;
+  }
+
+  /**
    * Patient Zero's original and its clones as `replicator` and `clones` rows,
    * built only while a guest is in the room and one of them is on the field.
    * @returns {{replicator: number[][], clones: number[][]}}
@@ -1567,6 +1605,7 @@ export function createNetSystem(ctx) {
     const giants = live ? giantRows() : [];
     const replica = live ? replicaRows() : { replicator: [], clones: [] };
     const figures = live ? figureRows() : [];
+    const flyers = live ? flyerRows() : [];
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
@@ -1577,6 +1616,7 @@ export function createNetSystem(ctx) {
       ...(replica.replicator.length ? { replicator: replica.replicator } : {}),
       ...(replica.clones.length ? { clones: replica.clones } : {}),
       ...(figures.length ? { figures } : {}),
+      ...(flyers.length ? { flyers } : {}),
       ...(live ? worldRows(h) : {})
     };
   }
@@ -1657,6 +1697,7 @@ export function createNetSystem(ctx) {
       }
       if (buffer.push(msg, performance.now() / 1000).ok) {
         S.hostCars = Array.isArray(msg.cars);
+        if (Array.isArray(msg.flyers)) S.hostFlyers = true;
         S.aimRows = Array.isArray(msg.aim) ? msg.aim : null;
         S.holeRow = Array.isArray(msg.hole) && Array.isArray(msg.hole[0]) ? msg.hole[0] : null;
         S.holeFresh = true;
@@ -1803,6 +1844,7 @@ export function createNetSystem(ctx) {
     const { controls, camera, renderer } = Sim.three;
     if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
     showTownCars();
+    showLocalSky();
     // Let go of the input pipeline, unless a local Hero run holds it (it cannot
     // while this is a peer, but leaving must never take Roger's keys away).
     if (!(ctx.Hero && ctx.Hero.active)) ctx.systems.playerInput.detachInput();
@@ -1863,6 +1905,9 @@ export function createNetSystem(ctx) {
     // HAVOC's heat and visor and a samurai's slash trail are made for each figure.
     const fig = obj.userData.figure;
     if (fig && fig.own) for (const m of fig.own) m.dispose();
+    // A GHOST jet's cloak materials are made for each jet.
+    const fly = obj.userData.flyer;
+    if (fly && fly.own) for (const m of fly.own) m.dispose();
   }
 
   /** @type {{template: any, joints: any}|null} the real Terminator, built once per session (its geometry and materials are shared by every proxy) */
@@ -2089,6 +2134,99 @@ export function createNetSystem(ctx) {
     }
   }
 
+  /** @type {{jet: any, chopper: any, mothership: any, cow: any, spotless: any}} the real jet, helicopter, mothership, cow and Spotless builders, each made on first sight (geometry and materials released in `clearProxies`; the single helicopter, ship and giant are kept and re-used) */
+  const flyerKits = { jet: null, chopper: null, mothership: null, cow: null, spotless: null };
+
+  /**
+   * One jet, helicopter, mothership, cow or Captain Spotless for a proxy, from
+   * the host's own builders (`airSupport`, `newsChopper`, `mothership`, `cows`,
+   * `cleaner` `.buildGuestModel`). Null when the system is absent.
+   * @param {number} type FLYER.*
+   * @param {number} index The actor's index within its type.
+   * @returns {{root: THREE.Object3D, data: any}|null}
+   */
+  function flyerFigure(type, index) {
+    const sys = ctx.systems;
+    /** @param {{geometries: THREE.BufferGeometry[], materials: THREE.Material[]}} unit */
+    const keep = (unit) => { for (const g of unit.geometries) keepGeo(g); for (const m of unit.materials) keepMat(m); };
+    if (type === FLYER.jet) {
+      let kit = flyerKits.jet;
+      if (!kit) {
+        kit = sys.airSupport && sys.airSupport.buildGuestModel ? sys.airSupport.buildGuestModel() : null;
+        if (!kit) return null;
+        keep(kit);
+        flyerKits.jet = kit;
+      }
+      const look = kit.build();
+      return { root: look.group, data: { type, look, reach: kit.reach, index, own: look.materials } };
+    }
+    if (type === FLYER.cow) {
+      let kit = flyerKits.cow;
+      if (!kit) {
+        kit = sys.cows && sys.cows.buildGuestModel ? sys.cows.buildGuestModel() : null;
+        if (!kit) return null;
+        keep(kit);
+        flyerKits.cow = kit;
+      }
+      const root = kit.build(index);
+      return { root, data: { type, head: root.userData.head } };
+    }
+    const name = type === FLYER.chopper ? 'chopper' : type === FLYER.mothership ? 'mothership' : 'spotless';
+    let unit = flyerKits[name];
+    if (!unit) {
+      const owner = type === FLYER.chopper ? sys.newsChopper : type === FLYER.mothership ? sys.mothership : sys.cleaner;
+      unit = owner && owner.buildGuestModel ? owner.buildGuestModel() : null;
+      if (!unit) return null;
+      keep(unit);
+      // The helicopter's livery is a texture; it is released with the materials.
+      if (unit.textures) for (const tx of unit.textures) keepMat(/** @type {any} */ (tx));
+      flyerKits[name] = unit;
+    }
+    return { root: unit.root, data: { type, unit } };
+  }
+
+  /**
+   * Poses a flyer proxy from an interpolated `flyers` row.
+   * @param {THREE.Object3D} obj The proxy.
+   * @param {number[]} row
+   * @param {number} t Snapshot clock, seconds.
+   * @returns {void}
+   */
+  function poseFlyerProxy(obj, row, t) {
+    poseFlyer(obj, row);
+    const fd = obj.userData.flyer;
+    if (!fd) return;
+    const type = row[1];
+    if (type === FLYER.jet) {
+      const L = fd.look;
+      const jl = jetLook(row[9], row[8], t, fd.index, 0.85 + 0.3 * (0.5 + 0.5 * Math.sin(t * 40 + fd.index)), fd.reach);
+      L.uniforms.uReveal.value = jl.reveal;
+      L.uniforms.uEdge.value = 1;
+      L.uniforms.uTime.value = t + fd.index * 3.1;
+      L.uniforms.uShell.value = 0.5;
+      for (const f of L.flames) { f.visible = jl.shown; f.scale.set(jl.flameWidth, jl.flameWidth, jl.flameLength); }
+      for (const l of L.lights) l.visible = jl.shown;
+      L.strobe.visible = jl.strobe;
+    } else if (type === FLYER.chopper) {
+      const u = fd.unit;
+      const cl = chopperLook(row[8], t, CHOPPER.storm);
+      u.rotor.rotation.y = cl.rotor;
+      u.tailRotor.rotation.x = cl.tail;
+      u.beacon.visible = cl.beacon;
+      u.beam.rotation.set(cl.beamTilt, 0, 0);
+      u.beam.material.opacity = cl.beamOpacity;
+    } else if (type === FLYER.cow) {
+      if (fd.head) fd.head.position.y = headHeight(row[9]);
+    } else if (type === FLYER.spotless) {
+      const u = fd.unit;
+      const sl = spotlessLook(row[9], u.stride);
+      u.legs[0].rotation.x = sl.left;
+      u.legs[1].rotation.x = sl.right;
+      u.waveMat.opacity = sl.wave;
+      u.wave.rotation.z = t * 1.5;
+    }
+  }
+
   /** @type {Map<number, THREE.Object3D>} the real car, one template per body colour, built on first sight (shared geometry; each colour's paint is released in `clearProxies`) */
   const carKits = new Map();
 
@@ -2188,6 +2326,17 @@ export function createNetSystem(ctx) {
       } else {
         const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(0.4, 1.6, 4, 8)), mat(colour === FIGURE.samurai ? 0x8e1b1b : colour === FIGURE.havoc ? 0x4a5240 : 0x8d8780));
         body.position.y = 1.2;
+        g.add(body);
+      }
+    } else if (kind === 'flyers') {
+      // `colour` is the actor type, `variant` its index within the type.
+      const fig = flyerFigure(colour, variant);
+      if (fig) {
+        g.rotation.order = 'YXZ';
+        g.add(fig.root);
+        g.userData.flyer = fig.data;
+      } else {
+        const body = new THREE.Mesh(keepGeo(new THREE.BoxGeometry(4, 1.5, 8)), mat(0x9aa4b2));
         g.add(body);
       }
     } else if (kind === 'vehicles') {
@@ -2458,6 +2607,7 @@ export function createNetSystem(ctx) {
     if (figureKits.samurai) figureKits.samurai.release();
     figureKits.hank = figureKits.havoc = figureKits.samurai = null;
     aliensKit.alien = aliensKit.saucer = null;
+    flyerKits.jet = flyerKits.chopper = flyerKits.mothership = flyerKits.cow = flyerKits.spotless = null;
   }
 
   /**
@@ -2625,6 +2775,35 @@ export function createNetSystem(ctx) {
     S.hiddenCars.length = 0;
   }
 
+  /**
+   * While the host's cows, helicopter, jets, mothership and Captain Spotless
+   * arrive as `flyers` rows, the guest's own (a herd grazing, a helicopter
+   * circling, jets arriving on their own clock) would stand under them: they
+   * are held back, a few times a second so a system that shows its own
+   * again (a reset) does not slip through, and put back by `showLocalSky` on
+   * leaving. An older host sends no `flyers`, and the guest's own stay.
+   * @param {number} dt
+   * @returns {void}
+   */
+  function hideLocalSky(dt) {
+    if (!S.hostFlyers) return;
+    S.skyHideAcc += dt;
+    if (S.skyHideAcc < 0.5) return;
+    S.skyHideAcc = 0;
+    const s = ctx.systems;
+    for (const owner of [s.cows, s.newsChopper, s.airSupport, s.mothership, s.cleaner]) {
+      if (!owner || !owner.localRoots) continue;
+      for (const m of owner.localRoots()) if (m.visible) { m.visible = false; S.hiddenSky.push(m); }
+    }
+  }
+
+  /** The guest's own cows, helicopter, jets, mothership and Spotless, back (leaving the host's view). @returns {void} */
+  function showLocalSky() {
+    for (const m of S.hiddenSky) m.visible = true;
+    S.hiddenSky.length = 0;
+    S.skyHideAcc = 1;
+  }
+
   /** @param {number} dt */
   function updatePeer(dt) {
     if (!S.peerReadyShown || !S.proxyRoot || !S.client) return;
@@ -2673,6 +2852,7 @@ export function createNetSystem(ctx) {
     }
     for (const [id, to] of S.altTarget) if (!S.altNow.has(id)) S.altNow.set(id, to);
     hideTownCars();
+    hideLocalSky(dt);
     for (const [kind, sampled] of Object.entries(s.kinds)) {
       // The tornado is not a proxy: the guest's own funnels draw it (funnels.drive above).
       if (kind === 'tornadoes') continue;
@@ -2688,13 +2868,15 @@ export function createNetSystem(ctx) {
       for (const [id, row] of rows) {
         const mine = kind === 'players' && String(id) === S.myId;
         let obj = map.get(id);
-        if (!obj) { obj = makeProxy(kind, id, kind === 'cars' ? row[7] : kind === 'figures' ? row[1] : 0, kind === 'figures' ? row[8] : 0); map.set(id, obj); S.proxyRoot.add(obj); }
+        if (!obj) { obj = makeProxy(kind, id, kind === 'cars' ? row[7] : kind === 'figures' || kind === 'flyers' ? row[1] : 0, kind === 'figures' ? row[8] : kind === 'flyers' ? id - flyerId(row[1], 0) : 0); map.set(id, obj); S.proxyRoot.add(obj); }
         if (kind === 'cars') {
           poseCar(obj, row);
         } else if (kind === 'giants') {
           poseGiant(obj, row, dt, s.t);
         } else if (kind === 'figures') {
           poseFigure(obj, row, dt, s.t);
+        } else if (kind === 'flyers') {
+          poseFlyerProxy(obj, row, s.t);
         } else if (kind === 'replicator') {
           const rd = obj.userData.replica;
           if (rd) {
@@ -3049,6 +3231,8 @@ export function createNetSystem(ctx) {
   return {
     initNet, updateNet, applySky, resetNet, disposeNet,
     isPeerView: () => S.role === 'peer' && S.peerReadyShown,
+    /** @returns {boolean} the guest is drawing the host's cows, helicopter, jets, mothership and Spotless (its own stand still). */
+    isSkyMirrored: () => S.role === 'peer' && S.peerReadyShown && S.hostFlyers,
     fxLive,
     /** @returns {number} `fx` rows waiting for the next snapshot (HAVOC's rounds give way when many wait). */
     fxPending: () => fxRing.pending(),
