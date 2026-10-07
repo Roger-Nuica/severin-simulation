@@ -11,6 +11,7 @@ import { GUEST_WEAPONS, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrig
 import { createMirror } from './mirror.js';
 import { createFunnels } from './funnels.js';
 import { createSky } from './skyMirror.js';
+import { explosionParams, createSoundGate } from './explosionFx.js';
 import { flameWanted, flameMuzzle } from './mirrorRules.js';
 import { HERO } from '../hero/config.js';
 import { JETPACK } from '../hero/jetpack.js';
@@ -1523,6 +1524,8 @@ export function createNetSystem(ctx) {
     }
   }
 
+  const explosionSound = createSoundGate();
+
   /** @param {any} msg */
   function peerMessage(msg) {
     if ((msg.type === 'snapshot' || msg.type === 'event') && msg.v !== PROTOCOL_VERSION) {
@@ -1598,8 +1601,15 @@ export function createNetSystem(ctx) {
         break;
       case 'mission': S.peerMission = { id: String(d.id), value: Number(d.value), goal: Number(d.goal), left: Number(d.left) }; break;
       case 'score': if (Number(d.id) === Number(S.myId)) say(`+${Number(d.points) || 0}`); break;
+      case 'explosion': {
+        // The host's blast, drawn here and nowhere else (cosmetic: no damage, no shake, no bus event).
+        const p = explosionParams(d);
+        if (!p) { if (dbg) dbg.eventIgnored('explosion(invalid)'); break; }
+        ctx.systems.explosions.cosmeticExplosion(p.x, p.y, p.z, p.strength, explosionSound.allow(performance.now()));
+        break;
+      }
       default:
-        // No handler: the event is dropped here (`explosion` today).
+        // No handler: the event is dropped here.
         if (dbg) dbg.eventIgnored(String(msg.kind));
     }
   }
