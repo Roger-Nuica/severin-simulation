@@ -3,7 +3,9 @@ import * as THREE from 'three';
 import { createSoftDotTexture } from '../utils/textures.js';
 import { createParticlePool, pointScaleFor, markPoolDirty, disposeParticlePool } from './particlePool.js';
 import { GUNNER, caught, turnToward, lead, nextPhase } from './gunner/config.js';
-import { buildGunnerKit, buildGunner } from './gunner/model.js';
+import { buildGunnerKit, buildGunner, buildRoundMeshes } from './gunner/model.js';
+import { createWeaponFx } from './hero/weaponFx.js';
+import { roundTo, ROUND_EVERY, ROUND_BACKLOG } from './net/enemyFx.js';
 
 /**
  * ===========================================================================
@@ -137,33 +139,16 @@ export function createGunnerSystem(ctx) {
   const red = new THREE.Color(3, 0.55, 0.18);
   const cyan = new THREE.Color(0.55, 2.2, 3.4);
   const bubbleUniforms = { uTime: { value: 0 }, uAlpha: { value: 0 } };
+  /** Announces some of the rounds to the co-op guest (hero/weaponFx.js); nothing happens outside a room with a guest. */
+  const weaponFx = createWeaponFx(ctx);
+  const fxEnd = { x: 0, y: 0, z: 0 };
+  let fxCount = 0;
 
   /** @returns {void} */
   function initGunners() {
     kit = buildGunnerKit();
-    // A round: a slug with a long tracer behind it.
-    const headGeo = new THREE.CapsuleGeometry(0.06, 0.42, 3, 8).rotateX(Math.PI / 2);
-    const trailGeo = new THREE.CylinderGeometry(0.035, 0.008, 1, 5, 1, true).rotateX(Math.PI / 2).translate(0, 0, -0.5);
-    ownGeometries.push(headGeo, trailGeo);
-    const headMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
-    const trailMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
-    });
-    ownMaterials.push(headMat, trailMat);
-    heads = new THREE.InstancedMesh(headGeo, headMat, N);
-    trails = new THREE.InstancedMesh(trailGeo, trailMat, N);
-    for (const mesh of [heads, trails]) {
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      mesh.frustumCulled = false;
-      mesh.castShadow = false;
-      for (let i = 0; i < N; i++) {
-        mesh.setMatrixAt(i, zero);
-        mesh.setColorAt(i, red);
-      }
-      Sim.three.scene.add(mesh);
-    }
-    heads.name = 'havoc_rounds';
-    trails.name = 'havoc_tracers';
+    // A round: a slug with a long tracer behind it (gunner/model.js, shared with the co-op guest's drawing).
+    ({ heads, trails } = buildRoundMeshes(Sim.three.scene, N, red, { geos: ownGeometries, mats: ownMaterials }));
 
     // The sphere of slowed time round Roger: a rim of light with ripples running over it.
     const bubbleGeo = new THREE.SphereGeometry(GUNNER.catchRadius, 40, 24);
@@ -420,6 +405,11 @@ export function createGunnerSystem(ctx) {
     if (heads?.instanceColor) heads.instanceColor.needsUpdate = true;
     if (trails?.instanceColor) trails.instanceColor.needsUpdate = true;
     roundsAlive = true;
+    // Last: the co-op guest sees one round in ROUND_EVERY (net/enemyFx.js `round`), and none while rows wait; one read outside a room.
+    const net = ctx.systems.net;
+    if (net && net.fxLive() && ++fxCount % ROUND_EVERY === 0 && net.fxPending() < ROUND_BACKLOG) {
+      weaponFx.announce('round', from, roundTo(fxEnd, from, dir), '', 0);
+    }
   }
 
   /** @param {Unit} u @returns {THREE.Vector3} his chest, in v3 */

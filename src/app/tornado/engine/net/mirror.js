@@ -4,6 +4,8 @@ import { createBullets } from '../hero/bullets.js';
 import { newFxQueue, dueFx } from './fxQueue.js';
 import { unpackExtra } from './fxOut.js';
 import { boltFromRow, empFromRow } from './skyFx.js';
+import { rayFromRow, roundFromRow, missileFromRow } from './enemyFx.js';
+import { createRoundView } from '../gunner/roundView.js';
 import { playedKind, shotEnd, takeRows, cueDue, CUE_GAP, RAIL_POWER, beamLook } from './mirrorRules.js';
 import { HERO } from '../hero/config.js';
 import { buildBeamMeshes, placeBeamMesh, fadeBeamMeshes, buildRingMeshes, placeRingMeshes, ringsTotal } from '../hero/plasmaBeam.js';
@@ -34,6 +36,13 @@ import { buildBeamMeshes, placeBeamMesh, fadeBeamMeshes, buildRingMeshes, placeR
  * no `plasmaHit`, no damage, no score, no neutralise or chip, and no shake or
  * flash on this camera from someone else's beam (owner decision 10). A small
  * fixed set of `BEAMS` is made on the first one and released with the session.
+ *
+ * The enemies' projectiles (`ray`, `round`, `missile`, net/enemyFx.js) are the aliens'
+ * and HAVOC's own builders run render-only: `aliens.showRay` and `showTracker` (the
+ * bolt, lance and tracking laser with no hit to deliver), `aliens.showMissile` (the
+ * missile on an eased straight path, never homing, with a cosmetic burst) and
+ * `gunner/roundView.js` (the round meshes flying a straight line). None tests, hurts,
+ * pushes or scores (R-053); sounds are capped per kind by `CUE_GAP`.
  *
  * One small pool of rounds per instance, made on first use and released with
  * the session (R-047, R-048): `ROUNDS` bullets and `CASINGS` casings are about
@@ -72,7 +81,11 @@ export function createMirror(ctx) {
   /** The landing of each round in flight: one record per pool slot, in firing order (the pool reuses its slots round-robin). */
   const hits = Array.from({ length: ROUNDS }, () => ({ kind: 'ground', obj: null, at: new THREE.Vector3() }));
   let nextHit = 0;
-  const lastCue = { bullet: -Infinity, rail: -Infinity, plasma: -Infinity, mega: -Infinity, holeShot: -Infinity, bolt: -Infinity, emp: -Infinity };
+  const lastCue = { bullet: -Infinity, rail: -Infinity, plasma: -Infinity, mega: -Infinity, holeShot: -Infinity, bolt: -Infinity, emp: -Infinity, ray: -Infinity, round: -Infinity, missile: -Infinity };
+  /** HAVOC's announced rounds (made on the first one). @type {ReturnType<typeof createRoundView>|null} */
+  let roundView = null;
+  let roundLands = 0;
+  const landAt = new THREE.Vector3();
   /**
    * The beams (made on first use): the meshes, and per beam the seconds it burns, its width and its ends.
    * @type {{beam: THREE.Group, splash: THREE.Mesh, t: number, life: number, width: number, mega: boolean, from: THREE.Vector3, to: THREE.Vector3}[]|null}
@@ -261,6 +274,69 @@ export function createMirror(ctx) {
   }
 
   /**
+   * Whether a cue of `kind` may sound now (and notes it): the per-kind rate cap.
+   * @param {'ray'|'round'|'missile'} kind
+   * @returns {boolean}
+   */
+  function soundDue(kind) {
+    const now = performance.now() / 1000;
+    if (!cueDue(lastCue[kind], now, CUE_GAP[kind])) return false;
+    lastCue[kind] = now;
+    return true;
+  }
+
+  /**
+   * An alien's ray bolt, a ship's lance or a tracking laser burst, drawn by the aliens' own
+   * builders (`aliens.showRay`, `showTracker`): no hit, no harm (R-053). The sounds are rate-capped.
+   * @param {ReadonlyArray<number>} row
+   * @returns {void}
+   */
+  function enemyRay(row) {
+    const r = rayFromRow(row);
+    const aliens = ctx.systems.aliens;
+    if (!r || !aliens) return;
+    const sound = soundDue('ray');
+    from.set(r.from.x, r.from.y, r.from.z);
+    if (r.tracker) { aliens.showTracker(from, r.foot, r.sub === 4, sound); return; }
+    to.set(r.to.x, r.to.y, r.to.z);
+    aliens.showRay(from, to, r.sub, sound);
+  }
+
+  /**
+   * One of HAVOC's announced rounds, flown straight to its end with the gunner's own round
+   * meshes; a spark where one ends on the ground (room permitting). One burst sound a second.
+   * @param {ReadonlyArray<number>} row
+   * @returns {void}
+   */
+  function enemyRound(row) {
+    const r = roundFromRow(row);
+    if (!r) return;
+    if (!roundView) {
+      roundView = createRoundView(ctx, (x, y, z) => {
+        if (y > 0.5 || ++roundLands % 2 !== 0 || !sparkGate() || !ctx.systems.explosions) return;
+        ctx.systems.explosions.spawnImpactBurst(landAt.set(x, Math.max(0.1, y), z), 0.2);
+      });
+    }
+    roundView.fire(r.from, r.to);
+    if (!soundDue('round') || !ctx.systems.gunnerSound) return;
+    from.set(r.from.x, r.from.y, r.from.z);
+    ctx.systems.gunnerSound.playBurst(Math.max(0, 1 - ctx.Sim.three.camera.position.distanceTo(from) / 140), 1);
+  }
+
+  /**
+   * An alien ship's homing missile: the same model and trail flown on an eased path to where the
+   * host expected it to arrive, then a cosmetic burst (`aliens.showMissile`); it homes on nothing here.
+   * @param {ReadonlyArray<number>} row
+   * @returns {void}
+   */
+  function enemyMissile(row) {
+    const m = missileFromRow(row);
+    const aliens = ctx.systems.aliens;
+    if (!m || !aliens) return;
+    aliens.showMissile(m.from, m.to, m.seconds, soundDue('missile'));
+  }
+
+  /**
    * Plays one due row.
    * @param {ReadonlyArray<number>} row [id, kind, shooter, x, y, z, a, b, c, extra]
    * @returns {void}
@@ -270,6 +346,9 @@ export function createMirror(ctx) {
     if (!kind) return;
     if (kind === 'bolt') { skyBolt(row); return; }
     if (kind === 'emp') { skyEmp(row); return; }
+    if (kind === 'ray') { enemyRay(row); return; }
+    if (kind === 'round') { enemyRound(row); return; }
+    if (kind === 'missile') { enemyMissile(row); return; }
     from.set(row[3], row[4], row[5]);
     const b = rowTo.set(row[6], row[7], row[8]);
     const { hit, extra } = unpackExtra(row[9]);
@@ -295,6 +374,7 @@ export function createMirror(ctx) {
         for (const row of r.due) play(row);
       }
       if (rounds) rounds.update(dt, 1, noLanding);
+      if (roundView) roundView.update(dt);
       stepBeams(dt);
     },
     drawOwn(kind, a, b) {
@@ -314,13 +394,16 @@ export function createMirror(ctx) {
     reset() {
       queue = newFxQueue();
       if (rounds) rounds.clear();
-      lastCue.bullet = lastCue.rail = lastCue.plasma = lastCue.mega = lastCue.holeShot = lastCue.bolt = lastCue.emp = -Infinity;
+      if (roundView) roundView.clear();
+      lastCue.bullet = lastCue.rail = lastCue.plasma = lastCue.mega = lastCue.holeShot = lastCue.bolt = lastCue.emp = lastCue.ray = lastCue.round = lastCue.missile = -Infinity;
       hideBeams();
     },
     dispose() {
       queue = newFxQueue();
       if (rounds) rounds.dispose();
       rounds = null;
+      if (roundView) roundView.dispose();
+      roundView = null;
       if (beams) for (const e of beams) { ctx.Sim.three.scene.remove(e.beam, e.splash); }
       if (rings) for (const r of rings) ctx.Sim.three.scene.remove(r);
       for (const g of geos) g.dispose();

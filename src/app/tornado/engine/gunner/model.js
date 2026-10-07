@@ -208,3 +208,42 @@ export function buildGunner(kit) {
   root.scale.setScalar(GUNNER.height / 2.38);
   return { root, body, legs, guns, heat, visor, marker, own: [heat, visor, markerMat] };
 }
+
+/**
+ * HAVOC's rounds as two instanced meshes, a slug and its long tracer, all hidden: `count` slots in
+ * `colour`. The host's gunner (engine/gunner.js) and a co-op guest's drawing of his stream
+ * (gunner/roundView.js) both build them here, so a round looks the same on both screens.
+ * Geometries and materials are pushed to `own` for the caller to dispose.
+ * @param {THREE.Scene} scene
+ * @param {number} count
+ * @param {THREE.Color} colour
+ * @param {{geos: THREE.BufferGeometry[], mats: THREE.Material[]}} own
+ * @returns {{heads: THREE.InstancedMesh, trails: THREE.InstancedMesh}}
+ */
+export function buildRoundMeshes(scene, count, colour, own) {
+  // A round: a slug with a long tracer behind it.
+  const headGeo = new THREE.CapsuleGeometry(0.06, 0.42, 3, 8).rotateX(Math.PI / 2);
+  const trailGeo = new THREE.CylinderGeometry(0.035, 0.008, 1, 5, 1, true).rotateX(Math.PI / 2).translate(0, 0, -0.5);
+  own.geos.push(headGeo, trailGeo);
+  const headMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+  const trailMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+  });
+  own.mats.push(headMat, trailMat);
+  const heads = new THREE.InstancedMesh(headGeo, headMat, count);
+  const trails = new THREE.InstancedMesh(trailGeo, trailMat, count);
+  const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  for (const mesh of [heads, trails]) {
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    mesh.castShadow = false;
+    for (let i = 0; i < count; i++) {
+      mesh.setMatrixAt(i, zero);
+      mesh.setColorAt(i, colour);
+    }
+    scene.add(mesh);
+  }
+  heads.name = 'havoc_rounds';
+  trails.name = 'havoc_tracers';
+  return { heads, trails };
+}

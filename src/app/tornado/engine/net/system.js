@@ -2525,6 +2525,8 @@ export function createNetSystem(ctx) {
     initNet, updateNet, applySky, resetNet, disposeNet,
     isPeerView: () => S.role === 'peer' && S.peerReadyShown,
     fxLive,
+    /** @returns {number} `fx` rows waiting for the next snapshot (HAVOC's rounds give way when many wait). */
+    fxPending: () => fxRing.pending(),
     pickTarget, catchPlayer, interceptRogerDeath, coopActive,
     notifyDamage, hitGuestsArea, splashGuests, hurtRay, hurtSector, hurtArea,
     /** For tests and the HUD. */

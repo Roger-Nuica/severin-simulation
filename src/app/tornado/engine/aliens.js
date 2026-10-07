@@ -631,6 +631,7 @@ export function createAliensSystem(ctx) {
     api.updateMutants(dt);
     for (const alien of S.aliens) api.updateAlien(alien, dt);
     api.updateRays(dt);
+    api.stepMirrorTrackers(dt);
     api.updateMissiles(dt);
   }
 
@@ -785,6 +786,8 @@ export function createAliensSystem(ctx) {
 
   return {
     initAliens, updateAliens, abductedCount, markers, riftShip, riftHold, riftDown,
+    /** The co-op guest's drawing of the host's shots, laser bursts and missiles (net/mirror.js): the same builders, no hit, no homing, no harm (R-053). */
+    showRay: api.showRay, showTracker: api.showTracker, showMissile: api.showMissile,
     /** For testing from the console: the ship's phase; a count of people taken set by hand, and its lift-off forced. */
     debugShip: (/** @type {number|undefined} */ taken, /** @type {boolean|undefined} */ lift) => {
       if (taken !== undefined) S.state.abducted = taken;
