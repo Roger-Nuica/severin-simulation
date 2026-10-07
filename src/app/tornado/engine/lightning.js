@@ -485,7 +485,7 @@ export function createLightningSystem(ctx) {
     const proximity = 1 - THREE.MathUtils.clamp(distance / 220, 0, 1);
     spawnBolt(start, end, power, rail);
     ctx.systems.weather.onLightningStrike(start, end, power);
-    lightUp(end, power, distance, 1 - proximity, rail);
+    lightUp(end, power, distance, 1 - proximity, rail, still);
   }
 
   /**
@@ -496,7 +496,7 @@ export function createLightningSystem(ctx) {
    * @param {number} muffle 0..1
    * @returns {void}
    */
-  function lightUp(end, power, distance, muffle, rail = false) {
+  function lightUp(end, power, distance, muffle, rail = false, still = false) {
     if (Lightning.overlay) Lightning.overlay.style.background = LIGHTNING_OVERLAY_CSS;
     Lightning.flashLight.position.set(end.x, Math.max(end.y, 4) + 12, end.z);
     // The railgun's flash is a short spike on a limited light, not the storm's
