@@ -79,7 +79,7 @@ test('clear empties the ring and zeroes the counters but never repeats an id', (
 });
 
 test('every kind the weapons announce is a known fx kind', () => {
-  for (const k of ['bullet', 'rail', 'plasma', 'mega', 'holeShot', 'cut']) assert.ok(FX_KINDS.includes(k), k);
+  for (const k of ['bullet', 'rail', 'plasma', 'mega', 'holeShot', 'cut', 'bolt', 'emp']) assert.ok(FX_KINDS.includes(k), k);
 });
 
 test('state row builders clamp into the validator ranges and never emit NaN', () => {

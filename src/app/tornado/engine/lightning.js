@@ -1,4 +1,6 @@
 // @ts-check
+import { createWeaponFx } from './hero/weaponFx.js';
+import { boltFxTo } from './net/skyFx.js';
 import * as THREE from 'three';
 import { LIGHTING } from './lightingTuning.js';
 
@@ -112,6 +114,22 @@ export function createLightningSystem(ctx) {
   };
 
   ctx.Lightning = Lightning;
+
+  /** Announces landed bolts to the co-op guest (hero/weaponFx.js); nothing is built outside a room with a guest. */
+  const weaponFx = createWeaponFx(ctx);
+  const fxTo = { x: 0, y: 0, z: 0 };
+
+  /**
+   * A bolt that has just landed, for the guest's screen (net/skyFx.js `bolt`).
+   * @param {THREE.Vector3} end
+   * @param {number} power 0..1
+   * @returns {void}
+   */
+  function announceBolt(end, power) {
+    const net = ctx.systems.net;
+    if (!net || !net.fxLive()) return;
+    weaponFx.announce('bolt', end, boltFxTo(fxTo, power), '');
+  }
 
   /** @returns {void} */
   function initLightning() {
@@ -429,6 +447,7 @@ export function createLightningSystem(ctx) {
     const muffle = 1 - proximity;
 
     spawnBolt(start, end, power);
+    announceBolt(end, power);
     // Light shafts fanning down from the bolt (weather.js). Looked up
     // lazily: the weather system is constructed after this one.
     ctx.systems.weather.onLightningStrike(start, end, power);
@@ -484,6 +503,8 @@ export function createLightningSystem(ctx) {
     const distance = Sim.three.camera.position.distanceTo(end);
     const proximity = 1 - THREE.MathUtils.clamp(distance / 220, 0, 1);
     spawnBolt(start, end, power, rail);
+    // A rail bolt already travels as the `rail` row, and a mirrored one (`still`) is the partner's.
+    if (!rail && !still) announceBolt(end, power);
     ctx.systems.weather.onLightningStrike(start, end, power);
     lightUp(end, power, distance, 1 - proximity, rail, still);
   }
@@ -617,8 +638,11 @@ export function createLightningSystem(ctx) {
     // trigger, so a run does not open with a strike already overdue.
     const daytime = !!(ctx.DayNight && ctx.DayNight.day);
     const calm = Sim.state.stormRamp <= 0;
-    if (!daytime && !calm) Lightning.timeToNextStrike -= dt;
-    if (!daytime && !calm && Lightning.timeToNextStrike <= 0) {
+    // The co-op guest's screen shows the host's bolts (net/skyFx.js): its own random
+    // ground strikes would double them (and hit its own idle town), so they are off there.
+    const mirrored = !!(ctx.systems.net && ctx.systems.net.isPeerView());
+    if (!daytime && !calm && !mirrored) Lightning.timeToNextStrike -= dt;
+    if (!daytime && !calm && !mirrored && Lightning.timeToNextStrike <= 0) {
       triggerLightningStrike();
       // Raised again, on request for more of it: ~1.6/s at the EF4 default
       // (0.75) and ~2.5/s at EF5, still a strike every couple of seconds on a
@@ -638,7 +662,7 @@ export function createLightningSystem(ctx) {
       Lightning.restrikes[i] -= dt;
       if (Lightning.restrikes[i] > 0) continue;
       Lightning.restrikes.splice(i, 1);
-      if (!daytime && !calm) triggerLightningStrike();
+      if (!daytime && !calm && !mirrored) triggerLightningStrike();
     }
     // Flickers inside the cloud and crawlers along its base, on their own,
     // looser schedule.

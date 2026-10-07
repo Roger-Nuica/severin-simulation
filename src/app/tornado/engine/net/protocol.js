@@ -75,7 +75,7 @@ export const EVENT_TYPES = ['welcome', 'announce', 'notice', 'explosion', 'playe
  * Append only: an index is part of the wire contract. A row whose kind is not
  * in this list (a newer host) is dropped by `sanitizeFx`, never an error.
  */
-export const FX_KINDS = ['bullet', 'rail', 'plasma', 'mega', 'fire', 'holeShot', 'cut', 'blast'];
+export const FX_KINDS = ['bullet', 'rail', 'plasma', 'mega', 'fire', 'holeShot', 'cut', 'blast', 'bolt', 'emp'];
 
 /** Column order of an `fx` row: [id, kind, shooter, x, y, z, a, b, c, extra]. */
 export const FX_COLUMNS = ['id', 'kind', 'shooter', 'x', 'y', 'z', 'a', 'b', 'c', 'extra'];

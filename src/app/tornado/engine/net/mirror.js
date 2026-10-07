@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { createBullets } from '../hero/bullets.js';
 import { newFxQueue, dueFx } from './fxQueue.js';
 import { unpackExtra } from './fxOut.js';
+import { boltFromRow, empFromRow } from './skyFx.js';
 import { playedKind, shotEnd, takeRows, cueDue, CUE_GAP, RAIL_POWER, beamLook } from './mirrorRules.js';
 import { HERO } from '../hero/config.js';
 import { buildBeamMeshes, placeBeamMesh, fadeBeamMeshes, buildRingMeshes, placeRingMeshes, ringsTotal } from '../hero/plasmaBeam.js';
@@ -71,7 +72,7 @@ export function createMirror(ctx) {
   /** The landing of each round in flight: one record per pool slot, in firing order (the pool reuses its slots round-robin). */
   const hits = Array.from({ length: ROUNDS }, () => ({ kind: 'ground', obj: null, at: new THREE.Vector3() }));
   let nextHit = 0;
-  const lastCue = { bullet: -Infinity, rail: -Infinity, plasma: -Infinity, mega: -Infinity, holeShot: -Infinity };
+  const lastCue = { bullet: -Infinity, rail: -Infinity, plasma: -Infinity, mega: -Infinity, holeShot: -Infinity, bolt: -Infinity, emp: -Infinity };
   /**
    * The beams (made on first use): the meshes, and per beam the seconds it burns, its width and its ends.
    * @type {{beam: THREE.Group, splash: THREE.Mesh, t: number, life: number, width: number, mega: boolean, from: THREE.Vector3, to: THREE.Vector3}[]|null}
@@ -223,6 +224,43 @@ export function createMirror(ctx) {
   }
 
   /**
+   * The host's storm bolt (random, targeted or the electric storm's) at its end point: the
+   * storm's own bolt, flash and thunder, with no camera shake (owner decision 10).
+   * Presentation only; `strikeAt` hits nobody. At most one per `CUE_GAP.bolt`.
+   * @param {ReadonlyArray<number>} row
+   * @returns {void}
+   */
+  function skyBolt(row) {
+    const b = boltFromRow(row);
+    const lightning = ctx.systems.lightning;
+    if (!b || !lightning) return;
+    const now = performance.now() / 1000;
+    if (!cueDue(lastCue.bolt, now, CUE_GAP.bolt)) return;
+    lastCue.bolt = now;
+    to.set(b.x, b.y, b.z);
+    lightning.strikeAt(to, b.power, false, true);
+  }
+
+  /**
+   * The host's EMP, drawn as its wave alone (ring, dome, flash and sounds): never the stun,
+   * the line faults or the notice. The ring is always drawn; the sounds are rate-capped.
+   * @param {ReadonlyArray<number>} row
+   * @returns {void}
+   */
+  function skyEmp(row) {
+    const e = empFromRow(row);
+    if (!e) return;
+    const now = performance.now() / 1000;
+    const sound = cueDue(lastCue.emp, now, CUE_GAP.emp);
+    if (sound) lastCue.emp = now;
+    if (e.variant === 'wave') {
+      if (ctx.systems.empCharge) ctx.systems.empCharge.showWave(e.x, e.z, sound);
+    } else if (ctx.systems.emp) {
+      ctx.systems.emp.showPulse(e.x, e.z, e.radius, e.variant === 'solar', sound);
+    }
+  }
+
+  /**
    * Plays one due row.
    * @param {ReadonlyArray<number>} row [id, kind, shooter, x, y, z, a, b, c, extra]
    * @returns {void}
@@ -230,6 +268,8 @@ export function createMirror(ctx) {
   function play(row) {
     const kind = playedKind(row[1]);
     if (!kind) return;
+    if (kind === 'bolt') { skyBolt(row); return; }
+    if (kind === 'emp') { skyEmp(row); return; }
     from.set(row[3], row[4], row[5]);
     const b = rowTo.set(row[6], row[7], row[8]);
     const { hit, extra } = unpackExtra(row[9]);
@@ -274,7 +314,7 @@ export function createMirror(ctx) {
     reset() {
       queue = newFxQueue();
       if (rounds) rounds.clear();
-      lastCue.bullet = lastCue.rail = lastCue.plasma = lastCue.mega = lastCue.holeShot = -Infinity;
+      lastCue.bullet = lastCue.rail = lastCue.plasma = lastCue.mega = lastCue.holeShot = lastCue.bolt = lastCue.emp = -Infinity;
       hideBeams();
     },
     dispose() {

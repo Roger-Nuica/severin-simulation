@@ -1,4 +1,6 @@
 // @ts-check
+import { createWeaponFx } from './hero/weaponFx.js';
+import { empFxTo } from './net/skyFx.js';
 import * as THREE from 'three';
 import { lightningPath, BOLT_VERTEX, BOLT_FRAGMENT } from './environment/powerLines.js';
 
@@ -70,6 +72,7 @@ function between(range) {
  *   lethalAt: (x: number, z: number) => Object|null,
  *   chargedTimeLeft: () => number,
  *   arcAround: (at: THREE.Vector3, height: number) => void,
+ *   showWave: (x: number, z: number, sound?: boolean, visual?: boolean) => void,
  *   waveRings: () => {x: number, z: number, radius: number, strength: number}[],
  *   resetEmpCharge: () => void,
  *   disposeEmpCharge: () => void
@@ -89,7 +92,7 @@ export function createEmpChargeSystem(ctx) {
   const arcs = [];
   /**
    * The discharge waves in flight: a fixed pool of ground rings.
-   * @type {{mesh: THREE.Mesh, x: number, z: number, radius: number, alive: boolean}[]}
+   * @type {{mesh: THREE.Mesh, x: number, z: number, radius: number, alive: boolean, visual: boolean}[]}
    */
   const waves = [];
   const tangent = new THREE.Vector3();
@@ -97,6 +100,10 @@ export function createEmpChargeSystem(ctx) {
   const side = new THREE.Vector3();
   const a = new THREE.Vector3();
   const b = new THREE.Vector3();
+  /** Announces the discharge wave to the co-op guest (hero/weaponFx.js); nothing happens outside a room with a guest. */
+  const weaponFx = createWeaponFx(ctx);
+  const fxAt = { x: 0, y: 12, z: 0 };
+  const fxTo = { x: 0, y: 0, z: 0 };
 
   /** @returns {void} */
   function initEmpCharge() {
@@ -145,7 +152,7 @@ export function createEmpChargeSystem(ctx) {
       mesh.frustumCulled = false;
       mesh.visible = false;
       Sim.three.scene.add(mesh);
-      waves.push({ mesh, x: 0, z: 0, radius: 0, alive: false });
+      waves.push({ mesh, x: 0, z: 0, radius: 0, alive: false, visual: false });
     }
   }
 
@@ -155,15 +162,35 @@ export function createEmpChargeSystem(ctx) {
    * @returns {void}
    */
   function fireWave(v) {
+    showWave(v.center.x, v.center.z, true, false);
+    if (ctx.systems.net && ctx.systems.net.fxLive()) {
+      fxAt.x = v.center.x;
+      fxAt.z = v.center.z;
+      weaponFx.announce('emp', fxAt, empFxTo(fxTo, EMP.waveRadius, 'wave'), '');
+    }
+  }
+
+  /**
+   * The ring and its flash and zap, from (x, z): the visual half of a discharge wave.
+   * `visual` waves (the co-op guest's mirror, net/mirror.js) never short a Terminator
+   * and never emit `empPulse` (R-053): `updateWaves` only grows and fades them.
+   * @param {number} x
+   * @param {number} z
+   * @param {boolean} [sound] false skips the zap (the guest's per-kind rate cap)
+   * @param {boolean} [visual] a mirrored wave: the ring alone
+   * @returns {void}
+   */
+  function showWave(x, z, sound = true, visual = true) {
     const wave = waves.find(w => !w.alive) || waves[0];
     wave.alive = true;
-    wave.x = v.center.x;
-    wave.z = v.center.z;
+    wave.visual = visual;
+    wave.x = x;
+    wave.z = z;
     wave.radius = 1;
     wave.mesh.position.set(wave.x, 0.6, wave.z);
     wave.mesh.visible = true;
     ctx.systems.lightning.flashScreen(a.set(wave.x, 12, wave.z), 0.3, '#bfe8ff');
-    if (ctx.systems.powerArcSound) ctx.systems.powerArcSound.playZap(0.8);
+    if (sound && ctx.systems.powerArcSound) ctx.systems.powerArcSound.playZap(0.8);
   }
 
   /**
@@ -178,8 +205,10 @@ export function createEmpChargeSystem(ctx) {
       const k = Math.max(0, 1 - wave.radius / EMP.waveRadius);
       wave.mesh.scale.setScalar(wave.radius);
       wave.mesh.material.opacity = 0.9 * k * (0.8 + 0.2 * Math.random());
-      if (ctx.systems.terminator) ctx.systems.terminator.empSweep(wave.x, wave.z, wave.radius);
-      ctx.events.emit('empPulse', { x: wave.x, z: wave.z, radius: wave.radius });
+      if (!wave.visual) {
+        if (ctx.systems.terminator) ctx.systems.terminator.empSweep(wave.x, wave.z, wave.radius);
+        ctx.events.emit('empPulse', { x: wave.x, z: wave.z, radius: wave.radius });
+      }
       if (wave.radius >= EMP.waveRadius) {
         wave.alive = false;
         wave.mesh.visible = false;
@@ -430,7 +459,7 @@ export function createEmpChargeSystem(ctx) {
   }
 
   return {
-    initEmpCharge, updateEmpCharge, lineDown, lethalAt, chargedTimeLeft, arcAround, waveRings,
+    initEmpCharge, updateEmpCharge, lineDown, lethalAt, chargedTimeLeft, arcAround, waveRings, showWave,
     resetEmpCharge, disposeEmpCharge
   };
 }
