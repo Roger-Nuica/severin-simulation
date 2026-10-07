@@ -49,6 +49,9 @@ export const LIMITS = {
   maxTw: 8,
   maxHole: 1,
   maxGiants: 2,
+  /** Patient Zero's original (one) and its clones (PZ.maxClones, CAPS.perKind.patientZeroClone). */
+  maxReplicator: 1,
+  maxClones: 50,
   maxAim: 8,
   maxEnv: 1
 };
@@ -82,7 +85,7 @@ export const FX_KINDS = ['bullet', 'rail', 'plasma', 'mega', 'fire', 'holeShot',
 export const FX_COLUMNS = ['id', 'kind', 'shooter', 'x', 'y', 'z', 'a', 'b', 'c', 'extra'];
 
 /** Row widths of the additive snapshot fields (`fx` is the widest). */
-export const EXTRA_ROW_WIDTH = { fx: 10, tw: 6, hole: 4, aim: 4, env: 7, cars: 8, giants: 7 };
+export const EXTRA_ROW_WIDTH = { fx: 10, tw: 6, hole: 4, aim: 4, env: 7, cars: 8, giants: 7, replicator: 8, clones: 6 };
 
 const CODE_RE = new RegExp(`^[${ROOM.codeAlphabet}]{${ROOM.codeLength}}$`);
 
@@ -202,12 +205,14 @@ export function validateInput(msg) {
  *   env          [running 0|1, stormRamp, intensity, wind, radius, daylight, timeScale]
  *   cars         [id, x, y, z, yaw, pitch, roll, colour]  (every car: the driven, thrown, moving, then parked; `vehicles` keeps its five columns for an older guest)
  *   giants       [id, x, z, heading, state, a, b]  (the cyber T-Rex id 0 and Yeti id 1, while one is on the field; net/giantPose.js)
- * Caps: fx 24, tw 8, hole 1, aim 8, env 1, cars 64, giants 2. Unknown fx kinds are dropped by
+ *   replicator   [id 0, x, z, heading, attack, evolve, grown, flare]  (Patient Zero's original, while it stands; evolve 0 none, 0..1 changing, 1 evolved; net/replicatorPose.js)
+ *   clones       [id, x, z, heading, attack, grown]  (its clones, up to 50; grown 0..1 is how far built or come apart)
+ * Caps: fx 24, tw 8, hole 1, aim 8, env 1, cars 64, giants 2, replicator 1, clones 50. Unknown fx kinds are dropped by
  * `sanitizeFx`, not an error. Built and read by later subtasks; no row here
  * widens an existing one.
  * @typedef {{type:'snapshot', v:number, room:string, tick:number, t:number,
  *   score:number, players:number[][], tornadoes:number[][], terminators:number[][],
- *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][], ack?:number[][], alt?:number[][], fx?:number[][], tw?:number[][], hole?:number[][], aim?:number[][], env?:number[][], cars?:number[][], giants?:number[][]}} Snapshot
+ *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][], ack?:number[][], alt?:number[][], fx?:number[][], tw?:number[][], hole?:number[][], aim?:number[][], env?:number[][], cars?:number[][], giants?:number[][], replicator?:number[][], clones?:number[][]}} Snapshot
  */
 const ROW_WIDTH = { players: 9, tornadoes: 4, terminators: 5, aliens: 5, ships: 5, vehicles: 5 };
 
@@ -270,7 +275,7 @@ export function validateSnapshot(msg) {
  */
 function validateExtraFields(msg, b) {
   /** @type {Record<string, number>} */
-  const caps = { fx: LIMITS.maxFx, tw: LIMITS.maxTw, hole: LIMITS.maxHole, aim: LIMITS.maxAim, env: LIMITS.maxEnv, cars: LIMITS.maxPerKind, giants: LIMITS.maxGiants };
+  const caps = { fx: LIMITS.maxFx, tw: LIMITS.maxTw, hole: LIMITS.maxHole, aim: LIMITS.maxAim, env: LIMITS.maxEnv, cars: LIMITS.maxPerKind, giants: LIMITS.maxGiants, replicator: LIMITS.maxReplicator, clones: LIMITS.maxClones };
   for (const name of Object.keys(caps)) {
     const rows = msg[name];
     if (rows === undefined) continue;
@@ -316,6 +321,12 @@ function extraRowOk(name, r, b) {
       return Number.isInteger(r[0]) && r[0] >= 0 && r[0] <= 1 && Math.abs(r[1]) <= b && Math.abs(r[2]) <= b
         && inRange(r[3], -Math.PI * 4, Math.PI * 4) && Number.isInteger(r[4]) && r[4] >= 0 && r[4] <= 4
         && inRange(r[5], -2, 2) && inRange(r[6], -2, 2);
+    case 'replicator':
+      return r[0] === 0 && Math.abs(r[1]) <= b && Math.abs(r[2]) <= b && inRange(r[3], -Math.PI * 4, Math.PI * 4)
+        && inRange(r[4], 0, 1) && inRange(r[5], 0, 1) && inRange(r[6], 0, 1) && inRange(r[7], 0, 5);
+    case 'clones':
+      return Number.isInteger(r[0]) && r[0] >= 0 && Math.abs(r[1]) <= b && Math.abs(r[2]) <= b
+        && inRange(r[3], -Math.PI * 4, Math.PI * 4) && inRange(r[4], 0, 1) && inRange(r[5], 0, 1);
     default: return false;
   }
 }

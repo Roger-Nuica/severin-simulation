@@ -31,6 +31,7 @@ import { dressAsRoger, rogerLimbs, newOwned, disposeRoger } from '../hero/rogerL
 import { poseWalk, lieAngle, mapJoints } from './terminatorPose.js';
 import { poseAlienWalk, spinSaucer, ALIEN_STRIDE } from './alienPose.js';
 import { giantRow, fallPose, poseTrex, poseYeti, GIANT } from './giantPose.js';
+import { cloneRows, replicatorRow, poseOriginal, writeClones, newReplicaScratch, easeHeat, standingCount, glowLevels } from './replicatorPose.js';
 import { eulerYXZ, carClass, pickCars, carRow, poseCar, colourIndex } from './carPose.js';
 import { ALIENS } from '../aliens/config.js';
 import { T800 } from '../terminator/config.js';
@@ -1465,6 +1466,21 @@ export function createNetSystem(ctx) {
     return out;
   }
 
+  /**
+   * Patient Zero's original and its clones as `replicator` and `clones` rows,
+   * built only while a guest is in the room and one of them is on the field.
+   * @returns {{replicator: number[][], clones: number[][]}}
+   */
+  function replicaRows() {
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    const st = ctx.systems.patientZero && ctx.systems.patientZero.replicaState && ctx.systems.patientZero.replicaState();
+    if (!st) return { replicator: [], clones: [] };
+    return {
+      replicator: st.original ? [replicatorRow(st.original, st.flare, st.warpOut, clamp)] : [],
+      clones: cloneRows(st.clones, st.warpOut, idOf, clamp, LIMITS.maxClones)
+    };
+  }
+
   /** @returns {import('./protocol.js').Snapshot} */
   function buildSnapshot() {
     const h = hero();
@@ -1529,6 +1545,7 @@ export function createNetSystem(ctx) {
     }
     const live = fxLive();
     const giants = live ? giantRows() : [];
+    const replica = live ? replicaRows() : { replicator: [], clones: [] };
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
@@ -1536,6 +1553,8 @@ export function createNetSystem(ctx) {
       ack: gate.acks((id) => id !== '0' && !!players.get(id)),
       ...(live ? { cars: carRows(driving ? driving.mesh : null) } : {}),
       ...(giants.length ? { giants } : {}),
+      ...(replica.replicator.length ? { replicator: replica.replicator } : {}),
+      ...(replica.clones.length ? { clones: replica.clones } : {}),
       ...(live ? worldRows(h) : {})
     };
   }
@@ -1911,6 +1930,62 @@ export function createNetSystem(ctx) {
     else poseTrex(gd.joints, gd.kit.mats, gd.kit.colours, gd.run.phase, amount, row[4], row[5], t);
   }
 
+  /** @type {{unit: any, meshes: Record<string, THREE.InstancedMesh>, runs: Map<number, import('./rogerView.js').RunCycle>, scratch: ReturnType<typeof newReplicaScratch>, heat: number}|null} Patient Zero's real geometry and materials, the clones' six instanced meshes, built on first sight (released in `clearProxies`) */
+  let replicaKit = null;
+
+  /**
+   * The Replicator's kit, built on first use: the host's own geometry and glow
+   * materials (`ctx.systems.patientZero.buildGuestModel`) and one instanced
+   * mesh per part for the clones. Null when the system is absent or the
+   * session has no proxy root.
+   * @returns {NonNullable<typeof replicaKit>|null}
+   */
+  function replicator() {
+    if (replicaKit) return replicaKit;
+    const sys = ctx.systems.patientZero;
+    if (!sys || !sys.buildGuestModel || !S.proxyRoot) return null;
+    const unit = sys.buildGuestModel();
+    for (const g of unit.geometries) keepGeo(g);
+    for (const m of unit.materials) keepMat(m);
+    /** @type {Record<string, THREE.InstancedMesh>} */
+    const meshes = {};
+    for (const name of Object.keys(unit.partGeo)) {
+      const m = new THREE.InstancedMesh(unit.partGeo[name], unit.cloneMat, unit.consts.maxClones);
+      m.count = 0;
+      m.frustumCulled = false;
+      m.castShadow = true;
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      S.proxyRoot.add(m);
+      meshes[name] = m;
+    }
+    replicaKit = { unit, meshes, runs: new Map(), scratch: newReplicaScratch(), heat: 0 };
+    return replicaKit;
+  }
+
+  /**
+   * Draws the clones (one instanced mesh per part) from the interpolated rows
+   * and sets the glow of both materials. Visual only.
+   * @param {Map<number, number[]>} rows The `clones` rows.
+   * @param {Map<number, number[]>} originals The `replicator` rows.
+   * @param {number} dt
+   * @param {number} t Snapshot clock, seconds.
+   * @returns {void}
+   */
+  function drawClones(rows, originals, dt, t) {
+    if (!rows.size && !replicaKit) return;
+    const kit = replicator();
+    if (!kit) return;
+    const c = kit.unit.consts;
+    writeClones(kit.meshes, rows, kit.runs, dt, c.stride, c.maxClones, kit.scratch);
+    const o = originals.get(0);
+    kit.heat = easeHeat(kit.heat, standingCount(rows.values()), c.trigger, dt);
+    const g = glowLevels(o ? o[7] : 1, kit.heat, !!o && o[5] > 0, t, c.heatFlare);
+    kit.unit.cloneMat.userData.glow.value = g.cloneGlow;
+    kit.unit.cloneMat.userData.tint.value.setRGB(1, 1, 1).lerp(c.heatTint, g.cloneHeat);
+    kit.unit.originalMat.userData.glow.value = g.originalGlow;
+    kit.unit.originalMat.userData.tint.value.setRGB(1, 1, 1).lerp(c.heatTint, g.originalHeat);
+  }
+
   /** @type {Map<number, THREE.Object3D>} the real car, one template per body colour, built on first sight (shared geometry; each colour's paint is released in `clearProxies`) */
   const carKits = new Map();
 
@@ -1979,6 +2054,17 @@ export function createNetSystem(ctx) {
         const box = new THREE.Mesh(keepGeo(new THREE.BoxGeometry(2, 1.3, 4.5)), mat(0x4a90e2));
         box.position.y = 0.8;
         g.add(box);
+      }
+    } else if (kind === 'replicator') {
+      const kit = replicator();
+      if (kit) {
+        const fig = kit.unit.makeFigure();
+        g.add(fig.root);
+        g.userData.replica = { fig, run: newRunCycle() };
+      } else {
+        const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(0.4, 1.6, 4, 8)), mat(0x3a8f4a));
+        body.position.y = 1.2;
+        g.add(body);
       }
     } else if (kind === 'giants') {
       const fig = giantFigure(id);
@@ -2246,6 +2332,8 @@ export function createNetSystem(ctx) {
     if (S.proxyRoot) Sim.three.scene.remove(S.proxyRoot);
     S.proxyRoot = null;
     S.proxies.clear();
+    if (replicaKit) for (const m of Object.values(replicaKit.meshes)) m.dispose();
+    replicaKit = null;
     for (const g of S.geos) g.dispose();
     for (const m of S.mats) m.dispose();
     S.geos = [];
@@ -2474,6 +2562,8 @@ export function createNetSystem(ctx) {
       if (kind === 'tornadoes') continue;
       // The moving-cars rows are the older host's: once `cars` arrives they are not drawn.
       const rows = kind === 'vehicles' && S.hostCars ? NO_ROWS : sampled;
+      // The clones are one set of instanced meshes, not proxies.
+      if (kind === 'clones') { drawClones(sampled, s.kinds.replicator || NO_ROWS, dt, s.t); continue; }
       let map = S.proxies.get(kind);
       if (!map) { map = new Map(); S.proxies.set(kind, map); }
       for (const [id, obj] of [...map]) {
@@ -2487,6 +2577,13 @@ export function createNetSystem(ctx) {
           poseCar(obj, row);
         } else if (kind === 'giants') {
           poseGiant(obj, row, dt, s.t);
+        } else if (kind === 'replicator') {
+          const rd = obj.userData.replica;
+          if (rd) {
+            const c = /** @type {NonNullable<typeof replicaKit>} */ (replicaKit).unit.consts;
+            const pace = stepRunCycle(rd.run, row[1], row[2], dt, c.stride, 4);
+            poseOriginal(rd.fig, row, pace, rd.run.phase, s.t, dt, c, /** @type {NonNullable<typeof replicaKit>} */ (replicaKit).scratch);
+          } else obj.position.set(row[1], 0, row[2]);
         } else if (kind === 'aliens' || kind === 'ships') {
           obj.position.set(row[1], row[2], row[3]);
           obj.rotation.y = row[4];
