@@ -43,3 +43,13 @@ export const stepAir = (st, input, dt, ground, rules) => {
   if (alt <= ground && vy <= 0) return { alt: ground, vy: 0, air: false };
   return { alt, vy, air };
 };
+
+/**
+ * Is a guest's jetpack lit this frame: it has an input (a guest that has sent
+ * none yet has none), may move on its feet, and holds the Space bit.
+ * @param {{abil: number}|null|undefined} input the guest's latest input, if any
+ * @param {boolean} canFly the guest is up and may move (not down, seated or locked)
+ * @param {number} bit the input `abil` bit for Space
+ * @returns {boolean}
+ */
+export const jetHeld = (input, canFly, bit) => !!input && !!canFly && (input.abil & bit) !== 0;

@@ -20,7 +20,7 @@ test('the table matches the wheel one for one, in wheel order (R-049)', () => {
 test('table values are the ones the host used before the extraction', () => {
   assert.deepEqual(GUEST_WEAPONS.rifle, { mode: 'ray', cooldown: 0.45, range: 140, needsAim: true, type: 'plasma' });
   assert.deepEqual(GUEST_WEAPONS.minigun, { mode: 'ray', cooldown: 0.09, range: 100, needsAim: true, type: 'bullet' });
-  assert.deepEqual(GUEST_WEAPONS.railgun, { mode: 'ray', cooldown: 1.6, range: 220, needsAim: true, type: 'bolt' });
+  assert.deepEqual(GUEST_WEAPONS.railgun, { mode: 'ray', cooldown: 0.2, range: 220, needsAim: true, type: 'bolt' });
   assert.equal(GUEST_WEAPONS.fire.mode, 'flame');
   assert.equal(GUEST_WEAPONS.fire.cooldown, 0);
   assert.equal(GUEST_WEAPONS.blackhole.cooldown, 0.6);
@@ -75,7 +75,7 @@ test('cooldown depends on host time only, not on how many messages arrived', () 
   };
   assert.equal(run(0), run(1));
   assert.equal(run(1), run(5));
-  assert.equal(run(1), 1); // 2 s at a 1.6 s cooldown, first shot ready after 1.6 s
+  assert.ok(run(1) >= 8 && run(1) <= 10, `${run(1)} shots`); // 2 s at the host's 0.2 s cooldown, first shot ready after 0.2 s
   assert.equal(coolDown(0.05, 1), 0);
 });
 

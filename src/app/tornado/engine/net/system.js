@@ -10,7 +10,7 @@ import { GUEST_WEAPONS, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrig
 import { createBullets } from '../hero/bullets.js';
 import { HERO } from '../hero/config.js';
 import { JETPACK } from '../hero/jetpack.js';
-import { stepAir } from './flight.js';
+import { stepAir, jetHeld } from './flight.js';
 import { TELEPORT } from '../player/teleport.js';
 import { newPrediction, viewPoint, predictFrame, recordSent, reconcile } from './prediction.js';
 import { stepRun, aimDirection } from '../hero/walk.js';
@@ -887,7 +887,7 @@ export function createNetSystem(ctx) {
         }
       }
       // The jetpack: Space held climbs, let go it sinks gently; down or seated, it lets go.
-      stepGuestAir(p, a, !!input && ctl.move && p.state === 'up' && (input.abil & JET_BIT) !== 0, ctl.move, dt, h);
+      stepGuestAir(p, a, jetHeld(input, ctl.move && p.state === 'up', JET_BIT), ctl.move, dt, h);
       pos.set(p.x, a.alt, p.z);
       a.obj.mesh.rotation.y = p.heading;
       // Down: lying flat; revived: upright.

@@ -158,7 +158,9 @@ Common rules for every subtask: functional style, every new function typed with 
   - Files changed: `net/protocol.js` (`PROTOCOL_VERSION` 4; `FX_KINDS`, `FX_COLUMNS`, `EXTRA_ROW_WIDTH`, `LIMITS.max*`; `fx`/`tw`/`hole`/`aim`/`env` validators; `sanitizeFx`; optional input `charge` and `ability`), `tests/protocol.test.mjs`, `tests/relay.integration.test.mjs`, `tests/coop-rules.test.mjs` and `tests/client.test.mjs` (literal `v: 3` to 4), `.claude/rules.md` (R-059 version text).
   - Result: old-shape and new snapshots validate, out-of-range rows are refused, unknown fx kinds are dropped; nothing builds or emits the fields yet (Subtask 3).
 
-- [ ] Subtask 2: Pure scheduling core, `net/fxQueue.js`. Typed pure functions over immutable state: `pushFx(queue, rows, hostT)` (drops duplicates by id, drops the guest's own `shooter`, caps), `dueFx(queue, renderT)` (returns the rows whose time has come and the queue left), `tornadoTarget`, `holeAt(age, closing)`. No scene, no DOM; tested like `net/prediction.js`.
+- [x] DONE Subtask 2: Pure scheduling core, `net/fxQueue.js`. Typed pure functions over immutable state: `pushFx(queue, rows, hostT)` (drops duplicates by id, drops the guest's own `shooter`, caps), `dueFx(queue, renderT)` (returns the rows whose time has come and the queue left), `tornadoTarget`, `holeAt(age, closing)`. No scene, no DOM; tested like `net/prediction.js`.
+  - Files changed: `src/app/tornado/engine/net/fxQueue.js` (new), `tests/fx-queue.test.mjs` (new)
+  - Result: pure queue (`newFxQueue`, `pushFx`, `dueFx`, `tornadoTarget`, `holeAt`) reusing `INTERP_DELAY`; not wired into `system.js` (Subtasks 3/4 do).
   - Likely files: `net/fxQueue.js` (new), `tests/fx-queue.test.mjs` (new)
   - Depends on: Subtask 1
   - Classification: LOW-RISK (mechanical once the schema is fixed; a pure helper with tests).
@@ -245,9 +247,9 @@ Common rules for every subtask: functional style, every new function typed with 
   - Acceptance: a written finding with numbers; an owner decision follows.
 
 - [ ] Subtask 14: Small fixes found while reading, each its own change.
-  - 14a: Regression test for the guest-without-input crash. Extract the jet-held test (`!!input && ctl.move && p.state === 'up' && (input.abil & JET_BIT) !== 0`, `net/system.js:824`) into a typed pure helper in `net/flight.js` and test `null` input in `tests/guest-flight.test.mjs`. LOW-RISK.
+  - [x] DONE 14a (files: `net/flight.js`, `net/system.js`, `tests/guest-flight.test.mjs`; `jetHeld` helper, null input tested): Regression test for the guest-without-input crash. Extract the jet-held test (`!!input && ctl.move && p.state === 'up' && (input.abil & JET_BIT) !== 0`, `net/system.js:824`) into a typed pure helper in `net/flight.js` and test `null` input in `tests/guest-flight.test.mjs`. LOW-RISK.
   - 14b: A guest's shots from the air aim from ground height: `scan`, `guestFire` and the tracer use the constant `EYE` (1.4) and ignore `a.alt` (`net/system.js:1006-1090`; the jetpack altitude is in `a.alt`, line 957). Use eye height plus altitude. SEPARATE: it changes the host's resolution of guest shots (R-060).
-  - 14c: Railgun cooldown: guest 1.6 s (`net/guestWeapons.js`) versus host 0.2 s (`heroWeapons.js:90`). DECIDED 2026-10-06: the guest matches the host (0.2 s); change `GUEST_WEAPONS.railgun.cooldown` and R-060's note in the same change set (a one-line LOW-RISK change; the predicted shot feedback reads the same table).
+  - [x] DONE 14c (files: `net/guestWeapons.js`, `tests/guest-weapons.test.mjs`, `.claude/rules.md` R-060, `docs/weapons.md:77`; host value verified 0.2): Railgun cooldown: guest 1.6 s (`net/guestWeapons.js`) versus host 0.2 s (`heroWeapons.js:90`). DECIDED 2026-10-06: the guest matches the host (0.2 s); change `GUEST_WEAPONS.railgun.cooldown` and R-060's note in the same change set (a one-line LOW-RISK change; the predicted shot feedback reads the same table).
   - 14d: Guest hit markers and the `score` event for the partner's points; sounds for host events (covered by 4 to 10; a volume and distance decision).
   - 14e: Guest "no energy" and "too close" notices stay host events; unchanged.
   - Depends on: 14a none; 14b after 4; 14c none

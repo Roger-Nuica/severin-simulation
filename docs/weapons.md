@@ -74,4 +74,4 @@ The project prefers reusing the existing damage and visual pipelines rather than
 
 ## Co-op guest
 
-The guest uses the same wheel (R-049). It must raise the weapon (right-click) before the rifle, minigun, railgun, Fire Gun or Black Hole Gun fires; the Katana fires without raising, as on the host. The host resolves guest shots from `net/guestWeapons.js` and the same `enemies.hit` contract, so enemy immunity is unchanged (R-054). Known disagreement, not reconciled: the guest's railgun cooldown there is 1.6 s, while the host's own Railgun cooldown in `heroWeapons.js` is 0.2 s. See R-060.
+The guest uses the same wheel (R-049). It must raise the weapon (right-click) before the rifle, minigun, railgun, Fire Gun or Black Hole Gun fires; the Katana fires without raising, as on the host. The host resolves guest shots from `net/guestWeapons.js` and the same `enemies.hit` contract, so enemy immunity is unchanged (R-054). The guest's railgun cooldown there is 0.2 s, matching the host's own Railgun cooldown in `heroWeapons.js` (owner decision 2026-10-06). See R-060.

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newAir, stepAir } from '../src/app/tornado/engine/net/flight.js';
+import { newAir, stepAir, jetHeld } from '../src/app/tornado/engine/net/flight.js';
 import { JETPACK } from '../src/app/tornado/engine/hero/jetpack.js';
 
 const fly = (st, jet, dt = 0.05, ground = 0, up = true) => stepAir(st, { jet, up }, dt, ground, JETPACK);
@@ -51,4 +51,16 @@ test('walking off a roof falls; a downed guest in the air falls under gravity, f
 test('the input state is not mutated', () => {
   const st = Object.freeze(newAir());
   assert.doesNotThrow(() => fly(st, true));
+});
+
+test('jetHeld: a guest with no input yet never flies (null and undefined do not throw)', () => {
+  assert.equal(jetHeld(null, true, 16), false);
+  assert.equal(jetHeld(undefined, true, 16), false);
+});
+
+test('jetHeld: needs the Space bit and a guest who can move', () => {
+  assert.equal(jetHeld({ abil: 16 }, true, 16), true);
+  assert.equal(jetHeld({ abil: 1 | 8 }, true, 16), false);
+  assert.equal(jetHeld({ abil: 16 | 1 }, true, 16), true);
+  assert.equal(jetHeld({ abil: 16 }, false, 16), false);
 });
