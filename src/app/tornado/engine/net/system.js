@@ -30,6 +30,7 @@ import { mayHurtPlayer, splashAmount, rayBodyDistance, inSector } from '../healt
 import { dressAsRoger, rogerLimbs, newOwned, disposeRoger } from '../hero/rogerLook.js';
 import { poseWalk, lieAngle, mapJoints } from './terminatorPose.js';
 import { poseAlienWalk, spinSaucer, ALIEN_STRIDE } from './alienPose.js';
+import { giantRow, fallPose, poseTrex, poseYeti, GIANT } from './giantPose.js';
 import { eulerYXZ, carClass, pickCars, carRow, poseCar, colourIndex } from './carPose.js';
 import { ALIENS } from '../aliens/config.js';
 import { T800 } from '../terminator/config.js';
@@ -1448,6 +1449,22 @@ export function createNetSystem(ctx) {
     return pickCars(list, LIMITS.maxPerKind).map((c) => c.row);
   }
 
+  /**
+   * The cyber T-Rex and Yeti as `giants` rows (at most one each), built only
+   * while a guest is in the room.
+   * @returns {number[][]}
+   */
+  function giantRows() {
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    /** @type {number[][]} */
+    const out = [];
+    const trex = ctx.systems.trex && ctx.systems.trex.replicaState();
+    if (trex) out.push(giantRow(GIANT.trex, trex, clamp));
+    const yeti = ctx.systems.yeti && ctx.systems.yeti.replicaState();
+    if (yeti) out.push(giantRow(GIANT.yeti, yeti, clamp));
+    return out;
+  }
+
   /** @returns {import('./protocol.js').Snapshot} */
   function buildSnapshot() {
     const h = hero();
@@ -1511,12 +1528,14 @@ export function createNetSystem(ctx) {
       rows.vehicles.push([idOf(car), r2(clamp(car.mesh.position.x)), r2(clamp(car.mesh.position.z)), r2(car.mesh.rotation.y), r2(v.length())]);
     }
     const live = fxLive();
+    const giants = live ? giantRows() : [];
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
       alt: altRows(h),
       ack: gate.acks((id) => id !== '0' && !!players.get(id)),
       ...(live ? { cars: carRows(driving ? driving.mesh : null) } : {}),
+      ...(giants.length ? { giants } : {}),
       ...(live ? worldRows(h) : {})
     };
   }
@@ -1798,6 +1817,8 @@ export function createNetSystem(ctx) {
    */
   function disposeProxy(obj) {
     if (obj.userData.owned) disposeRoger(obj, obj.userData.owned);
+    // The Yeti's fur strands are instanced meshes with a buffer of their own per clone.
+    if (obj.userData.giant) obj.traverse((/** @type {any} */ c) => { if (c.isInstancedMesh) c.dispose(); });
   }
 
   /** @type {{template: any, joints: any}|null} the real Terminator, built once per session (its geometry and materials are shared by every proxy) */
@@ -1844,6 +1865,50 @@ export function createNetSystem(ctx) {
     }
     const root = kit.template.clone(true);
     return { root, limbs: kit.limbs ? mapJoints(kit.template, root, kit.limbs) : null };
+  }
+
+  /** @type {Array<{template: THREE.Object3D, joints: any, mats: any, colours: any, stride: number, speed: number}|null>} the real T-Rex (0) and Yeti (1), each built once per session (shared geometry and materials) */
+  const giantKits = [null, null];
+
+  /**
+   * One cyber T-Rex or Yeti for a proxy: a clone of the host's own model
+   * (`ctx.systems.trex` or `yeti` `.buildGuestModel`), sharing the template's
+   * geometry and materials. Null when the system is absent.
+   * @param {number} id GIANT.trex or GIANT.yeti.
+   * @returns {{root: THREE.Object3D, joints: any, kit: any}|null}
+   */
+  function giantFigure(id) {
+    let kit = giantKits[id];
+    if (!kit) {
+      const sys = id === GIANT.yeti ? ctx.systems.yeti : ctx.systems.trex;
+      const unit = sys && sys.buildGuestModel ? sys.buildGuestModel() : null;
+      if (!unit) return null;
+      for (const g of unit.geometries) keepGeo(g);
+      for (const m of unit.materials) keepMat(m);
+      kit = giantKits[id] = { template: unit.root, joints: unit.joints, mats: unit.mats, colours: unit.colours, stride: unit.stride, speed: unit.speed };
+    }
+    const root = kit.template.clone(true);
+    return { root, joints: mapJoints(kit.template, root, kit.joints), kit };
+  }
+
+  /**
+   * Poses a giant proxy from an interpolated `giants` row.
+   * @param {THREE.Object3D} obj The proxy.
+   * @param {number[]} row
+   * @param {number} dt
+   * @param {number} t Snapshot clock, seconds.
+   * @returns {void}
+   */
+  function poseGiant(obj, row, dt, t) {
+    const gd = obj.userData.giant;
+    obj.position.set(row[1], 0, row[2]);
+    if (!gd) return;
+    const amount = stepRunCycle(gd.run, row[1], row[2], dt, gd.kit.stride, gd.kit.speed);
+    const fall = fallPose(row[0], row[4], row[5]);
+    obj.rotation.set(fall.rx, row[3], fall.rz);
+    obj.position.y = fall.y;
+    if (row[0] === GIANT.yeti) poseYeti(gd.joints, gd.kit.mats, gd.kit.colours, gd.run.phase, amount, row[4], row[5], row[6], t);
+    else poseTrex(gd.joints, gd.kit.mats, gd.kit.colours, gd.run.phase, amount, row[4], row[5], t);
   }
 
   /** @type {Map<number, THREE.Object3D>} the real car, one template per body colour, built on first sight (shared geometry; each colour's paint is released in `clearProxies`) */
@@ -1914,6 +1979,16 @@ export function createNetSystem(ctx) {
         const box = new THREE.Mesh(keepGeo(new THREE.BoxGeometry(2, 1.3, 4.5)), mat(0x4a90e2));
         box.position.y = 0.8;
         g.add(box);
+      }
+    } else if (kind === 'giants') {
+      const fig = giantFigure(id);
+      if (fig) {
+        g.add(fig.root);
+        g.userData.giant = { joints: fig.joints, kit: fig.kit, run: newRunCycle() };
+      } else {
+        const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(2, 8, 4, 8)), mat(id === GIANT.yeti ? 0xdfeaf5 : 0x4f7a3a));
+        body.position.y = 5;
+        g.add(body);
       }
     } else if (kind === 'vehicles') {
       const box = new THREE.Mesh(keepGeo(new THREE.BoxGeometry(2, 1.3, 4.5)), mat(0x4a90e2));
@@ -2177,6 +2252,7 @@ export function createNetSystem(ctx) {
     S.mats = [];
     termKit = null;
     carKits.clear();
+    giantKits[0] = giantKits[1] = null;
     aliensKit.alien = aliensKit.saucer = null;
   }
 
@@ -2409,6 +2485,8 @@ export function createNetSystem(ctx) {
         if (!obj) { obj = makeProxy(kind, id, kind === 'cars' ? row[7] : 0); map.set(id, obj); S.proxyRoot.add(obj); }
         if (kind === 'cars') {
           poseCar(obj, row);
+        } else if (kind === 'giants') {
+          poseGiant(obj, row, dt, s.t);
         } else if (kind === 'aliens' || kind === 'ships') {
           obj.position.set(row[1], row[2], row[3]);
           obj.rotation.y = row[4];

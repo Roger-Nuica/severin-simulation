@@ -103,7 +103,9 @@ export const YETI = {
  *   initYeti: () => void,
  *   updateYeti: (dt: number) => void,
  *   resetYeti: () => void,
- *   disposeYeti: () => void
+ *   disposeYeti: () => void,
+ *   buildGuestModel: () => any,
+ *   replicaState: () => any
  * }}
  */
 export function createYetiSystem(ctx) {
@@ -620,5 +622,43 @@ export function createYetiSystem(ctx) {
     button = null;
   }
 
-  return { spawn, alive: () => !!duelist(), duelist, initYeti, updateYeti, resetYeti, disposeYeti };
+  /**
+   * The co-op guest's Yeti (net/system.js): the real model, built for the
+   * guest to clone, with the joints and materials its pose moves. Nothing is
+   * added to the scene and no state is touched. The fur strands (instanced
+   * meshes) and the materials are the guest's to release; the geometry stays
+   * the system's own.
+   * @returns {{root: THREE.Object3D, joints: Record<string, THREE.Object3D>, mats: {glowMat: THREE.Material, coolantMat: THREE.Material}, colours: {visor: THREE.Color}, stride: number, speed: number, geometries: THREE.BufferGeometry[], materials: {dispose: () => void}[]}}
+   */
+  function buildGuestModel() {
+    const rig = model.build();
+    const { legL, legR, armL, armR } = rig;
+    /** @type {Set<any>} */
+    const owned = new Set();
+    rig.root.traverse((/** @type {any} */ child) => {
+      if (child.material) owned.add(child.material);
+      if (child.isInstancedMesh) owned.add(child);
+    });
+    return {
+      root: rig.root, joints: { legL, legR, armL, armR },
+      mats: { glowMat: rig.glowMat, coolantMat: rig.coolantMat }, colours: { visor: YETI.visor },
+      // The host's stride per metre and its walking speed.
+      stride: 1.2 / size, speed: YETI.walkSpeed,
+      geometries: [], materials: [...owned]
+    };
+  }
+
+  /**
+   * What the guest needs to draw it (a `giants` row, net/giantPose.js), or
+   * null when there is none. Read-only.
+   * @returns {{x: number, z: number, heading: number, phase: string, acting: boolean, a: number, b: number, fall: number}|null}
+   */
+  function replicaState() {
+    const y = yeti;
+    if (!y) return null;
+    const p = y.root.position;
+    return { x: p.x, z: p.z, heading: y.heading, phase: y.phase, acting: y.aim > 0.05, a: y.aim, b: y.pitch, fall: Math.min(1, y.timer / 1.6) };
+  }
+
+  return { spawn, alive: () => !!duelist(), duelist, initYeti, updateYeti, resetYeti, disposeYeti, buildGuestModel, replicaState };
 }
