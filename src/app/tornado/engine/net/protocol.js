@@ -81,7 +81,7 @@ export const FX_KINDS = ['bullet', 'rail', 'plasma', 'mega', 'fire', 'holeShot',
 export const FX_COLUMNS = ['id', 'kind', 'shooter', 'x', 'y', 'z', 'a', 'b', 'c', 'extra'];
 
 /** Row widths of the additive snapshot fields (`fx` is the widest). */
-export const EXTRA_ROW_WIDTH = { fx: 10, tw: 6, hole: 4, aim: 4, env: 7 };
+export const EXTRA_ROW_WIDTH = { fx: 10, tw: 6, hole: 4, aim: 4, env: 7, cars: 8 };
 
 const CODE_RE = new RegExp(`^[${ROOM.codeAlphabet}]{${ROOM.codeLength}}$`);
 
@@ -199,12 +199,13 @@ export function validateInput(msg) {
  *   hole         [x, z, age, closing 0|1]
  *   aim          [playerId, yaw, pitch, firingBits]  (bits: 1 Fire Gun firing, 2 minigun spinning, 4 jetpack burning)
  *   env          [running 0|1, stormRamp, intensity, wind, radius, daylight, timeScale]
- * Caps: fx 24, tw 8, hole 1, aim 8, env 1. Unknown fx kinds are dropped by
+ *   cars         [id, x, y, z, yaw, pitch, roll, colour]  (every car: the driven, thrown, moving, then parked; `vehicles` keeps its five columns for an older guest)
+ * Caps: fx 24, tw 8, hole 1, aim 8, env 1, cars 64. Unknown fx kinds are dropped by
  * `sanitizeFx`, not an error. Built and read by later subtasks; no row here
  * widens an existing one.
  * @typedef {{type:'snapshot', v:number, room:string, tick:number, t:number,
  *   score:number, players:number[][], tornadoes:number[][], terminators:number[][],
- *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][], ack?:number[][], alt?:number[][], fx?:number[][], tw?:number[][], hole?:number[][], aim?:number[][], env?:number[][]}} Snapshot
+ *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][], ack?:number[][], alt?:number[][], fx?:number[][], tw?:number[][], hole?:number[][], aim?:number[][], env?:number[][], cars?:number[][]}} Snapshot
  */
 const ROW_WIDTH = { players: 9, tornadoes: 4, terminators: 5, aliens: 5, ships: 5, vehicles: 5 };
 
@@ -267,7 +268,7 @@ export function validateSnapshot(msg) {
  */
 function validateExtraFields(msg, b) {
   /** @type {Record<string, number>} */
-  const caps = { fx: LIMITS.maxFx, tw: LIMITS.maxTw, hole: LIMITS.maxHole, aim: LIMITS.maxAim, env: LIMITS.maxEnv };
+  const caps = { fx: LIMITS.maxFx, tw: LIMITS.maxTw, hole: LIMITS.maxHole, aim: LIMITS.maxAim, env: LIMITS.maxEnv, cars: LIMITS.maxPerKind };
   for (const name of Object.keys(caps)) {
     const rows = msg[name];
     if (rows === undefined) continue;
@@ -305,6 +306,10 @@ function extraRowOk(name, r, b) {
     case 'env':
       return (r[0] === 0 || r[0] === 1) && inRange(r[1], 0, 1) && inRange(r[2], 0, 10) && inRange(r[3], 0, 1000)
         && inRange(r[4], 0, 1000) && inRange(r[5], 0, 1) && inRange(r[6], 0, 10);
+    case 'cars':
+      return Number.isInteger(r[0]) && r[0] >= 0 && Math.abs(r[1]) <= b && Math.abs(r[3]) <= b && inRange(r[2], -50, 2000)
+        && inRange(r[4], -Math.PI * 4, Math.PI * 4) && inRange(r[5], -Math.PI * 4, Math.PI * 4) && inRange(r[6], -Math.PI * 4, Math.PI * 4)
+        && Number.isInteger(r[7]) && r[7] >= 0 && r[7] <= 255;
     default: return false;
   }
 }

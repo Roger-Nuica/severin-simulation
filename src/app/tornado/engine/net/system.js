@@ -30,6 +30,7 @@ import { mayHurtPlayer, splashAmount, rayBodyDistance, inSector } from '../healt
 import { dressAsRoger, rogerLimbs, newOwned, disposeRoger } from '../hero/rogerLook.js';
 import { poseWalk, lieAngle, mapJoints } from './terminatorPose.js';
 import { poseAlienWalk, spinSaucer, ALIEN_STRIDE } from './alienPose.js';
+import { eulerYXZ, carClass, pickCars, carRow, poseCar, colourIndex } from './carPose.js';
 import { ALIENS } from '../aliens/config.js';
 import { T800 } from '../terminator/config.js';
 import { rogerStyle, newRunCycle, stepRunCycle, swingLimbs, newCameraPose, followCamera, wheelHtml, wrapAngle, newFireLatch, fireLatchPress, fireLatchRelease, fireLatchSample } from './rogerView.js';
@@ -192,6 +193,10 @@ export function createNetSystem(ctx) {
     predStats: { snaps: 0, blends: 0, last: 0, worst: 0 },
     /** Latest synced health per player id: value, seconds since last damage, receipt time (ms). */
     peerHp: /** @type {Map<number, {v: number, since: number, at: number}>} */ (new Map()),
+    /** The host sends the `cars` kind (an older host does not: the guest then draws its `vehicles` rows). */
+    hostCars: false,
+    /** The guest's own town cars, hidden while the host's are drawn from `cars` rows (put back on leaving). */
+    hiddenCars: /** @type {THREE.Object3D[]} */ ([]),
     hudHtml: '',
     hurtFlip: false,
     peerMission: /** @type {{id: string, value: number, goal: number, left: number}|null} */ (null),
@@ -376,6 +381,7 @@ export function createNetSystem(ctx) {
     S.lastAuth = null;
     S.predStats = { snaps: 0, blends: 0, last: 0, worst: 0 };
     S.peerHp.clear();
+    S.hostCars = false;
     S.peerInv.clear();
     reviveShown.clear();
     partnerRows.clear();
@@ -1421,6 +1427,27 @@ export function createNetSystem(ctx) {
     return out;
   }
 
+  /**
+   * Every car as a `cars` row (position, height, tilt, body colour), the
+   * driven, thrown or lifted and moving ones first, at most the per-kind cap.
+   * Built only while a guest is in the room.
+   * @param {THREE.Object3D|null} driven The car the host is driving.
+   * @returns {number[][]}
+   */
+  function carRows(driven) {
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    const list = [];
+    for (const car of ctx.Environment.cars) {
+      const m = car.mesh;
+      if (!m || !m.parent) continue;
+      const e = eulerYXZ(m.quaternion);
+      const v = car.velocity;
+      const cls = carClass({ y: m.position.y, speedSq: v ? v.lengthSq() : 0, pitch: e.pitch, roll: e.roll, driven: m === driven, lifted: car.captureState !== undefined && car.captureState !== 'grounded' });
+      list.push({ cls, row: carRow(idOf(car), { x: clamp(m.position.x), y: m.position.y, z: clamp(m.position.z) }, e, m.userData.carColour ?? 0) });
+    }
+    return pickCars(list, LIMITS.maxPerKind).map((c) => c.row);
+  }
+
   /** @returns {import('./protocol.js').Snapshot} */
   function buildSnapshot() {
     const h = hero();
@@ -1483,12 +1510,14 @@ export function createNetSystem(ctx) {
       if (!v || v.lengthSq() < 0.04) continue;
       rows.vehicles.push([idOf(car), r2(clamp(car.mesh.position.x)), r2(clamp(car.mesh.position.z)), r2(car.mesh.rotation.y), r2(v.length())]);
     }
+    const live = fxLive();
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
       alt: altRows(h),
       ack: gate.acks((id) => id !== '0' && !!players.get(id)),
-      ...(fxLive() ? worldRows(h) : {})
+      ...(live ? { cars: carRows(driving ? driving.mesh : null) } : {}),
+      ...(live ? worldRows(h) : {})
     };
   }
 
@@ -1567,6 +1596,7 @@ export function createNetSystem(ctx) {
         dbg.snapshotArrived(performance.now(), mine);
       }
       if (buffer.push(msg, performance.now() / 1000).ok) {
+        S.hostCars = Array.isArray(msg.cars);
         S.aimRows = Array.isArray(msg.aim) ? msg.aim : null;
         S.holeRow = Array.isArray(msg.hole) && Array.isArray(msg.hole[0]) ? msg.hole[0] : null;
         S.holeFresh = true;
@@ -1712,6 +1742,7 @@ export function createNetSystem(ctx) {
   function restorePeerView() {
     const { controls, camera, renderer } = Sim.three;
     if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
+    showTownCars();
     // Let go of the input pipeline, unless a local Hero run holds it (it cannot
     // while this is a peer, but leaving must never take Roger's keys away).
     if (!(ctx.Hero && ctx.Hero.active)) ctx.systems.playerInput.detachInput();
@@ -1815,8 +1846,32 @@ export function createNetSystem(ctx) {
     return { root, limbs: kit.limbs ? mapJoints(kit.template, root, kit.limbs) : null };
   }
 
-  /** @param {string} kind @param {number} [id] Player id, for the players kind. @returns {THREE.Object3D} */
-  function makeProxy(kind, id = 0) {
+  /** @type {Map<number, THREE.Object3D>} the real car, one template per body colour, built on first sight (shared geometry; each colour's paint is released in `clearProxies`) */
+  const carKits = new Map();
+
+  /**
+   * One car for a proxy: a clone of the host's own model
+   * (`ctx.systems.cars.buildGuestModel`) in a body colour. Null when absent.
+   * @param {number} colour Index of the body colour.
+   * @returns {THREE.Object3D|null}
+   */
+  function carFigure(colour) {
+    const sys = ctx.systems.cars;
+    if (!sys || !sys.buildGuestModel) return null;
+    const index = colourIndex(colour, sys.colourCount);
+    let template = carKits.get(index);
+    if (!template) {
+      const unit = sys.buildGuestModel(index);
+      for (const g of unit.geometries) keepGeo(g);
+      for (const m of unit.materials) keepMat(m);
+      template = unit.root;
+      carKits.set(index, template);
+    }
+    return template.clone(true);
+  }
+
+  /** @param {string} kind @param {number} [id] Player id, for the players kind. @param {number} [colour] Body colour, for the cars kind. @returns {THREE.Object3D} */
+  function makeProxy(kind, id = 0, colour = 0) {
     if (kind === 'players') return makeRogerProxy(id);
     const g = new THREE.Group();
     const mat = (/** @type {number} */ c, o = 1) => /** @type {THREE.Material} */ (keepMat(new THREE.MeshStandardMaterial({ color: c, transparent: o < 1, opacity: o, roughness: 0.7 })));
@@ -1851,6 +1906,14 @@ export function createNetSystem(ctx) {
       } else {
         const disc = new THREE.Mesh(keepGeo(new THREE.CylinderGeometry(14, 14, 3, 20)), mat(0x9aa4b2));
         g.add(disc);
+      }
+    } else if (kind === 'cars') {
+      const car = carFigure(colour);
+      if (car) g.add(car);
+      else {
+        const box = new THREE.Mesh(keepGeo(new THREE.BoxGeometry(2, 1.3, 4.5)), mat(0x4a90e2));
+        box.position.y = 0.8;
+        g.add(box);
       }
     } else if (kind === 'vehicles') {
       const box = new THREE.Mesh(keepGeo(new THREE.BoxGeometry(2, 1.3, 4.5)), mat(0x4a90e2));
@@ -2113,6 +2176,7 @@ export function createNetSystem(ctx) {
     S.geos = [];
     S.mats = [];
     termKit = null;
+    carKits.clear();
     aliensKit.alien = aliensKit.saucer = null;
   }
 
@@ -2257,6 +2321,30 @@ export function createNetSystem(ctx) {
     }
   }
 
+  /** @type {Map<number, number[]>} no rows, for a kind that is not drawn */
+  const NO_ROWS = new Map();
+
+  /**
+   * While the host's cars arrive as `cars` rows, the guest's own town cars
+   * (parked, and its idle street traffic, which has its own randomness) would
+   * stand under them: they are hidden, and put back by `showTownCars` on
+   * leaving. An older host sends no `cars`, and the guest's cars stay.
+   * @returns {void}
+   */
+  function hideTownCars() {
+    if (!S.hostCars) return;
+    for (const car of ctx.Environment.cars) {
+      const m = car.mesh;
+      if (m && m.visible) { m.visible = false; S.hiddenCars.push(m); }
+    }
+  }
+
+  /** The guest's own town cars, back (leaving the host's view). @returns {void} */
+  function showTownCars() {
+    for (const m of S.hiddenCars) m.visible = true;
+    S.hiddenCars.length = 0;
+  }
+
   /** @param {number} dt */
   function updatePeer(dt) {
     if (!S.peerReadyShown || !S.proxyRoot || !S.client) return;
@@ -2304,9 +2392,12 @@ export function createNetSystem(ctx) {
       if (next < 0.01 && !S.altTarget.has(id)) S.altNow.delete(id); else S.altNow.set(id, next);
     }
     for (const [id, to] of S.altTarget) if (!S.altNow.has(id)) S.altNow.set(id, to);
-    for (const [kind, rows] of Object.entries(s.kinds)) {
+    hideTownCars();
+    for (const [kind, sampled] of Object.entries(s.kinds)) {
       // The tornado is not a proxy: the guest's own funnels draw it (funnels.drive above).
       if (kind === 'tornadoes') continue;
+      // The moving-cars rows are the older host's: once `cars` arrives they are not drawn.
+      const rows = kind === 'vehicles' && S.hostCars ? NO_ROWS : sampled;
       let map = S.proxies.get(kind);
       if (!map) { map = new Map(); S.proxies.set(kind, map); }
       for (const [id, obj] of [...map]) {
@@ -2315,8 +2406,10 @@ export function createNetSystem(ctx) {
       for (const [id, row] of rows) {
         const mine = kind === 'players' && String(id) === S.myId;
         let obj = map.get(id);
-        if (!obj) { obj = makeProxy(kind, id); map.set(id, obj); S.proxyRoot.add(obj); }
-        if (kind === 'aliens' || kind === 'ships') {
+        if (!obj) { obj = makeProxy(kind, id, kind === 'cars' ? row[7] : 0); map.set(id, obj); S.proxyRoot.add(obj); }
+        if (kind === 'cars') {
+          poseCar(obj, row);
+        } else if (kind === 'aliens' || kind === 'ships') {
           obj.position.set(row[1], row[2], row[3]);
           obj.rotation.y = row[4];
           const al = obj.userData.limbs;

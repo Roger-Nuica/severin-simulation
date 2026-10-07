@@ -1000,7 +1000,8 @@ export function createSimulation(container) {
       // Before physics: a train derailed this frame is integrated from now.
       updateTrain(dt);
       // The street traffic too: a car the funnel takes is integrated from now.
-      ctx.systems.streetTraffic.updateStreetTraffic(dt);
+      // (Not while the co-op guest views the host's town: the host's cars are drawn from its snapshots.)
+      if (!(ctx.systems.net && ctx.systems.net.isPeerView())) ctx.systems.streetTraffic.updateStreetTraffic(dt);
       // Alongside the train and for the same reason: a span that drops this
       // frame, and any car that drops with it, is integrated from here on.
       updateViaduct(dt);
