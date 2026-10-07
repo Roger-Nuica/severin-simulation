@@ -128,12 +128,101 @@ export const formatStats = (s, digits = 0) => (s.n === 0
   ? 'no samples'
   : `min ${s.min.toFixed(digits)} / med ${s.median.toFixed(digits)} / max ${s.max.toFixed(digits)} (n=${s.n})`);
 
+/**
+ * Named per-second rates over the span between two `roll` calls. The names
+ * are fixed up front, so `add` never allocates; an unknown name is ignored.
+ * @param {string[]} names
+ * @returns {{add: (name: string, n?: number) => void, roll: (now: number) => void, rate: (name: string) => number, clear: () => void}}
+ */
+export function createRateTable(names) {
+  /** @type {Map<string, number>} */
+  const slots = new Map(names.map((n, i) => [n, i]));
+  const totals = new Float64Array(names.length);
+  const rates = new Float64Array(names.length);
+  let rolledAt = -1;
+  return {
+    add(name, n = 1) {
+      const i = slots.get(name);
+      if (i !== undefined) totals[i] += n;
+    },
+    roll(now) {
+      if (rolledAt >= 0 && now > rolledAt) {
+        const s = (now - rolledAt) / 1000;
+        for (let i = 0; i < totals.length; i++) rates[i] = totals[i] / s;
+      }
+      totals.fill(0);
+      rolledAt = now;
+    },
+    rate(name) {
+      const i = slots.get(name);
+      return i === undefined ? 0 : rates[i];
+    },
+    clear() { totals.fill(0); rates.fill(0); rolledAt = -1; }
+  };
+}
+
+/**
+ * The last `capacity` diagnostic lines. A line whose `key` equals the newest
+ * line's key is folded into it as a repeat count (`x3`), so a per-frame
+ * source cannot flush the ring. Allocates only when a line is written.
+ * @param {number} capacity
+ * @returns {{push: (line: string, key?: string) => void, lines: () => string[], clear: () => void}}
+ */
+export function createLineRing(capacity) {
+  /** @type {string[]} */
+  const text = new Array(capacity).fill('');
+  /** @type {string[]} */
+  const keys = new Array(capacity).fill('');
+  const repeats = new Int32Array(capacity);
+  let head = 0;
+  let count = 0;
+  return {
+    push(line, key = line) {
+      if (count > 0) {
+        const last = (head + capacity - 1) % capacity;
+        if (keys[last] === key) { repeats[last]++; text[last] = line; return; }
+      }
+      text[head] = line;
+      keys[head] = key;
+      repeats[head] = 1;
+      head = (head + 1) % capacity;
+      if (count < capacity) count++;
+    },
+    lines() {
+      /** @type {string[]} */
+      const out = [];
+      for (let i = 0; i < count; i++) {
+        const at = (head + capacity - count + i) % capacity;
+        out.push(repeats[at] > 1 ? `${text[at]} x${repeats[at]}` : text[at]);
+      }
+      return out;
+    },
+    clear() { head = 0; count = 0; repeats.fill(0); }
+  };
+}
+
+/**
+ * One overlay line of `name=rate/s` pairs.
+ * @param {string} label
+ * @param {string[]} names
+ * @param {(name: string) => number} rate
+ * @param {number} [digits]
+ * @returns {string}
+ */
+export const formatRates = (label, names, rate, digits = 1) => `${label}: ${names.map((n) => `${n} ${rate(n).toFixed(digits)}`).join(' | ')}`;
+
+/** @param {number} n @returns {string} a number to one decimal, or `-` when it is not finite */
+export const fixed1 = (n) => (Number.isFinite(n) ? n.toFixed(1) : '-');
+
 /** Seconds the report windows cover. */
 export const WINDOW_MS = 5000;
 
+/** Lines the combat ring keeps. */
+export const COMBAT_LINES = 20;
+
 /**
  * Peer and host measurements for the overlay. One instance per net system.
- * @param {{weapons: number}} opts how many wheel weapons `guestFire` can see
+ * @param {{weapons: number, kinds?: string[]}} opts how many wheel weapons `guestFire` can see, and the snapshot kinds to count rows of
  */
 export function createNetMetrics(opts) {
   const W = opts.weapons;
@@ -151,6 +240,14 @@ export function createNetMetrics(opts) {
   const unfired = createCounters(3);
   const rejects = createReasonCounts();
   const tmp = newStats();
+  const kinds = opts.kinds || [];
+  const rateNames = ['snapshots', 'snap bytes', 'events', 'event bytes', ...kinds];
+  const rates = createRateTable(rateNames);
+  const eventsIn = createReasonCounts();
+  const eventsIgnored = createReasonCounts();
+  const eventsDropped = createReasonCounts();
+  const hostCounts = createCounters(3);
+  const combatRing = createLineRing(COMBAT_LINES);
   let lastSnapAt = 0;
   let lastFrameAt = 0;
   let lastSendAt = 0;
@@ -193,6 +290,24 @@ export function createNetMetrics(opts) {
     reject(reason) { rejects.add(reason); },
     /** @param {number} weapon @param {0|1|2|3} slot 0 call, 1 cooldown skip, 2 target in ray, 3 hit accepted */
     fire(weapon, slot) { fire.add(weapon * 4 + slot); },
+    /** A snapshot's rows of one kind (peer: received, host: sent). @param {string} kind @param {number} rows */
+    snapshotRows(kind, rows) { rates.add(kind, rows); },
+    /** A whole snapshot, JSON characters. @param {number} bytes */
+    snapshotBytes(bytes) { rates.add('snapshots'); rates.add('snap bytes', bytes); },
+    /** A whole event, JSON characters. @param {number} bytes */
+    eventBytes(bytes) { rates.add('events'); rates.add('event bytes', bytes); },
+    /** An event reached the peer. @param {string} kind */
+    eventIn(kind) { eventsIn.add(kind); },
+    /** Nothing acted on an event of this kind (no handler, or a duplicate). @param {string} kind */
+    eventIgnored(kind) { eventsIgnored.add(kind); },
+    /** The host's emitter refused an event (rate cap or invalid). @param {string} kind */
+    eventDropped(kind) { eventsDropped.add(kind); },
+    /** @param {0|1|2} what 0 own shot (a weapon call into the net), 1 black hole opened, 2 tornado born */
+    host(what) { hostCounts.add(what); },
+    /** A combat line for the ring; repeated `key`s fold into one. @param {string} line @param {string} [key] */
+    combat(line, key) { combatRing.push(line, key); },
+    /** @returns {string[]} the ring, oldest first */
+    combatLines() { return combatRing.lines(); },
     /** @param {0|1|2} why 0 host not in Hero Mode, 1 controls blocked fire, 2 fired without `aim` */
     unfired(why) { unfired.add(why); },
     /**
@@ -231,14 +346,23 @@ export function createNetMetrics(opts) {
         f += ` [w${w}: call ${fire.get(w * 4)} cd ${fire.get(w * 4 + 1)} ray ${fire.get(w * 4 + 2)} hit ${fire.get(w * 4 + 3)}]`;
       }
       lines.push(`guestFire:${f || ' none'}; fire held but not run: no-hero ${unfired.get(0)}, blocked ${unfired.get(1)}; fired with weapon not raised ${unfired.get(2)}`);
+      lines.push(formatRates('per second', rateNames, rates.rate));
+      const kindLine = (/** @type {{entries: () => [string, number][]}} */ r) => (r.entries().map(([k, v]) => `${k}=${v}`).join(' ') || 'none');
+      lines.push(`events received: ${kindLine(eventsIn)}`);
+      lines.push(`events IGNORED (no handler or duplicate): ${kindLine(eventsIgnored)}`);
+      lines.push(`events dropped by the host's emitter: ${kindLine(eventsDropped)}`);
+      lines.push(`host: own weapon calls into net (rays, sectors, areas, splashes) ${hostCounts.get(0)}, hole opens ${hostCounts.get(1)}, tornado births ${hostCounts.get(2)}`);
       return lines;
     },
+    /** Once a second, from the overlay's tick: closes the current rate window. @param {number} now */
+    roll(now) { rates.roll(now); },
     /** A session ended: forget everything measured. */
     reset() {
       rtt.clear(); sendLog.clear(); snapGap.clear(); snapStale.clear(); hostFrame.clear();
       snapSend.clear(); inputGap.clear(); relayRtt.clear(); fire.clear(); unfired.clear(); rejects.clear();
       lastSnapAt = lastFrameAt = lastSendAt = lastInputAt = 0;
       pingId = pingAt = pongs = acksSeen = 0;
+      rates.clear(); eventsIn.clear(); eventsIgnored.clear(); eventsDropped.clear(); hostCounts.clear(); combatRing.clear();
     }
   };
 }

@@ -5,7 +5,7 @@ import { createInputGate } from './inputGate.js';
 import { createSnapshotBuffer } from './interp.js';
 import { createEventEmitter, createEventDeduper } from './events.js';
 import { createPlayerRegistry, REVIVE, FRIENDLY_FIRE } from './players.js';
-import { PROTOCOL_VERSION, LIMITS, WEAPONS } from './protocol.js';
+import { PROTOCOL_VERSION, LIMITS, WEAPONS, SNAPSHOT_KINDS } from './protocol.js';
 import { GUEST_WEAPONS, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrigger, coolDown, weaponAt } from './guestWeapons.js';
 import { createBullets } from '../hero/bullets.js';
 import { HERO } from '../hero/config.js';
@@ -22,7 +22,7 @@ import { glowLevel } from '../health/state.js';
 import { mayHurtPlayer, splashAmount, rayBodyDistance, inSector } from '../health/friendlyFire.js';
 import { dressAsRoger, rogerLimbs, newOwned, disposeRoger } from '../hero/rogerLook.js';
 import { rogerStyle, newRunCycle, stepRunCycle, swingLimbs, newCameraPose, followCamera, wheelHtml, wrapAngle, newFireLatch, fireLatchPress, fireLatchRelease, fireLatchSample } from './rogerView.js';
-import { createNetMetrics, isNetDebug } from './metrics.js';
+import { createNetMetrics, isNetDebug, fixed1 } from './metrics.js';
 import { createWeaponModels } from '../hero/weaponModels.js';
 import { attachHeld } from '../hero/heldWeapons.js';
 import { heldKey } from './heldWeapon.js';
@@ -109,7 +109,10 @@ export function createNetSystem(ctx) {
   const buffer = createSnapshotBuffer();
   const heroRequests = createHeroRequests();
   /** Dev-only diagnostics: null (and every hook below skipped) unless the page has `?netdebug`. */
-  const dbg = typeof location !== 'undefined' && isNetDebug(location.search) ? createNetMetrics({ weapons: WEAPONS.length }) : null;
+  const dbg = typeof location !== 'undefined' && isNetDebug(location.search) ? createNetMetrics({ weapons: WEAPONS.length, kinds: SNAPSHOT_KINDS }) : null;
+  /** Scratch for the combat diagnostic's `traceAim` call (only made with `?netdebug`). */
+  const dbgRayO = dbg ? new THREE.Vector3() : null;
+  const dbgRayD = dbg ? new THREE.Vector3() : null;
 
   const S = {
     /** @type {ReturnType<typeof createRelayClient>|null} */
@@ -148,6 +151,9 @@ export function createNetSystem(ctx) {
     dbgEl: null,
     dbgAcc: 0,
     dbgPingAcc: 0,
+    /** Combat diagnostic: who fired the last hole, when, and whether it was seen open last frame. */
+    dbgHole: { shooter: '0', at: 0, open: false },
+    dbgTornadoes: -1,
     peerReadyShown: false,
     resetting: false,
     /** @type {{pos: THREE.Vector3, target: THREE.Vector3}|null} */
@@ -268,11 +274,23 @@ export function createNetSystem(ctx) {
     if (ui.leave) /** @type {HTMLButtonElement} */ (ui.leave).disabled = idle;
   }
 
+  /**
+   * Diagnostic only (`?netdebug`): the bytes and per-kind rows of one snapshot.
+   * @param {any} snap
+   * @returns {void}
+   */
+  function dbgSnapshot(snap) {
+    if (!dbg) return;
+    dbg.snapshotBytes(JSON.stringify(snap).length);
+    for (const k of SNAPSHOT_KINDS) if (Array.isArray(snap[k])) dbg.snapshotRows(k, snap[k].length);
+  }
+
   /** @param {string} kind @param {Object} data @param {string} [to] */
   function sendEvent(kind, data, to) {
     if (S.role !== 'host' || !S.client) return;
     const ev = emitter.make(kind, data);
-    if (!ev) return;
+    if (!ev) { if (dbg) dbg.eventDropped(kind); return; }
+    if (dbg) dbg.eventBytes(JSON.stringify(ev).length);
     S.client.send(to === undefined ? ev : { ...ev, to });
   }
 
@@ -302,7 +320,7 @@ export function createNetSystem(ctx) {
     deduper.reset();
     emitter.reset();
     buffer.clear();
-    if (dbg) { dbg.reset(); S.dbgAcc = S.dbgPingAcc = 0; }
+    if (dbg) { dbg.reset(); S.dbgAcc = S.dbgPingAcc = 0; S.dbgTornadoes = -1; S.dbgHole.open = false; S.dbgHole.shooter = '0'; S.dbgHole.at = 0; }
     S.tick = 0;
     S.peerScore = 0;
     S.peerRow = null;
@@ -565,6 +583,30 @@ export function createNetSystem(ctx) {
   const mayHurt = (shooterId, targetId) => mayHurtPlayer(shooterId, targetId, { coop: coopActive(), friendlyFire: FRIENDLY_FIRE });
 
   /**
+   * Diagnostic only (`?netdebug`): one line of the combat ring, repeats folded.
+   * @param {string} fn The entry point (`hurtRay`, `hitGuestsArea`...).
+   * @param {string} shooterId
+   * @param {string} targetId
+   * @param {string} outcome `applied`, `miss`, `out`, `mayHurt` or `refused:<reason>`.
+   * @param {string} [extra] Detail that may vary without making a new line.
+   * @returns {void}
+   */
+  function dbgHurt(fn, shooterId, targetId, outcome, extra = '') {
+    if (dbg) dbg.combat(`${fn} ${shooterId}->${targetId}: ${outcome}${extra}`, `${fn}|${shooterId}|${targetId}|${outcome}`);
+  }
+
+  /**
+   * Diagnostic only: the outcome of a `damagePlayer` call.
+   * @param {string} fn @param {string} shooterId @param {string} targetId
+   * @param {{applied: boolean, killed: boolean, health: number, reason?: string}} r
+   * @param {string} [extra]
+   * @returns {void}
+   */
+  function dbgResult(fn, shooterId, targetId, r, extra = '') {
+    if (dbg) dbgHurt(fn, shooterId, targetId, r.applied ? (r.killed ? 'applied+down' : 'applied') : `refused:${r.reason || 'unknown'}`, `${extra} hp ${Math.round(r.health)}`);
+  }
+
+  /**
    * An area event (explosion, ship crash, black hole zone) reaching the
    * guests: every guest inside the radius takes the same request Roger would,
    * through the one health API (host only; the API ignores a downed guest).
@@ -576,7 +618,16 @@ export function createNetSystem(ctx) {
     if (!coopActive() || !ctx.systems.health) return;
     for (const p of players.list()) {
       if (p.id === '0' || Math.hypot(p.x - x, p.z - z) >= radius) continue;
-      ctx.systems.health.damagePlayer({ ...request, targetId: p.id });
+      const r = ctx.systems.health.damagePlayer({ ...request, targetId: p.id });
+      if (dbg) {
+        const d = Math.hypot(p.x - x, p.z - z);
+        if (request.source === 'blackHole') {
+          // Shooter-to-centre and the zone radius at this swallow.
+          const shooter = players.get(S.dbgHole.shooter);
+          const sd = shooter ? Math.hypot(shooter.x - x, shooter.z - z) : NaN;
+          if (dbg) dbgResult('hole-swallow', S.dbgHole.shooter, p.id, r, ` centre ${fixed1(x)},${fixed1(z)} shooter-to-centre ${fixed1(sd)} m zone ${fixed1(radius)} m target-to-centre ${fixed1(d)} m`);
+        } else dbgResult('hitGuestsArea', request.source, p.id, r, ` at ${fixed1(x)},${fixed1(z)} ${fixed1(d)} m of ${fixed1(radius)}`);
+      }
     }
   }
 
@@ -589,12 +640,16 @@ export function createNetSystem(ctx) {
    * @returns {void}
    */
   function splashGuests(at, radius, weapon) {
+    if (dbg) dbg.host(0);
     if (!coopActive() || !ctx.systems.health) return;
     for (const p of players.list()) {
-      if (p.id === '0' || !mayHurt('0', p.id)) continue;
-      const amount = splashAmount(weapon, Math.hypot(p.x - at.x, p.z - at.z), radius);
-      if (amount <= 0) continue;
-      ctx.systems.health.damagePlayer({ source: 'friendlyFire', amount, type: 'blast', position: at, targetId: p.id, title: 'FRIENDLY FIRE', sub: "Caught in Roger's blast" });
+      if (p.id === '0') continue;
+      if (!mayHurt('0', p.id)) { if (dbg) dbgHurt('splashGuests', '0', p.id, 'mayHurt', ` ${weapon}`); continue; }
+      const d = Math.hypot(p.x - at.x, p.z - at.z);
+      const amount = splashAmount(weapon, d, radius);
+      if (amount <= 0) { if (dbg) dbgHurt('splashGuests', '0', p.id, 'out', ` ${weapon} ${fixed1(d)} m of ${fixed1(radius)}`); continue; }
+      const r = ctx.systems.health.damagePlayer({ source: 'friendlyFire', amount, type: 'blast', position: at, targetId: p.id, title: 'FRIENDLY FIRE', sub: "Caught in Roger's blast" });
+      if (dbg) dbgResult('splashGuests', '0', p.id, r, ` ${weapon} ${fixed1(d)} m`);
     }
   }
 
@@ -622,16 +677,19 @@ export function createNetSystem(ctx) {
    * @returns {void}
    */
   function hurtRay(shooterId, ox, oy, oz, dx, dy, dz, maxT, weapon) {
+    if (dbg && shooterId === '0') dbg.host(0);
     if (!coopActive() || !ctx.systems.health) return;
     const amount = /** @type {Record<string, number>} */ (HEALTH.damageToPlayer)[weapon];
     if (!(amount > 0)) return;
     for (const p of players.list()) {
-      if (p.id === shooterId || !mayHurt(shooterId, p.id)) continue;
-      if (rayBodyDistance(ox, oy, oz, dx, dy, dz, maxT, p.x, p.z) < 0) continue;
-      ctx.systems.health.damagePlayer({
+      if (p.id === shooterId) continue;
+      if (!mayHurt(shooterId, p.id)) { if (dbg) dbgHurt('hurtRay', shooterId, p.id, 'mayHurt', ` ${weapon}`); continue; }
+      if (rayBodyDistance(ox, oy, oz, dx, dy, dz, maxT, p.x, p.z) < 0) { if (dbg) dbgHurt('hurtRay', shooterId, p.id, 'miss', ` ${weapon} reach ${fixed1(maxT)} m, target ${fixed1(Math.hypot(p.x - ox, p.z - oz))} m away`); continue; }
+      const r = ctx.systems.health.damagePlayer({
         source: 'friendlyFire', amount, type: 'ray',
         position: { x: ox, y: 0, z: oz }, targetId: p.id, title: 'FRIENDLY FIRE', sub: `Shot by ${attacker(shooterId)}`
       });
+      if (dbg) dbgResult('hurtRay', shooterId, p.id, r, ` ${weapon}`);
     }
   }
 
@@ -652,17 +710,20 @@ export function createNetSystem(ctx) {
    * @returns {void}
    */
   function hurtSector(shooterId, ox, oz, fx, fz, reach, cosArc, near, weapon, type, verb) {
+    if (dbg && shooterId === '0') dbg.host(0);
     if (!coopActive() || !ctx.systems.health) return;
     const amount = /** @type {Record<string, number>} */ (HEALTH.damageToPlayer)[weapon];
     if (!(amount > 0)) return;
     const len = Math.hypot(fx, fz) || 1;
     for (const p of players.list()) {
-      if (p.id === shooterId || !mayHurt(shooterId, p.id)) continue;
-      if (!inSector(ox, oz, fx / len, fz / len, p.x, p.z, reach, cosArc, near)) continue;
-      ctx.systems.health.damagePlayer({
+      if (p.id === shooterId) continue;
+      if (!mayHurt(shooterId, p.id)) { if (dbg) dbgHurt('hurtSector', shooterId, p.id, 'mayHurt', ` ${weapon}`); continue; }
+      if (!inSector(ox, oz, fx / len, fz / len, p.x, p.z, reach, cosArc, near)) { if (dbg) dbgHurt('hurtSector', shooterId, p.id, 'out', ` ${weapon} target ${fixed1(Math.hypot(p.x - ox, p.z - oz))} m of reach ${fixed1(reach)}`); continue; }
+      const r = ctx.systems.health.damagePlayer({
         source: 'friendlyFire', amount, type, position: { x: ox, y: 0, z: oz },
         targetId: p.id, title: 'FRIENDLY FIRE', sub: `${verb} ${attacker(shooterId)}`
       });
+      if (dbg) dbgResult('hurtSector', shooterId, p.id, r, ` ${weapon}`);
     }
   }
 
@@ -678,15 +739,20 @@ export function createNetSystem(ctx) {
    * @returns {void}
    */
   function hurtArea(shooterId, x, z, radius, weapon, verb) {
+    if (dbg && shooterId === '0') dbg.host(0);
     if (!coopActive() || !ctx.systems.health) return;
     const amount = /** @type {Record<string, number>} */ (HEALTH.damageToPlayer)[weapon];
     if (!(amount > 0)) return;
     for (const p of players.list()) {
-      if (p.id === shooterId || !mayHurt(shooterId, p.id) || Math.hypot(p.x - x, p.z - z) >= radius) continue;
-      ctx.systems.health.damagePlayer({
+      if (p.id === shooterId) continue;
+      if (!mayHurt(shooterId, p.id)) { if (dbg) dbgHurt('hurtArea', shooterId, p.id, 'mayHurt', ` ${weapon}`); continue; }
+      const d = Math.hypot(p.x - x, p.z - z);
+      if (d >= radius) { if (dbg) dbgHurt('hurtArea', shooterId, p.id, 'out', ` ${weapon} ${fixed1(d)} m of ${fixed1(radius)}`); continue; }
+      const r = ctx.systems.health.damagePlayer({
         source: 'friendlyFire', amount, type: 'ray', position: { x, y: 0, z },
         targetId: p.id, title: 'FRIENDLY FIRE', sub: `${verb} ${attacker(shooterId)}`
       });
+      if (dbg) dbgResult('hurtArea', shooterId, p.id, r, ` ${weapon}`);
     }
   }
 
@@ -1025,6 +1091,44 @@ export function createNetSystem(ctx) {
     return best;
   }
 
+  /**
+   * Diagnostic only (`?netdebug`): one line per guest hitscan shot. The enemy
+   * `scan` found, what Roger's own `traceAim` finds along the same ray (a
+   * read-only query, checked: it only reads the world), and the people within
+   * 5 m of where the ray ends.
+   * @param {string} id The shooter.
+   * @param {string} weapon
+   * @param {number} ox Origin x (the eye is at `EYE`).
+   * @param {number} oz Origin z.
+   * @param {number} dx Unit direction.
+   * @param {number} dy
+   * @param {number} dz
+   * @param {{kind: any, t: number}|null} hit What `scan` found.
+   * @param {number} range The weapon's range.
+   * @returns {void}
+   */
+  function dbgShot(id, weapon, ox, oz, dx, dy, dz, hit, range) {
+    if (!dbg || !dbgRayO || !dbgRayD) return;
+    const h = hero();
+    let aim = 'traceAim n/a';
+    let reach = hit ? hit.t : range;
+    if (h && typeof h.traceAim === 'function') {
+      dbgRayO.set(ox, EYE, oz);
+      dbgRayD.set(dx, dy, dz);
+      const a = h.traceAim(dbgRayO, dbgRayD);
+      aim = `traceAim ${a.kind} at ${fixed1(a.t)} m`;
+      reach = Math.min(reach, a.t);
+    }
+    const ix = ox + dx * reach, iz = oz + dz * reach;
+    let near = 0, avatars = 0;
+    for (const person of ctx.Environment.people) {
+      if (!person.mesh.parent || person.abducted) continue;
+      if (Math.hypot(person.mesh.position.x - ix, person.mesh.position.z - iz) > 5) continue;
+      if (person.mesh.name.startsWith('coop_player_')) avatars++; else near++;
+    }
+    dbg.combat(`shot ${id} ${weapon} from ${fixed1(ox)},${fixed1(oz)} dir ${fixed1(dx)},${fixed1(dy)},${fixed1(dz)}: scan ${hit ? `${hit.kind.kind} at ${fixed1(hit.t)} m` : 'none'}; ${aim}; people within 5 m of impact ${near} (+${avatars} avatars)`);
+  }
+
   /** @param {number} points @param {string} id */
   function credit(points, id) {
     ctx.systems.damage.addDamageScore(points);
@@ -1069,7 +1173,7 @@ export function createNetSystem(ctx) {
       const w = /** @type {typeof GUEST_WEAPONS.rifle} */ (GUEST_WEAPONS[name]);
       a.cd = w.cooldown;
       const hit = scan(p, yaw, pitch, w.range);
-      if (dbg && hit) dbg.fire(trigger.weapon, 2);
+      if (dbg) { dbgShot(p.id, name, ox, oz, dx, dy, dz, hit, w.range); if (hit) dbg.fire(trigger.weapon, 2); }
       // What the host sees of the guest's shot: one tracer in the shared round
       // pool, from just ahead of the guest's eye to where the ray ends. Cosmetic
       // (no hit, no casing, no sound, no particles); the damage is the call below.
@@ -1136,6 +1240,10 @@ export function createNetSystem(ctx) {
       const cost = HOLE.cost * 10;
       if (!ENERGY.infinite && p.energy < cost) { sendEvent('notice', { text: `BLACK HOLE GUN — needs ${cost}% energy` }, p.id); return; }
       const result = ctx.systems.blackHole.fire(Math.max(-HERO.bound, Math.min(HERO.bound, gx)), Math.max(-HERO.bound, Math.min(HERO.bound, gz)));
+      if (dbg) {
+        if (result) { S.dbgHole.shooter = p.id; S.dbgHole.at = performance.now(); }
+        dbg.combat(`blackhole ${p.id}: ${result || 'refused'} centre ${fixed1(gx)},${fixed1(gz)} shooter-to-centre ${fixed1(Math.hypot(gx - ox, gz - oz))} m, scan ${hit ? hit.kind.kind : 'ground'}`);
+      }
       if (result && !ENERGY.infinite) p.energy -= cost;
     }
   }
@@ -1295,6 +1403,7 @@ export function createNetSystem(ctx) {
         }
       }
       if (dbg) {
+        dbgSnapshot(msg);
         let mine = -1;
         if (Array.isArray(msg.ack)) for (const r of msg.ack) if (String(r[0]) === S.myId) mine = r[1];
         dbg.snapshotArrived(performance.now(), mine);
@@ -1307,7 +1416,8 @@ export function createNetSystem(ctx) {
       return;
     }
     if (msg.type !== 'event') return;
-    if (!deduper.first(msg)) return;
+    if (dbg) { dbg.eventBytes(JSON.stringify(msg).length); dbg.eventIn(String(msg.kind)); }
+    if (!deduper.first(msg)) { if (dbg) dbg.eventIgnored(`${msg.kind}(dup/invalid)`); return; }
     const d = msg.data || {};
     switch (msg.kind) {
       case 'welcome':
@@ -1344,6 +1454,8 @@ export function createNetSystem(ctx) {
       case 'mission': S.peerMission = { id: String(d.id), value: Number(d.value), goal: Number(d.goal), left: Number(d.left) }; break;
       case 'score': if (Number(d.id) === Number(S.myId)) say(`+${Number(d.points) || 0}`); break;
       default:
+        // No handler: the event is dropped here (`explosion` today).
+        if (dbg) dbg.eventIgnored(String(msg.kind));
     }
   }
 
@@ -2074,6 +2186,33 @@ export function createNetSystem(ctx) {
   }
 
   /**
+   * Diagnostic only: the overlay's lines about the guest's world (tornado
+   * proxies, the guest-only pools, the shared particle room) and, last, the
+   * combat ring. Built once a second.
+   * @returns {string[]}
+   */
+  function dbgWorldLines() {
+    /** @type {string[]} */
+    const lines = [];
+    if (S.role === 'peer') {
+      const cam = Sim.three.camera.position;
+      const inScene = !!S.proxyRoot && S.proxyRoot.parent === Sim.three.scene;
+      const tw = S.proxies.get('tornadoes');
+      lines.push(`tornado proxies: ${tw ? tw.size : 0}; proxyRoot ${S.proxyRoot ? (inScene ? 'in scene' : 'NOT in scene') : 'missing'}`);
+      if (tw) {
+        for (const [id, o] of tw) lines.push(`  tornado #${id}: x ${fixed1(o.position.x)} z ${fixed1(o.position.z)} radius ${fixed1(o.scale.x)} distance to camera ${fixed1(Math.hypot(o.position.x - cam.x, o.position.z - cam.z))} m visible ${o.visible}`);
+      }
+      lines.push(`guest pools: flames ${flames ? 'exist' : 'none'}, rounds ${rounds ? 'exist' : 'none'} (neither pool exposes a live count)`);
+    }
+    const caps = ctx.systems.caps;
+    if (caps) lines.push(`shared particles: in use ${caps.particlesInUse()}, room ${caps.particleRoom()}`);
+    const ring = dbg ? dbg.combatLines() : [];
+    lines.push(`combat ring (last ${ring.length}):`);
+    for (const l of ring) lines.push(`  ${l}`);
+    return lines;
+  }
+
+  /**
    * `?netdebug` only: host frame cadence, the relay ping once a second and the
    * overlay refresh once a second. Never called when the flag is off.
    * @param {number} rawDt
@@ -2082,7 +2221,20 @@ export function createNetSystem(ctx) {
   function debugTick(rawDt) {
     if (!dbg) return;
     const now = performance.now();
-    if (S.role === 'host') dbg.hostFrameAt(now);
+    if (S.role === 'host') {
+      dbg.hostFrameAt(now);
+      // Hole opens and tornado births, seen by their state (no hook in those systems).
+      const open = !!(ctx.systems.blackHole && ctx.systems.blackHole.isOpen());
+      if (open && !S.dbgHole.open) {
+        dbg.host(1);
+        // Opened by a guest shot a moment ago (guestFire noted it), else by Roger.
+        if (now - S.dbgHole.at > 1000) S.dbgHole.shooter = '0';
+      }
+      S.dbgHole.open = open;
+      const born = ctx.tornadoes ? ctx.tornadoes.active.length : 0;
+      if (S.dbgTornadoes >= 0 && born > S.dbgTornadoes) dbg.host(2);
+      S.dbgTornadoes = born;
+    }
     S.dbgPingAcc += rawDt;
     if (S.dbgPingAcc >= 1 && S.client && S.client.state().status === 'in-room') {
       S.dbgPingAcc = 0;
@@ -2092,7 +2244,8 @@ export function createNetSystem(ctx) {
     S.dbgAcc += rawDt;
     if (S.dbgAcc >= 1) {
       S.dbgAcc = 0;
-      if (S.dbgEl) S.dbgEl.textContent = `NETDEBUG ${S.role || ''} (5 s window)\n${dbg.report(now).join('\n')}${S.role === 'peer' ? `\nprediction: ${S.pred.active ? 'on' : 'off'} pending ${S.pred.pending.length} blends ${S.predStats.blends} snaps ${S.predStats.snaps} error last ${S.predStats.last.toFixed(2)} worst ${S.predStats.worst.toFixed(2)} m` : ''}`;
+      dbg.roll(now);
+      if (S.dbgEl) S.dbgEl.textContent = `NETDEBUG ${S.role || ''} (5 s window)\n${dbg.report(now).concat(dbgWorldLines()).join('\n')}${S.role === 'peer' ? `\nprediction: ${S.pred.active ? 'on' : 'off'} pending ${S.pred.pending.length} blends ${S.predStats.blends} snaps ${S.predStats.snaps} error last ${S.predStats.last.toFixed(2)} worst ${S.predStats.worst.toFixed(2)} m` : ''}`;
     }
   }
 
@@ -2117,8 +2270,12 @@ export function createNetSystem(ctx) {
       S.snapAcc += rawDt;
       if (S.snapAcc >= SNAP_INTERVAL && players.list().length > 1) {
         S.snapAcc = 0;
-        if (dbg) dbg.snapshotSent(performance.now());
-        S.client.send(buildSnapshot());
+        const snap = buildSnapshot();
+        if (dbg) {
+          dbg.snapshotSent(performance.now());
+          dbgSnapshot(snap);
+        }
+        S.client.send(snap);
       }
     } else if (S.role === 'peer') updatePeer(rawDt);
   }
