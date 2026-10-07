@@ -11,7 +11,7 @@ const out = () => ({ x: 0, y: 0, z: 0, kind: '' });
 const code = (n) => HIT_CODES.indexOf(n);
 
 test('the minigun round, the rail bolt and the plasma beam are played in this build', () => {
-  assert.deepEqual([...PLAYED], ['bullet', 'rail', 'plasma', 'mega', 'holeShot', 'bolt', 'emp', 'ray', 'round', 'missile']);
+  assert.deepEqual([...PLAYED], ['bullet', 'rail', 'plasma', 'mega', 'holeShot', 'bolt', 'emp', 'ray', 'round', 'missile', 'cut', 'warp']);
   for (const k of FX_KINDS) assert.equal(playedKind(FX_KINDS.indexOf(k)), PLAYED.includes(k) ? k : null);
   assert.equal(playedKind(99), null);
 });

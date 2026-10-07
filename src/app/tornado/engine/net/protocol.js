@@ -75,7 +75,7 @@ export const EVENT_TYPES = ['welcome', 'announce', 'notice', 'explosion', 'playe
  * Append only: an index is part of the wire contract. A row whose kind is not
  * in this list (a newer host) is dropped by `sanitizeFx`, never an error.
  */
-export const FX_KINDS = ['bullet', 'rail', 'plasma', 'mega', 'fire', 'holeShot', 'cut', 'blast', 'bolt', 'emp', 'ray', 'round', 'missile'];
+export const FX_KINDS = ['bullet', 'rail', 'plasma', 'mega', 'fire', 'holeShot', 'cut', 'blast', 'bolt', 'emp', 'ray', 'round', 'missile', 'warp'];
 
 /** Column order of an `fx` row: [id, kind, shooter, x, y, z, a, b, c, extra]. */
 export const FX_COLUMNS = ['id', 'kind', 'shooter', 'x', 'y', 'z', 'a', 'b', 'c', 'extra'];
@@ -197,7 +197,7 @@ export function validateInput(msg) {
  *   fx           [id, kind, shooter, x, y, z, a, b, c, extra]  (kind = index in FX_KINDS)
  *   tw           [id, birth, sizeMul, fade, leanX, leanZ]      (the tornado's position stays in `tornadoes`)
  *   hole         [x, z, age, closing 0|1]
- *   aim          [playerId, yaw, pitch, firingBits]
+ *   aim          [playerId, yaw, pitch, firingBits]  (bits: 1 Fire Gun firing, 2 minigun spinning, 4 jetpack burning)
  *   env          [running 0|1, stormRamp, intensity, wind, radius, daylight, timeScale]
  * Caps: fx 24, tw 8, hole 1, aim 8, env 1. Unknown fx kinds are dropped by
  * `sanitizeFx`, not an error. Built and read by later subtasks; no row here

@@ -13,6 +13,7 @@ import { createFunnels } from './funnels.js';
 import { createSky } from './skyMirror.js';
 import { explosionParams, createSoundGate } from './explosionFx.js';
 import { flameWanted, flameMuzzle } from './mirrorRules.js';
+import { withJetBit, jetWanted, guestBurning, climbFrom, scoreMarker, HIT_MARK_SECONDS } from './figureFx.js';
 import { HERO } from '../hero/config.js';
 import { JETPACK } from '../hero/jetpack.js';
 import { stepAir, jetHeld } from './flight.js';
@@ -211,6 +212,8 @@ export function createNetSystem(ctx) {
     altNow: new Map(),
     /** The newest snapshot's `aim` rows ([id, yaw, pitch, bits]); null when it carried none (the flames' state, so a cleared bit stops a flame within one snapshot). */
     aimRows: null,
+    /** Seconds the crosshair's hit marker (class `on`) has left on a guest. */
+    hitMark: 0,
     /** The newest snapshot's `hole` row ([x, z, age, closing 0|1]) or null, whether it came this frame, and the clock that times the collapse from the flag flipping (the Black Hole mirrored on this screen). */
     holeRow: null,
     holeFresh: false,
@@ -255,6 +258,8 @@ export function createNetSystem(ctx) {
   /** @type {Map<string, number>} Per guest: ability bits pressed since the host last acted on them, and the bits of the last message. */
   const abilEdges = new Map();
   const abilSeen = new Map();
+  /** Each figure's eased height last frame, for how hard it climbs (guest). @type {Map<number, number>} */
+  const jetAlt = new Map();
   // Scratch for the peer camera.
   const camPose = newCameraPose();
   const camGoal = new THREE.Vector3();
@@ -356,6 +361,10 @@ export function createNetSystem(ctx) {
     S.altTarget.clear();
     S.altNow.clear();
     S.aimRows = null;
+    S.hitMark = 0;
+    if (S.cross) S.cross.classList.remove('on');
+    jetAlt.clear();
+    if (ctx.systems.heroMode) ctx.systems.heroMode.clearRemoteJets();
     S.holeRow = null;
     S.holeFresh = false;
     S.holeClock = newHoleClock();
@@ -967,9 +976,14 @@ export function createNetSystem(ctx) {
       swingLimbs(a.limbs, a.run.phase, p.state === 'up' ? stepRunCycle(a.run, p.x, p.z, dt, HERO.stride, HERO.runSpeed) : 0);
       // The guest's weapon in its hand, as the host sees the guest's Roger.
       a.held.show(heldKey(p.weapon, p.state === 'up', !!p.seat));
+      // The guest's jetpack flames and smoke on the host's screen (drawing only; the pack burns while it is in the air).
+      if (guestBurning(a.air, p.state === 'up', !p.seat)) h.showRemoteJet(Number(p.id), p.x, a.alt, p.z, p.heading, THREE.MathUtils.clamp(a.vy / JETPACK.climbSpeed, 0, 1), dt);
       // Hunters now hurt a guest through the health API (melee touches, rays),
       // which calls catchPlayer at 0 health; there is no instant catch here.
     }
+
+    // Ends the frame for the co-op packs (hides the ones not shown, steps the shared smoke).
+    h.stepRemoteJets(dt);
 
     const { revived, died } = players.update(dt);
     for (const id of revived) {
@@ -1301,8 +1315,10 @@ export function createNetSystem(ctx) {
         ctx.systems.people.explodePerson(person);
         credit(IMPACT_SCORE, p.id);
       }
-      muzzleVec.set(ox, EYE, oz);
-      tracerEnd.set(ox + Math.sin(yaw) * KATANA.reach, EYE, oz + Math.cos(yaw) * KATANA.reach);
+      // The crescent on the host's screen, and the cut row for the guest's other screen: both ends at the guest's feet.
+      muzzleVec.set(ox, a.alt, oz);
+      tracerEnd.set(ox + Math.sin(yaw) * KATANA.reach, a.alt, oz + Math.cos(yaw) * KATANA.reach);
+      mirror.drawGuestSwing(ox, a.alt, oz, yaw, !!(target || person));
       announceGuestShot('cut', p.id, muzzleVec, tracerEnd, target || person ? 'enemy' : '');
     } else if (name === 'blackhole') {
       a.cd = HOLE_COOLDOWN;
@@ -1363,14 +1379,14 @@ export function createNetSystem(ctx) {
     const pose = h.rogerPose();
     if (pose) {
       const d = h.rogerAim();
-      rows.push(aimRow(0, d ? Math.atan2(d.x, d.z) : pose.heading, d ? Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)) : 0, h.rogerFireBits()));
+      rows.push(aimRow(0, d ? Math.atan2(d.x, d.z) : pose.heading, d ? Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)) : 0, withJetBit(h.rogerFireBits(), h.rogerJetBurning())));
     }
     for (const p of players.list()) {
       if (p.id === '0' || rows.length >= LIMITS.maxAim || !S.avatars.has(p.id) || !p.input) continue;
       const input = p.input;
       const firing = input.fire && input.aim && p.state === 'up';
       const w = WEAPONS[input.weapon];
-      rows.push(aimRow(Number(p.id), input.aim ? input.yaw : p.heading, input.aim ? input.pitch : 0, firing ? (w === 'fire' ? 1 : w === 'minigun' ? 2 : 0) : 0));
+      rows.push(aimRow(Number(p.id), input.aim ? input.yaw : p.heading, input.aim ? input.pitch : 0, withJetBit(firing ? (w === 'fire' ? 1 : w === 'minigun' ? 2 : 0) : 0, guestBurning(S.avatars.get(p.id).air, p.state === 'up', !p.seat))));
     }
     return rows;
   }
@@ -1600,7 +1616,16 @@ export function createNetSystem(ctx) {
         if (Number(d.id) === Number(S.myId)) say(d.on ? 'INVINCIBLE · nothing can hurt you' : 'Invincible off');
         break;
       case 'mission': S.peerMission = { id: String(d.id), value: Number(d.value), goal: Number(d.goal), left: Number(d.left) }; break;
-      case 'score': if (Number(d.id) === Number(S.myId)) say(`+${Number(d.points) || 0}`); break;
+      case 'score': {
+        // The guest's own points: the "+N" and the crosshair's hit marker (the red a target turns it). The
+        // event names only the player credited, so the partner's points are not shown (the host's own are not sent).
+        const m = scoreMarker(d, Number(S.myId));
+        if (m && m.own) {
+          say(`+${m.points}`);
+          if (S.cross) { S.cross.classList.add('on'); S.hitMark = HIT_MARK_SECONDS; }
+        }
+        break;
+      }
       case 'explosion': {
         // The host's blast, drawn here and nowhere else (cosmetic: no damage, no shake, no bus event).
         const p = explosionParams(d);
@@ -1966,6 +1991,34 @@ export function createNetSystem(ctx) {
     if (flames) flames.update(dt);
   }
 
+  /**
+   * The jetpack flames and smoke on every figure whose `aim` row says its pack burns, the viewer's
+   * own and the partner's: the pack and the flames are `hero/jetpack.js` `showRemoteJet` (the host's own
+   * model, pooled smoke, drawing only), placed where the figure's proxy stands, at its eased height.
+   * State, not events: a clear bit or a vanished row draws nothing. Then the frame is closed (once).
+   * @param {Map<number, number[]>|undefined} players the interpolated `players` rows
+   * @param {number} dt real seconds
+   * @returns {void}
+   */
+  function stepJets(players, dt) {
+    const h = hero();
+    const rows = S.aimRows;
+    const proxies = S.proxies.get('players');
+    if (rows && players && proxies) {
+      for (const r of rows) {
+        if (!jetWanted(r)) continue;
+        const row = players.get(r[0]);
+        const obj = proxies.get(r[0]);
+        if (!row || !obj || row[4] !== 0) continue;
+        const alt = S.altNow.get(r[0]) || 0;
+        const prev = jetAlt.get(r[0]);
+        jetAlt.set(r[0], alt);
+        h.showRemoteJet(r[0], obj.position.x, alt, obj.position.z, obj.rotation.y, climbFrom(prev === undefined ? alt : prev, alt, dt, JETPACK.climbSpeed), dt);
+      }
+    }
+    h.stepRemoteJets(dt);
+  }
+
   /** Takes every viewmodel out of the scene (their geometry is released with `S.geos`). @returns {void} */
   function clearViewmodels() {
     if (flames) flames.release();
@@ -2238,6 +2291,7 @@ export function createNetSystem(ctx) {
       if (own) own.visible = !camPose.firstPerson;
     }
     stepFlames(s.kinds.players, dt);
+    stepJets(s.kinds.players, dt);
     drawHud();
   }
 
@@ -2473,6 +2527,10 @@ export function createNetSystem(ctx) {
     if (S.toastTimer > 0) {
       S.toastTimer -= rawDt;
       if (S.toastTimer <= 0 && S.toast) S.toast.classList.remove('visible');
+    }
+    if (S.hitMark > 0) {
+      S.hitMark -= rawDt;
+      if (S.hitMark <= 0 && S.cross) S.cross.classList.remove('on');
     }
     if (!S.client) return;
     if (dbg) debugTick(rawDt);

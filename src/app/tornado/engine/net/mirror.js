@@ -5,6 +5,7 @@ import { newFxQueue, dueFx } from './fxQueue.js';
 import { unpackExtra } from './fxOut.js';
 import { boltFromRow, empFromRow } from './skyFx.js';
 import { rayFromRow, roundFromRow, missileFromRow } from './enemyFx.js';
+import { warpFromRow, cutFromRow, swingBearing, swingFade, SWING_ARC } from './figureFx.js';
 import { createRoundView } from '../gunner/roundView.js';
 import { playedKind, shotEnd, takeRows, cueDue, CUE_GAP, RAIL_POWER, beamLook } from './mirrorRules.js';
 import { HERO } from '../hero/config.js';
@@ -44,6 +45,11 @@ import { buildBeamMeshes, placeBeamMesh, fadeBeamMeshes, buildRingMeshes, placeR
  * `gunner/roundView.js` (the round meshes flying a straight line). None tests, hurts,
  * pushes or scores (R-053); sounds are capped per kind by `CUE_GAP`.
  *
+ * The teleport's `warp` is the host's own two-ended distortion (`teleport.warpAt`, the column
+ * and ring at each end) with its zap, no shake. The Katana's `cut` is a short crescent flashed
+ * in front of the shooter's figure (a pool of `ARCS`, additive, no light) with the katana's own
+ * whoosh and slice sounds; a Blade Mode line is a spark and the sound only. Visual only (R-053).
+ *
  * One small pool of rounds per instance, made on first use and released with
  * the session (R-047, R-048): `ROUNDS` bullets and `CASINGS` casings are about
  * the own and the partner's minigun in flight at once; sparks check
@@ -58,6 +64,8 @@ export const ROUNDS = 48;
 export const CASINGS = 40;
 /** Beams alive at once: the own and the partner's rifle (0.55 s each, one shot every 0.35 s) with room to spare. */
 export const BEAMS = 3;
+/** Swing crescents alive at once: the Katana's cooldown is 0.35 s and an arc lives 0.2 s, two Rogers need two. */
+export const ARCS = 3;
 /** The sparks need this much of the shared particle budget (`caps.particleRoom()`). */
 const SPARK_ROOM = 24;
 
@@ -68,6 +76,7 @@ const SPARK_ROOM = 24;
  *   update: (renderT: number|null, dt: number) => void,
  *   drawOwn: (kind: 'bullet'|'rail'|'plasma', from: THREE.Vector3, to: THREE.Vector3) => void,
  *   drawGuestShot: (kind: 'bullet'|'rail'|'plasma', from: THREE.Vector3, to: THREE.Vector3, hit: number) => void,
+ *   drawGuestSwing: (x: number, y: number, z: number, heading: number, hit: boolean) => void,
  *   tracer: (from: THREE.Vector3, to: THREE.Vector3) => void,
  *   reset: () => void,
  *   dispose: () => void,
@@ -81,7 +90,7 @@ export function createMirror(ctx) {
   /** The landing of each round in flight: one record per pool slot, in firing order (the pool reuses its slots round-robin). */
   const hits = Array.from({ length: ROUNDS }, () => ({ kind: 'ground', obj: null, at: new THREE.Vector3() }));
   let nextHit = 0;
-  const lastCue = { bullet: -Infinity, rail: -Infinity, plasma: -Infinity, mega: -Infinity, holeShot: -Infinity, bolt: -Infinity, emp: -Infinity, ray: -Infinity, round: -Infinity, missile: -Infinity };
+  const lastCue = { bullet: -Infinity, rail: -Infinity, plasma: -Infinity, mega: -Infinity, holeShot: -Infinity, bolt: -Infinity, emp: -Infinity, ray: -Infinity, round: -Infinity, missile: -Infinity, cut: -Infinity, warp: -Infinity };
   /** HAVOC's announced rounds (made on the first one). @type {ReturnType<typeof createRoundView>|null} */
   let roundView = null;
   let roundLands = 0;
@@ -92,6 +101,12 @@ export function createMirror(ctx) {
    */
   let beams = null;
   let nextBeam = 0;
+  /**
+   * The swing crescents (made on first use): the mesh, seconds left, and where it sweeps from.
+   * @type {{mesh: THREE.Mesh, t: number, heading: number}[]|null}
+   */
+  let arcs = null;
+  let nextArc = 0;
   /** @type {THREE.Mesh[]|null} */
   let rings = null;
   let ringT = 0;
@@ -275,7 +290,7 @@ export function createMirror(ctx) {
 
   /**
    * Whether a cue of `kind` may sound now (and notes it): the per-kind rate cap.
-   * @param {'ray'|'round'|'missile'} kind
+   * @param {'ray'|'round'|'missile'|'cut'|'warp'} kind
    * @returns {boolean}
    */
   function soundDue(kind) {
@@ -337,6 +352,88 @@ export function createMirror(ctx) {
   }
 
   /**
+   * The host's teleport, both ends: the column and ring where he left (drawn inward) and where he
+   * landed (thrown outward), through the teleport system's own `warpAt`, with its zap (rate-capped).
+   * No shake from someone else's jump (owner decision 10).
+   * @param {ReadonlyArray<number>} row
+   * @returns {void}
+   */
+  function warp(row) {
+    const w = warpFromRow(row);
+    const tele = ctx.systems.teleport;
+    if (!w || !tele) return;
+    tele.warpAt(w.fromX, w.fromZ, true);
+    tele.warpAt(w.toX, w.toZ, false);
+    if (soundDue('warp') && ctx.systems.powerArcSound) ctx.systems.powerArcSound.playZap(1);
+  }
+
+  /** The swing crescents, made once: a flat ring segment of the blade's reach, additive. @returns {NonNullable<typeof arcs>} */
+  function arcPool() {
+    if (arcs) return arcs;
+    const arc = 0.9;
+    const geo = kit.keepGeo(new THREE.RingGeometry(0.55, 1, 20, 1, -Math.PI / 2 - arc / 2, arc));
+    geo.rotateX(-Math.PI / 2);
+    arcs = [];
+    for (let i = 0; i < ARCS; i++) {
+      const mat = kit.keepMat(new THREE.MeshBasicMaterial({
+        color: 0xd8f2ff, transparent: true, opacity: 0, depthWrite: false,
+        blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false
+      }));
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.name = 'coop_katana_swing';
+      mesh.rotation.order = 'YXZ';
+      mesh.scale.setScalar(SWING_ARC.reach);
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      ctx.Sim.three.scene.add(mesh);
+      arcs.push({ mesh, t: 0, heading: 0 });
+    }
+    return arcs;
+  }
+
+  /**
+   * One Katana cut at a figure: the crescent flashed in front of it (or, for a Blade Mode line,
+   * a spark at its chest), and the katana's whoosh (and slice when it landed on an enemy),
+   * the sounds rate-capped. Nothing is cut here.
+   * @param {number} x @param {number} y the shooter's feet @param {number} z
+   * @param {number} heading radians, 0 faces +z @param {boolean} arc draw the crescent @param {boolean} hit it landed on an enemy
+   * @returns {void}
+   */
+  function swing(x, y, z, heading, arc, hit) {
+    if (arc) {
+      const pool = arcPool();
+      const e = pool[nextArc];
+      nextArc = (nextArc + 1) % ARCS;
+      e.t = SWING_ARC.life;
+      e.heading = heading;
+      e.mesh.position.set(x, y + SWING_ARC.height, z);
+      e.mesh.rotation.set(0.45, heading + swingBearing(0), 0);
+      e.mesh.visible = true;
+      /** @type {THREE.MeshBasicMaterial} */ (e.mesh.material).opacity = 0.9 * swingFade(0);
+    } else if (ctx.systems.explosions && sparkGate()) {
+      ctx.systems.explosions.spawnImpactBurst(landAt.set(x, y + SWING_ARC.height, z), 0.25);
+    }
+    if (!soundDue('cut')) return;
+    const snd = ctx.systems.katanaSound;
+    if (!snd) return;
+    snd.playSwing();
+    if (hit) snd.playSlice();
+  }
+
+  /** Burns the crescents down (no allocation). @param {number} dt */
+  function stepArcs(dt) {
+    if (!arcs) return;
+    for (const e of arcs) {
+      if (e.t <= 0) continue;
+      e.t -= dt;
+      if (e.t <= 0) { e.mesh.visible = false; continue; }
+      const u = 1 - e.t / SWING_ARC.life;
+      e.mesh.rotation.y = e.heading + swingBearing(u);
+      /** @type {THREE.MeshBasicMaterial} */ (e.mesh.material).opacity = 0.9 * swingFade(u);
+    }
+  }
+
+  /**
    * Plays one due row.
    * @param {ReadonlyArray<number>} row [id, kind, shooter, x, y, z, a, b, c, extra]
    * @returns {void}
@@ -349,6 +446,12 @@ export function createMirror(ctx) {
     if (kind === 'ray') { enemyRay(row); return; }
     if (kind === 'round') { enemyRound(row); return; }
     if (kind === 'missile') { enemyMissile(row); return; }
+    if (kind === 'warp') { warp(row); return; }
+    if (kind === 'cut') {
+      const c = cutFromRow(row);
+      if (c) swing(c.x, c.y, c.z, c.heading, c.hasHeading && !c.blade, c.hit);
+      return;
+    }
     from.set(row[3], row[4], row[5]);
     const b = rowTo.set(row[6], row[7], row[8]);
     const { hit, extra } = unpackExtra(row[9]);
@@ -376,6 +479,7 @@ export function createMirror(ctx) {
       if (rounds) rounds.update(dt, 1, noLanding);
       if (roundView) roundView.update(dt);
       stepBeams(dt);
+      stepArcs(dt);
     },
     drawOwn(kind, a, b) {
       // Predicted at the press: no hit is known, so the ray is cut at the ground or left in the sky. Its cue is the predicted one.
@@ -389,14 +493,20 @@ export function createMirror(ctx) {
       else beam(a, b, hit, false, 0);
       cue(kind);
     },
+    /**
+     * The host draws a guest's Katana cut as it resolves it (the guest's own screen shows its own blade).
+     * @param {number} x @param {number} y the guest's feet @param {number} z @param {number} heading @param {boolean} hit
+     */
+    drawGuestSwing(x, y, z, heading, hit) { swing(x, y, z, heading, true, hit); },
     /** A bare tracer: no hit, no casing, no cue. No weapon uses it now (the Black Hole Gun's shot is its flash and zap, as on the host). */
     tracer(a, b) { pool().fire(a, b, null, null, null); },
     reset() {
       queue = newFxQueue();
       if (rounds) rounds.clear();
       if (roundView) roundView.clear();
-      lastCue.bullet = lastCue.rail = lastCue.plasma = lastCue.mega = lastCue.holeShot = lastCue.bolt = lastCue.emp = lastCue.ray = lastCue.round = lastCue.missile = -Infinity;
+      lastCue.bullet = lastCue.rail = lastCue.plasma = lastCue.mega = lastCue.holeShot = lastCue.bolt = lastCue.emp = lastCue.ray = lastCue.round = lastCue.missile = lastCue.cut = lastCue.warp = -Infinity;
       hideBeams();
+      if (arcs) for (const e of arcs) { e.t = 0; e.mesh.visible = false; }
     },
     dispose() {
       queue = newFxQueue();
@@ -409,6 +519,9 @@ export function createMirror(ctx) {
       for (const g of geos) g.dispose();
       for (const m of mats) m.dispose();
       geos.length = mats.length = 0;
+      if (arcs) for (const e of arcs) ctx.Sim.three.scene.remove(e.mesh);
+      arcs = null;
+      nextArc = 0;
       beams = null;
       rings = null;
       nextBeam = 0;

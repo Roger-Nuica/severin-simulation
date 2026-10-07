@@ -14,7 +14,7 @@ const kindIx = (k) => FX_KINDS.indexOf(k);
 
 test('ray, round and missile are appended after the older kinds', () => {
   assert.deepEqual(FX_KINDS.slice(0, 10), ['bullet', 'rail', 'plasma', 'mega', 'fire', 'holeShot', 'cut', 'blast', 'bolt', 'emp']);
-  assert.deepEqual(FX_KINDS.slice(10), ['ray', 'round', 'missile']);
+  assert.deepEqual(FX_KINDS.slice(10, 13), ['ray', 'round', 'missile']);
 });
 
 test('the mirror plays the three kinds, each with a sound rate cap', () => {

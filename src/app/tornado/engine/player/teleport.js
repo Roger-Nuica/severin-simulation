@@ -1,5 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
+import { createWeaponFx } from '../hero/weaponFx.js';
+import { warpEnds } from '../net/figureFx.js';
 
 /**
  * ===========================================================================
@@ -47,6 +49,10 @@ export const TELEPORT = {
  */
 export function createTeleportSystem(ctx) {
   const { Sim } = ctx;
+  // Co-op: the host's jump announced to the guest as a `warp` row (nothing is built outside a room with a guest).
+  const weaponFx = createWeaponFx(ctx);
+  const fxFrom = { x: 0, y: 0, z: 0 };
+  const fxTo = { x: 0, y: 0, z: 0 };
   /**
    * @typedef {Object} Warp
    * @property {THREE.Mesh} column
@@ -112,12 +118,20 @@ export function createTeleportSystem(ctx) {
     const from = hero && hero.rogerTarget();
     const to = landingSpot();
     if (!from || !to) return false;
+    const leftX = from.x;
+    const leftZ = from.z;
     warpAt(from.x, from.z, true);
     if (!hero.placeRoger(to.x, to.z)) return false;
     const landed = hero.rogerTarget();
     warpAt(landed ? landed.x : to.x, landed ? landed.z : to.z, false);
     if (ctx.systems.powerArcSound) ctx.systems.powerArcSound.playZap(1);
     ctx.systems.gamefeel.event('impact', new THREE.Vector3(to.x, 1, to.z));
+    // Last: what the guest's screen is told of this jump (a no-op unless a guest is in the room).
+    const net = ctx.systems.net;
+    if (net && net.fxLive()) {
+      warpEnds(fxFrom, fxTo, leftX, leftZ, landed ? landed.x : to.x, landed ? landed.z : to.z);
+      weaponFx.announce('warp', fxFrom, fxTo, '', 0);
+    }
     return true;
   }
 

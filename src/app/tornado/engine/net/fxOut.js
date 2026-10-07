@@ -147,7 +147,7 @@ export function createFxRing(capacity = RING_CAPACITY) {
 }
 
 /**
- * An `aim` row: [playerId, yaw, pitch, firingBits]. Bits: 1 Fire Gun firing,
+ * An `aim` row: [playerId, yaw, pitch, firingBits]. Bits: 1 Fire Gun firing, 4 jetpack burning (net/figureFx.js),
  * 2 minigun barrels spinning.
  * @param {number} id @param {number} yaw radians @param {number} pitch radians @param {number} bits
  * @returns {number[]}

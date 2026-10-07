@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { createParticlePool, pointScaleFor, markPoolDirty, disposeParticlePool } from '../particlePool.js';
 import { createSoftDotTexture } from '../../utils/textures.js';
+import { buildJetpackPack } from './jetpackPack.js';
 
 /**
  * ===========================================================================
@@ -346,106 +347,121 @@ export function createHeroJetpack(ctx, S, api) {
   }
 
   /**
-   * The pack, San Andreas style: a frame on his back with a fuel tank across
-   * it, a strut out to each hip carrying a fat thruster with a bell nozzle,
-   * and a control arm from each thruster forward to a grip he holds. A flame
-   * and a white-hot core under each nozzle. Parts of his mesh (in its built
-   * units), in the run's geometry and material lists.
+   * The pack, San Andreas style (the model is hero/jetpackPack.js, shared with the
+   * co-op figures): hung on his back, parts of his mesh in the run's geometry and
+   * material lists.
    * @param {Object} roger the figure from buildRoger
    * @returns {void}
    */
   function attachJetpack(roger) {
-    const metal = api.keepMat(new THREE.MeshStandardMaterial({ color: 0x4a4f57, metalness: 0.8, roughness: 0.35 }));
-    const chrome = api.keepMat(new THREE.MeshStandardMaterial({ color: 0xc9ced6, metalness: 1, roughness: 0.18 }));
-    const dark = api.keepMat(new THREE.MeshStandardMaterial({ color: 0x17191d, metalness: 0.5, roughness: 0.6 }));
-    const warn = api.keepMat(new THREE.MeshBasicMaterial({ color: 0xffb02e }));
-    const flameMat = api.keepMat(new THREE.MeshBasicMaterial({
-      color: 0xff8a26, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false
-    }));
-    const coreMat = api.keepMat(new THREE.MeshBasicMaterial({
-      color: 0xbfe4ff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false
-    }));
-    const cyl = (/** @type {number} */ rt, /** @type {number} */ rb, /** @type {number} */ h, open = false) => api.keepGeo(new THREE.CylinderGeometry(rt, rb, h, 14, 1, open));
-    /**
-     * A rod from a to b (local units).
-     * @param {THREE.Vector3} a
-     * @param {THREE.Vector3} b
-     * @param {number} r
-     * @param {THREE.Material} mat
-     * @returns {THREE.Mesh}
-     */
-    const rod = (a, b, r, mat) => {
-      const len = a.distanceTo(b);
-      const m = new THREE.Mesh(cyl(r, r, len), mat);
-      m.position.copy(a).add(b).multiplyScalar(0.5);
-      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3().subVectors(b, a).normalize());
-      return m;
-    };
-    // A flame: a cone hanging point-down from the nozzle, scaled by the thrust.
-    const flameGeo = api.keepGeo(new THREE.ConeGeometry(0.1, 1, 12, 1, true));
-    flameGeo.rotateX(Math.PI);
-    flameGeo.translate(0, -0.5, 0);
-    const coreGeo = api.keepGeo(new THREE.ConeGeometry(0.055, 1, 10, 1, true));
-    coreGeo.rotateX(Math.PI);
-    coreGeo.translate(0, -0.5, 0);
+    const parts = buildJetpackPack(api.keepGeo, api.keepMat);
+    roger.mesh.add(parts.pack);
+    rig = parts;
+  }
 
-    const pack = new THREE.Group();
-    pack.name = 'hero_jetpack';
-    // Fitted to the Storm Ranger suit (hero/rogerLook.js: a slim torso, the
-    // Storm Core on the back at 1.2 m): two slim fuel tanks either side of
-    // the core, leaving it in view, and a yoke from them down to the hips.
-    // Roger's own frame: feet at 0, +z ahead.
-    /** @type {THREE.Mesh[]} */
-    const flames = [];
-    /** @type {THREE.Mesh[]} */
-    const cores = [];
-    for (const side of [-1, 1]) {
-      const tank = new THREE.Mesh(cyl(0.05, 0.05, 0.36), metal);
-      tank.position.set(side * 0.13, 1.2, -0.2);
-      tank.castShadow = true;
-      const tankCap = new THREE.Mesh(api.keepGeo(new THREE.SphereGeometry(0.05, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2)), chrome);
-      tankCap.position.set(0, 0.18, 0);
-      tank.add(tankCap);
-      const band = new THREE.Mesh(cyl(0.052, 0.052, 0.03), warn);
-      band.position.set(0, 0.06, 0);
-      tank.add(band);
-      pack.add(tank);
-      // The yoke, from the tank round the waist to the thruster.
-      pack.add(rod(new THREE.Vector3(side * 0.13, 1.08, -0.2), new THREE.Vector3(side * 0.29, 1.06, -0.08), 0.02, chrome));
-      const pod = new THREE.Mesh(cyl(0.09, 0.09, 0.32), metal);
-      pod.position.set(side * 0.3, 0.98, -0.06);
-      pod.castShadow = true;
-      const cap = new THREE.Mesh(api.keepGeo(new THREE.SphereGeometry(0.09, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2)), chrome);
-      cap.position.set(0, 0.16, 0);
-      pod.add(cap);
-      const ring = new THREE.Mesh(cyl(0.094, 0.094, 0.03), warn);
-      ring.position.set(0, 0.07, 0);
-      pod.add(ring);
-      const bell = new THREE.Mesh(cyl(0.065, 0.11, 0.12, true), dark);
-      bell.position.set(0, -0.22, 0);
-      pod.add(bell);
-      // The control arm, forward from the thruster to the grip.
-      const grip = new THREE.Vector3(side * 0.24, 1.0, 0.27);
-      pack.add(rod(new THREE.Vector3(side * 0.3, 1.04, 0.02), grip, 0.018, chrome));
-      const handle = new THREE.Mesh(cyl(0.026, 0.026, 0.12), dark);
-      handle.position.copy(grip);
-      pack.add(handle);
-      const flame = new THREE.Mesh(flameGeo, flameMat);
-      flame.position.set(0, -0.27, 0);
-      flame.visible = false;
-      flame.frustumCulled = false;
-      pod.add(flame);
-      const core = new THREE.Mesh(coreGeo, coreMat);
-      core.position.set(0, -0.27, 0);
-      core.visible = false;
-      core.frustumCulled = false;
-      pod.add(core);
-      flames.push(flame);
-      cores.push(core);
-      pack.add(pod);
+  /**
+   * One nozzle's flame and core, longer as he climbs (shared by Roger's own pack and the
+   * co-op figures').
+   * @param {THREE.Mesh} flame
+   * @param {THREE.Mesh} core
+   * @param {number} k 0..1 how strongly it burns
+   * @param {number} climb 0..1 how fast he climbs
+   * @param {number} wobble the flicker
+   * @returns {void}
+   */
+  function shapeFlame(flame, core, k, climb, wobble) {
+    const len = (0.45 + 0.9 * climb) * k;
+    flame.scale.set(1 + 0.15 * wobble, len * wobble, 1 + 0.15 * wobble);
+    core.scale.set(1, len * 0.55 * wobble, 1);
+  }
+
+  // ---------------------------------------------------------------------
+  // The co-op figures' jetpacks (visual only)
+  // ---------------------------------------------------------------------
+
+  /** Most partner figures a pack is made for (the room holds two players; a spare for a rejoin). */
+  const REMOTE_MAX = 3;
+  /** @type {{id: number, pack: THREE.Group, flames: THREE.Mesh[], cores: THREE.Mesh[], live: boolean, phase: number}[]} */
+  const remotes = [];
+  /** What the remote packs share (disposed with the system). @type {THREE.BufferGeometry[]} */
+  const remoteGeos = [];
+  /** @type {THREE.Material[]} */
+  const remoteMats = [];
+  const keepRemoteGeo = (/** @type {THREE.BufferGeometry} */ g) => { remoteGeos.push(g); return g; };
+  const keepRemoteMat = (/** @type {THREE.Material} */ m) => { remoteMats.push(m); return m; };
+
+  /**
+   * The burning pack on a co-op figure that is in the air, for one frame: the same model, flames,
+   * smoke and warm light as Roger's own, hung in the scene at the figure's place (never on the
+   * figure's mesh, which is released on its own). The caller names the figure's id, position and
+   * heading and how hard it climbs (0..1). Drawing only: nothing here moves, hurts or scores.
+   * Call `stepRemoteJets` once after the frame's calls.
+   * @param {number} id the player's id
+   * @param {number} x @param {number} y feet height @param {number} z
+   * @param {number} yaw the figure's heading (radians)
+   * @param {number} climb 0..1
+   * @param {number} dt real seconds
+   * @returns {void}
+   */
+  function showRemoteJet(id, x, y, z, yaw, climb, dt) {
+    let r = remotes.find((v) => v.id === id);
+    if (!r) {
+      if (remotes.length >= REMOTE_MAX) return;
+      const parts = buildJetpackPack(keepRemoteGeo, keepRemoteMat);
+      parts.pack.name = 'coop_jetpack';
+      parts.pack.visible = false;
+      Sim.three.scene.add(parts.pack);
+      r = { id, pack: parts.pack, flames: parts.flames, cores: parts.cores, live: false, phase: remotes.length * 2.3 };
+      remotes.push(r);
     }
-    roger.mesh.add(pack);
-    rig = { pack, flames, cores };
+    r.live = true;
+    r.phase += dt * 40;
+    r.pack.visible = true;
+    r.pack.position.set(x, y, z);
+    r.pack.rotation.y = yaw;
+    r.pack.updateMatrixWorld(true);
+    for (let i = 0; i < r.flames.length; i++) {
+      const flame = r.flames[i];
+      const core = r.cores[i];
+      flame.visible = core.visible = true;
+      const wobble = 0.85 + 0.3 * Math.abs(Math.sin(r.phase + i * 1.7)) + Math.random() * 0.12;
+      shapeFlame(flame, core, 1, climb, wobble);
+      if (dt > 0) {
+        core.getWorldPosition(nozzle);
+        nozzle.y -= 0.3;
+        const owed = JETPACK.smokeRate * dt + Math.random();
+        puff(nozzle.x, nozzle.y, nozzle.z, Math.floor(owed * (0.5 + climb)), 7);
+      }
+    }
+    ctx.systems.lightPool.requestLight({ x, y: y + 0.4, z, colour: 0xff8a2a, intensity: 3.5, distance: 14 });
+  }
+
+  /**
+   * Ends the frame for the co-op packs: any pack not shown this frame is hidden, and the smoke
+   * is stepped when Roger's own `updateJetFx` is not running (a guest, or no run), so it moves once a frame.
+   * @param {number} dt real seconds
+   * @returns {void}
+   */
+  function stepRemoteJets(dt) {
+    for (const r of remotes) {
+      if (r.live) { r.live = false; continue; }
+      r.pack.visible = false;
+    }
+    if (!S.Hero.active || !S.roger) stepSmoke(dt);
+  }
+
+  /** Hides every co-op pack at once (leaving a room, a restart). @returns {void} */
+  function clearRemoteJets() {
+    for (const r of remotes) r.pack.visible = false;
+  }
+
+  /** Removes the co-op packs and what they made. @returns {void} */
+  function disposeRemoteJets() {
+    for (const r of remotes) Sim.three.scene.remove(r.pack);
+    remotes.length = 0;
+    for (const g of remoteGeos) g.dispose();
+    for (const m of remoteMats) m.dispose();
+    remoteGeos.length = remoteMats.length = 0;
   }
 
   /**
@@ -468,9 +484,7 @@ export function createHeroJetpack(ctx, S, api) {
         const wobble = 0.85 + 0.3 * Math.abs(Math.sin(flicker + i * 1.7)) + Math.random() * 0.12;
         // Longer while he climbs, a short steady jet in the hover.
         const climb = THREE.MathUtils.clamp(st.vy / JETPACK.climbSpeed, 0, 1);
-        const len = (0.45 + 0.9 * climb) * k;
-        flame.scale.set(1 + 0.15 * wobble, len * wobble, 1 + 0.15 * wobble);
-        core.scale.set(1, len * 0.55 * wobble, 1);
+        shapeFlame(flame, core, k, climb, wobble);
         if (dt > 0) {
           // Smoke from under the nozzle, blown down and back.
           core.getWorldPosition(nozzle);
@@ -567,6 +581,7 @@ export function createHeroJetpack(ctx, S, api) {
   function resetJetpack() {
     landNow(0);
     rig = null;
+    clearRemoteJets();
     if (smoke) {
       smoke.life.fill(0);
       smoke.sizes.fill(0);
@@ -579,12 +594,14 @@ export function createHeroJetpack(ctx, S, api) {
   /** @returns {void} */
   function disposeJetpack() {
     resetJetpack();
+    disposeRemoteJets();
     if (smoke) disposeParticlePool(Sim.three.scene, smoke);
     smoke = null;
   }
 
   return {
     groundAt, pressJump, landNow, airMove, stepAir, attachJetpack, updateJetFx, poseAir,
-    initJetpack, registerJetpack, resetJetpack, disposeJetpack, cutJet: cutOut
+    initJetpack, registerJetpack, resetJetpack, disposeJetpack, cutJet: cutOut,
+    showRemoteJet, stepRemoteJets, clearRemoteJets
   };
 }

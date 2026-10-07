@@ -183,6 +183,10 @@ export { SHIP_DAMAGE } from './hero/config.js';
  *   guestFlame: (gun: {tick: number}, dt: number, muzzle: THREE.Vector3, dir: THREE.Vector3) => void,
  *   guestTracer: (from: THREE.Vector3, to: THREE.Vector3) => void,
  *   rogerFireBits: () => number,
+ *   rogerJetBurning: () => boolean,
+ *   showRemoteJet: (id: number, x: number, y: number, z: number, yaw: number, climb: number, dt: number) => void,
+ *   stepRemoteJets: (dt: number) => void,
+ *   clearRemoteJets: () => void,
  *   traceAim: (o: THREE.Vector3, d: THREE.Vector3) => {t: number, kind: string, obj: Object|null},
  *   setCoopDown: (down: boolean) => void,
  *   rogerPose: () => ({x: number, z: number, heading: number, weapon: string, driving: boolean}|null),
@@ -896,6 +900,12 @@ export function createHeroModeSystem(ctx) {
     guestTracer: (/** @type {THREE.Vector3} */ from, /** @type {THREE.Vector3} */ to) => { if (S.weapons) S.weapons.guestTracer(from, to); },
     // Read-only (co-op `aim` rows, net/system.js): 1 Fire Gun firing, 2 minigun barrels spinning.
     rogerFireBits: () => (S.weapons ? S.weapons.fireBits() : 0),
+    // Read-only (co-op `aim` rows, bit 4): the pack is burning on a Roger who is up and flying.
+    rogerJetBurning: () => S.Hero.active && !!S.roger && S.state.jetBurn > 0 && (S.state.phase === 'running' || S.state.phase === 'aiming'),
+    // Co-op figures' jetpacks (hero/jetpack.js): drawing only, the partner's flames and smoke on this screen.
+    showRemoteJet: (/** @type {number} */ id, /** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ z, /** @type {number} */ yaw, /** @type {number} */ climb, /** @type {number} */ dt) => api.showRemoteJet(id, x, y, z, yaw, climb, dt),
+    stepRemoteJets: (/** @type {number} */ dt) => api.stepRemoteJets(dt),
+    clearRemoteJets: () => api.clearRemoteJets(),
     // Read-only (no side effect): the co-op combat diagnostic asks what a ray would find (net/system.js, `?netdebug` only).
     traceAim: api.traceAim,
     setCoopDown: (/** @type {boolean} */ down) => {
