@@ -21,11 +21,13 @@
  * asking the host to bring it into Hero Mode). Version 3 gives the guest the
  * single-player controls: on foot the movement keys turn and run (the look is
  * only read while `aim` is held), `abil` gains bit 8 (V, Invincible), and the
- * host sends an `invincible` event. Host, relay and peer must run
- * the same build: a mismatch is rejected with the `version` error, which the
+ * host sends an `invincible` event. Version 4 (R-061) lets the guest see the
+ * host's world: the snapshot gains the additive optional fields `fx`, `tw`,
+ * `hole`, `aim` and `env`, and the input gains the optional `charge` and
+ * `ability` fields. Host, relay and peer must run the same build: a mismatch is rejected with the `version` error, which the
  * client turns into a "refresh the page" message.
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 export const LIMITS = {
   /** Largest raw frame the relay or a client will parse, in bytes. */
@@ -41,7 +43,13 @@ export const LIMITS = {
   /** Events per second the host may emit. */
   eventRate: 30,
   /** World half-extent a position may claim, metres (R-024 Roger ~288 m). */
-  worldBound: 400
+  worldBound: 400,
+  /** Rows per additive snapshot field (R-061; the 64 KiB frame stays far away). */
+  maxFx: 24,
+  maxTw: 8,
+  maxHole: 1,
+  maxAim: 8,
+  maxEnv: 1
 };
 
 export const ROOM = {
@@ -61,6 +69,19 @@ export const SNAPSHOT_KINDS = ['players', 'tornadoes', 'terminators', 'aliens', 
 
 /** Major events the host may replicate (cosmetic destruction stays local). */
 export const EVENT_TYPES = ['welcome', 'announce', 'notice', 'explosion', 'playerDown', 'playerRevived', 'playerDamage', 'gameOver', 'score', 'mission', 'invincible'];
+
+/**
+ * Kinds of a discrete guest-visible effect (`fx` column 1 is the index here).
+ * Append only: an index is part of the wire contract. A row whose kind is not
+ * in this list (a newer host) is dropped by `sanitizeFx`, never an error.
+ */
+export const FX_KINDS = ['bullet', 'rail', 'plasma', 'mega', 'fire', 'holeShot', 'cut', 'blast'];
+
+/** Column order of an `fx` row: [id, kind, shooter, x, y, z, a, b, c, extra]. */
+export const FX_COLUMNS = ['id', 'kind', 'shooter', 'x', 'y', 'z', 'a', 'b', 'c', 'extra'];
+
+/** Row widths of the additive snapshot fields (`fx` is the widest). */
+export const EXTRA_ROW_WIDTH = { fx: 10, tw: 6, hole: 4, aim: 4, env: 7 };
 
 const CODE_RE = new RegExp(`^[${ROOM.codeAlphabet}]{${ROOM.codeLength}}$`);
 
@@ -110,13 +131,17 @@ export function validateControl(msg) {
   }
 }
 
-const INPUT_KEYS = new Set(['type', 'v', 'seq', 'mx', 'mz', 'yaw', 'pitch', 'fire', 'aim', 'weapon', 'abil', 'use', 'hero']);
+const INPUT_KEYS = new Set(['type', 'v', 'seq', 'mx', 'mz', 'yaw', 'pitch', 'fire', 'aim', 'weapon', 'abil', 'use', 'hero', 'charge', 'ability']);
 
 /**
  * A peer's input: its intent only. Movement axes, look angles, buttons.
  * @typedef {{type:'input', v:number, seq:number, mx:number, mz:number,
  *   yaw:number, pitch:number, fire:boolean, aim:boolean, weapon:number,
- *   abil:number, use:boolean, hero:boolean}} PlayerInput
+ *   abil:number, use:boolean, hero:boolean, charge?:number, ability?:number}} PlayerInput
+ * Optional (version 4, absent from older inputs): `charge` is the rifle charge
+ * level 0-1 held by the guest; `ability` is a bit field 0-255 for the powers
+ * that do not fit `abil` (G grapple, C telekinesis; bits assigned by the
+ * subtask that uses them).
  * `hero` is a request level, not an order: true while the guest is asking to
  * join Hero Mode (the host acts on the rising edge only).
  * @param {any} msg
@@ -134,13 +159,16 @@ export function validateInput(msg) {
   if (!Number.isInteger(msg.weapon) || msg.weapon < 0 || msg.weapon >= WEAPONS.length) return { ok: false, error: 'weapon' };
   // Ability bits: 1 time slow, 2 teleport, 4 EMP, 8 Invincible (V).
   if (!Number.isInteger(msg.abil) || msg.abil < 0 || msg.abil > 31) return { ok: false, error: 'abil' };
-  return {
-    ok: true,
-    input: {
-      type: 'input', v: msg.v, seq: msg.seq, mx: msg.mx, mz: msg.mz, yaw: msg.yaw, pitch: msg.pitch,
-      fire: msg.fire, aim: msg.aim, weapon: msg.weapon, abil: msg.abil, use: msg.use, hero: msg.hero
-    }
+  if (msg.charge !== undefined && !inRange(msg.charge, 0, 1)) return { ok: false, error: 'charge' };
+  if (msg.ability !== undefined && (!Number.isInteger(msg.ability) || msg.ability < 0 || msg.ability > 255)) return { ok: false, error: 'ability' };
+  /** @type {PlayerInput} */
+  const input = {
+    type: 'input', v: msg.v, seq: msg.seq, mx: msg.mx, mz: msg.mz, yaw: msg.yaw, pitch: msg.pitch,
+    fire: msg.fire, aim: msg.aim, weapon: msg.weapon, abil: msg.abil, use: msg.use, hero: msg.hero
   };
+  if (msg.charge !== undefined) input.charge = msg.charge;
+  if (msg.ability !== undefined) input.ability = msg.ability;
+  return { ok: true, input };
 }
 
 /**
@@ -165,9 +193,18 @@ export function validateInput(msg) {
  *   ack          [playerId, lastAcceptedInputSeq]
  * The last input `seq` the host accepted from each guest (the host itself,
  * id 0, never sends inputs and has no row). Same additive rule as `hp`.
+ * Optional version 4 fields (R-061; same additive rule, absent means none):
+ *   fx           [id, kind, shooter, x, y, z, a, b, c, extra]  (kind = index in FX_KINDS)
+ *   tw           [id, birth, sizeMul, fade, leanX, leanZ]      (the tornado's position stays in `tornadoes`)
+ *   hole         [x, z, age, closing 0|1]
+ *   aim          [playerId, yaw, pitch, firingBits]
+ *   env          [running 0|1, stormRamp, intensity, wind, radius, daylight, timeScale]
+ * Caps: fx 24, tw 8, hole 1, aim 8, env 1. Unknown fx kinds are dropped by
+ * `sanitizeFx`, not an error. Built and read by later subtasks; no row here
+ * widens an existing one.
  * @typedef {{type:'snapshot', v:number, room:string, tick:number, t:number,
  *   score:number, players:number[][], tornadoes:number[][], terminators:number[][],
- *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][], ack?:number[][], alt?:number[][]}} Snapshot
+ *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][], ack?:number[][], alt?:number[][], fx?:number[][], tw?:number[][], hole?:number[][], aim?:number[][], env?:number[][]}} Snapshot
  */
 const ROW_WIDTH = { players: 9, tornadoes: 4, terminators: 5, aliens: 5, ships: 5, vehicles: 5 };
 
@@ -217,7 +254,70 @@ export function validateSnapshot(msg) {
       if (!Number.isInteger(row[0]) || !Number.isInteger(row[1]) || row[1] < 0 || row[1] > 0x7fffffff) return { ok: false, error: 'ack' };
     }
   }
+  const extra = validateExtraFields(msg, b);
+  if (extra) return { ok: false, error: extra };
   return { ok: true };
+}
+
+/**
+ * Checks the optional version 4 snapshot fields. Returns the error code or null.
+ * @param {any} msg
+ * @param {number} b world half-extent
+ * @returns {string|null}
+ */
+function validateExtraFields(msg, b) {
+  /** @type {Record<string, number>} */
+  const caps = { fx: LIMITS.maxFx, tw: LIMITS.maxTw, hole: LIMITS.maxHole, aim: LIMITS.maxAim, env: LIMITS.maxEnv };
+  for (const name of Object.keys(caps)) {
+    const rows = msg[name];
+    if (rows === undefined) continue;
+    if (!Array.isArray(rows) || rows.length > caps[name]) return name;
+    for (const r of rows) {
+      if (!Array.isArray(r) || r.length !== EXTRA_ROW_WIDTH[name] || !r.every(num)) return name;
+      if (!extraRowOk(name, r, b)) return name;
+    }
+  }
+  return null;
+}
+
+/**
+ * Range check of one already-finite additive row.
+ * @param {string} name
+ * @param {number[]} r
+ * @param {number} b world half-extent
+ * @returns {boolean}
+ */
+function extraRowOk(name, r, b) {
+  switch (name) {
+    case 'fx':
+      // Unknown kinds pass here (integer only) and are dropped by sanitizeFx.
+      return Number.isInteger(r[0]) && r[0] >= 0 && Number.isInteger(r[1]) && r[1] >= 0 && r[1] <= 255
+        && Number.isInteger(r[2]) && r[2] >= -1 && Math.abs(r[3]) <= b && Math.abs(r[4]) <= b && Math.abs(r[5]) <= b
+        && Math.abs(r[6]) <= 1e4 && Math.abs(r[7]) <= 1e4 && Math.abs(r[8]) <= 1e4 && Math.abs(r[9]) <= 1e4;
+    case 'tw':
+      return Number.isInteger(r[0]) && r[0] >= 0 && r[1] >= 0 && inRange(r[2], 0, 100) && inRange(r[3], 0, 1)
+        && Math.abs(r[4]) <= b && Math.abs(r[5]) <= b;
+    case 'hole':
+      return Math.abs(r[0]) <= b && Math.abs(r[1]) <= b && r[2] >= 0 && (r[3] === 0 || r[3] === 1);
+    case 'aim':
+      return Number.isInteger(r[0]) && r[0] >= 0 && inRange(r[1], -Math.PI * 4, Math.PI * 4) && inRange(r[2], -1.6, 1.6)
+        && Number.isInteger(r[3]) && r[3] >= 0 && r[3] <= 255;
+    case 'env':
+      return (r[0] === 0 || r[0] === 1) && inRange(r[1], 0, 1) && inRange(r[2], 0, 10) && inRange(r[3], 0, 1000)
+        && inRange(r[4], 0, 1000) && inRange(r[5], 0, 1) && inRange(r[6], 0, 10);
+    default: return false;
+  }
+}
+
+/**
+ * Keeps the `fx` rows whose kind this build knows; an unknown kind (a newer
+ * host) is dropped, never an error. Pure; returns a new array.
+ * @param {number[][]|undefined} rows
+ * @returns {number[][]}
+ */
+export function sanitizeFx(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((r) => Array.isArray(r) && r.length === EXTRA_ROW_WIDTH.fx && Number.isInteger(r[1]) && r[1] >= 0 && r[1] < FX_KINDS.length);
 }
 
 /**

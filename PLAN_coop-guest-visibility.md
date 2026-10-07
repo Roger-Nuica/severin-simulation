@@ -154,13 +154,9 @@ Common rules for every subtask: functional style, every new function typed with 
   - Open concern: the `flames` and `rounds` pools expose no live count (existence only, plus the shared particle figures); host own shots are counted at the `hurtRay`/`hurtSector`/`hurtArea`/`splashGuests` entry points (Fire Gun counts per tick), not at the weapon itself; hole opens and tornado births are seen by state edge each frame.
   - [ ] PENDING (person): a two-browser read-out of the overlay (60 s: the host fires each weapon and starts a tornado) settles the hypotheses in RC3 and RC5 and records bytes per second before the change.
 
-- [ ] Subtask 1: Contract and approvals. Record the owner's answers to the Clarifications; write the schema for `fx` (kinds and columns), `tw`, `hole`, `aim`, `env` in `net/protocol.js` with `validateSnapshot` checks (caps: `fx` 24, `tw` 8, `hole` 1, `aim` 8, `env` 1; numbers finite and in `worldBound`; unknown `fx` kinds dropped, not an error), the version bump, and `tests/protocol.test.mjs` plus `tests/relay.integration.test.mjs` cases (accepts with and without the new fields; relays unchanged; rejects out-of-range).
-  - Likely files: `net/protocol.js`, `tests/protocol.test.mjs`, `tests/relay.integration.test.mjs`, `relay/server.mjs` (comment only; the relay already forwards a validated snapshot)
-  - Depends on: Subtask 0 report (for the byte baseline), owner approval of the reversal and the bump
-  - Classification: SEPARATE: new design decision and a protocol contract change that every later subtask depends on.
-  - Risks / edge cases: "Protocol-contract changes needing approval" above. A players row must stay nine columns (older strict row-width check). Cap sizes must keep a worst-case snapshot under the 64 KiB frame (the existing 11 KB worst case plus about 3 KB). R-050: cite R-059 and R-060 in the report.
-  - Acceptance: validators and tests pass; an old-shape snapshot still validates; a new one with every field present is under 16 KB.
-  - **DECISION GATE (owner approval before code):** approve the reversal and the bump.
+- [x] DONE Subtask 1: Contract and approvals (decisions 1, 2 and 13 approved the reversal, the bump and the input field).
+  - Files changed: `net/protocol.js` (`PROTOCOL_VERSION` 4; `FX_KINDS`, `FX_COLUMNS`, `EXTRA_ROW_WIDTH`, `LIMITS.max*`; `fx`/`tw`/`hole`/`aim`/`env` validators; `sanitizeFx`; optional input `charge` and `ability`), `tests/protocol.test.mjs`, `tests/relay.integration.test.mjs`, `tests/coop-rules.test.mjs` and `tests/client.test.mjs` (literal `v: 3` to 4), `.claude/rules.md` (R-059 version text).
+  - Result: old-shape and new snapshots validate, out-of-range rows are refused, unknown fx kinds are dropped; nothing builds or emits the fields yet (Subtask 3).
 
 - [ ] Subtask 2: Pure scheduling core, `net/fxQueue.js`. Typed pure functions over immutable state: `pushFx(queue, rows, hostT)` (drops duplicates by id, drops the guest's own `shooter`, caps), `dueFx(queue, renderT)` (returns the rows whose time has come and the queue left), `tornadoTarget`, `holeAt(age, closing)`. No scene, no DOM; tested like `net/prediction.js`.
   - Likely files: `net/fxQueue.js` (new), `tests/fx-queue.test.mjs` (new)
