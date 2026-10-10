@@ -360,10 +360,11 @@ export const LAKE_FRAGMENT = /* glsl */`
 
 /**
  * @param {number[]} range
+ * @param {() => number} [rand] A seeded generator when the result must match another screen.
  * @returns {number}
  */
-export function between(range) {
-  return range[0] + Math.random() * (range[1] - range[0]);
+export function between(range, rand = Math.random) {
+  return range[0] + rand() * (range[1] - range[0]);
 }
 
 /**
@@ -396,13 +397,13 @@ export function halfWidthAt(fissure, v) {
  * @param {number} length world units
  * @returns {THREE.Vector2[]}
  */
-export function walkFissure(cx, cz, heading, length, maxTurn = FISSURE.maxTurn, straighten = FISSURE.straighten) {
+export function walkFissure(cx, cz, heading, length, maxTurn = FISSURE.maxTurn, straighten = FISSURE.straighten, rand = Math.random) {
   const steps = Math.max(4, Math.round(length / FISSURE.segment));
   const step = length / steps;
   const points = [new THREE.Vector2(cx, cz)];
   let angle = heading;
   for (let s = 0; s < steps; s++) {
-    angle += (Math.random() * 2 - 1) * maxTurn;
+    angle += (rand() * 2 - 1) * maxTurn;
     angle += (heading - angle) * straighten;
     const last = points[points.length - 1];
     points.push(new THREE.Vector2(last.x + Math.cos(angle) * step, last.y + Math.sin(angle) * step));

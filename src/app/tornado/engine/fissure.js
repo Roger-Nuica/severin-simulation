@@ -71,6 +71,8 @@ import { createFissureParticles } from './fissure/particles.js';
  *   initFissures: () => void,
  *   armEruption: (severity: number) => void,
  *   updateFissures: (dt: number, strength: number) => void,
+ *   mirror: (row: number[]|undefined) => void,
+ *   replicaState: () => ({seed: number, severity: number, heat: number}|null),
  *   hotSpots: () => HotSpot[],
  *   quench: (spot: HotSpot) => void,
  *   lavaContactAt: (x: number, z: number, minLevel: number) => boolean,
@@ -80,6 +82,8 @@ import { createFissureParticles } from './fissure/particles.js';
  */
 export function createFissureSystem(ctx) {
   const { Sim } = ctx;
+  // Co-op guest: the host's eruption is drawn from the `quake` row (mirror), at the heat the host sends.
+  const replica = { seed: 0, heat: 0 };
   // Everything this system's modules share (see the header): each of them
   // reads and writes it as S.
   const S = {
@@ -109,7 +113,10 @@ export function createFissureSystem(ctx) {
     /** @type {import('./particlePool.js').ParticlePool|null} */
     ash: null,
 
-    eruption: { severity: 0, heat: 0, scarTimer: 0 },
+    eruption: { severity: 0, heat: 0, scarTimer: 0, seed: 0 },
+    /** The generator the eruption being built draws from (seeded, so a co-op guest matches); Math.random otherwise. */
+    rand: Math.random,
+    peerView: () => !!(ctx.systems.net && ctx.systems.net.isPeerView()),
     /** @type {number|null} severity waiting for the quake to get strong enough */
     armed: null,
 
@@ -156,6 +163,7 @@ export function createFissureSystem(ctx) {
     if (!S.spatter) return;
     S.time += dt;
     S.shared.uTime.value = S.time;
+    if (replica.seed !== 0) strength = Math.max(strength, replica.heat);
     if (S.armed !== null && strength > FISSURE.triggerStrength) {
       if (S.fissures.length) api.extendEruption(S.armed);
       else api.erupt(S.armed);
@@ -198,6 +206,8 @@ export function createFissureSystem(ctx) {
     }
     S.burstAccumulator = 0;
     S.armed = null;
+    replica.seed = 0;
+    replica.heat = 0;
     S.spatterAccumulator = 0;
     S.ashAccumulator = 0;
     S.fountainAccumulator = 0;
@@ -230,6 +240,37 @@ export function createFissureSystem(ctx) {
   }
 
   /**
+   * Co-op guest: the host's `quake` row for the eruption (undefined when it
+   * has none), called every frame. The cracks, vents and crater are built from
+   * its seed the moment it first appears, then glow at the host's heat; what
+   * they break is the host's.
+   * @param {number[]|undefined} row
+   * @returns {void}
+   */
+  function mirror(row) {
+    if (!S.spatter) return;
+    if (!row) {
+      if (replica.seed !== 0) { replica.seed = 0; replica.heat = 0; api.clearEruption(); }
+      return;
+    }
+    if (row[2] !== replica.seed) {
+      if (S.fissures.length) api.clearEruption();
+      api.erupt(row[3], row[2]);
+      replica.seed = row[2];
+    }
+    replica.heat = row[4];
+  }
+
+  /**
+   * The eruption as plain numbers for the snapshot's `quake` row, read-only;
+   * null when no fissures show.
+   * @returns {{seed: number, severity: number, heat: number}|null}
+   */
+  function replicaState() {
+    return S.fissures.length ? { seed: S.eruption.seed, severity: S.eruption.severity, heat: S.eruption.heat } : null;
+  }
+
+  /**
    * Whether a point stands on molten ground: inside the radius of a glowing
    * vent or caldera lake (the same spots the Lavanado reads), no allocation.
    * @param {number} x
@@ -250,7 +291,7 @@ export function createFissureSystem(ctx) {
   }
 
   return {
-    initFissures, lavaContactAt, armEruption: api.armEruption, updateFissures, resetFissures, disposeFissures,
+    initFissures, lavaContactAt, armEruption: api.armEruption, mirror, replicaState, updateFissures, resetFissures, disposeFissures,
     // Read by the tornado picking up a load of lava (engine/lavanado.js) and
     // by the flood front finding one (engine/collisions.js).
     hotSpots: api.hotSpots, quench: api.quench

@@ -37,6 +37,7 @@ import { cloneRows, replicatorRow, poseOriginal, writeClones, newReplicaScratch,
 import { eulerYXZ, carClass, pickCars, carRow, poseCar, colourIndex } from './carPose.js';
 import { FIRE, fireId, buildingRow, fireRow, maskOf, orderFires } from './fireFx.js';
 import { floodRow } from './floodFx.js';
+import { QUAKE, quakeId, quakeRow, chasmRow, sinkholeRow, eruptionRow } from './quakeFx.js';
 import { FLYER, flyerId, flyerRow, poseFlyer, motherState, throttleState, headDown, headHeight, jetLook, chopperLook, spotlessLook } from './flyerPose.js';
 import { CHOPPER } from '../environment/newsChopper.js';
 import { ALIENS } from '../aliens/config.js';
@@ -1537,6 +1538,28 @@ export function createNetSystem(ctx) {
   }
 
   /**
+   * The earthquake family as `quake` rows (at most 8): the quake while it
+   * shakes, the chasms, the sinkholes and the lava fissures, built only while a
+   * guest is in the room (read-only state from each system).
+   * @returns {number[][]}
+   */
+  function quakeRows() {
+    const sys = ctx.systems;
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    /** @type {number[][]} */
+    const rows = [];
+    const quake = sys.earthquake && sys.earthquake.replicaState();
+    if (quake) rows.push(quakeRow(quake));
+    const chasms = sys.chasm && sys.chasm.replicaState();
+    if (chasms) chasms.forEach((c, i) => rows.push(chasmRow(i, c)));
+    const holes = sys.sinkhole && sys.sinkhole.replicaState();
+    if (holes) holes.forEach((h, i) => rows.push(sinkholeRow(i, h, clamp)));
+    const eruption = sys.fissures && sys.fissures.replicaState();
+    if (eruption) rows.push(eruptionRow(eruption));
+    return rows;
+  }
+
+  /**
    * The mothership, Captain Spotless, the news helicopter, the GHOST jets and
    * the cows as `flyers` rows (at most 14, most important first), built only
    * while a guest is in the room. Each system hands over read-only state; the
@@ -1649,6 +1672,7 @@ export function createNetSystem(ctx) {
     const flyers = live ? flyerRows() : [];
     const fires = live ? fireRows() : [];
     const flood = live ? floodRows() : [];
+    const quake = live ? quakeRows() : [];
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
@@ -1662,6 +1686,7 @@ export function createNetSystem(ctx) {
       ...(flyers.length ? { flyers } : {}),
       ...(fires.length ? { fires } : {}),
       ...(flood.length ? { flood } : {}),
+      ...(quake.length ? { quake } : {}),
       ...(live ? worldRows(h) : {})
     };
   }
@@ -1892,6 +1917,7 @@ export function createNetSystem(ctx) {
     showLocalSky();
     clearFires();
     clearFlood();
+    clearQuake();
     // Let go of the input pipeline, unless a local Hero run holds it (it cannot
     // while this is a peer, but leaving must never take Roger's keys away).
     if (!(ctx.Hero && ctx.Hero.active)) ctx.systems.playerInput.detachInput();
@@ -2891,6 +2917,37 @@ export function createNetSystem(ctx) {
     if (ctx.systems.flood) ctx.systems.flood.mirror(rows);
   }
 
+  let quakeDrawn = false;
+
+  /**
+   * The host's earthquake family (the `quake` rows) into each system's
+   * render-only entry: dust and rumble, the crack, the hole, the lava. Called
+   * every frame while viewing the host, with an empty map when the host sends
+   * none. Nothing shakes, falls in, is undermined or scored here.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function drawQuake(rows) {
+    if (rows.size) quakeDrawn = true;
+    else if (!quakeDrawn) return;
+    const sys = ctx.systems;
+    if (sys.earthquake) sys.earthquake.mirror(rows.get(quakeId(QUAKE.quake, 0)));
+    if (sys.chasm) sys.chasm.mirror(rows);
+    if (sys.sinkhole) sys.sinkhole.mirror(rows);
+    if (sys.fissures) sys.fissures.mirror(rows.get(quakeId(QUAKE.eruption, 0)));
+  }
+
+  /** The host's quake, chasms, holes and lava gone (leaving the host's view): all reset to this town's own. @returns {void} */
+  function clearQuake() {
+    if (!quakeDrawn) return;
+    quakeDrawn = false;
+    const sys = ctx.systems;
+    if (sys.earthquake) sys.earthquake.resetEarthquake();
+    if (sys.chasm) sys.chasm.resetChasms();
+    if (sys.sinkhole) sys.sinkhole.resetSinkholes();
+    if (sys.fissures) sys.fissures.resetFissures();
+  }
+
   /** The host's flood gone (leaving the host's view): the dam rebuilt, water and spray cleared. @returns {void} */
   function clearFlood() {
     if (!floodDrawn) return;
@@ -2960,6 +3017,7 @@ export function createNetSystem(ctx) {
       // The fires are not proxies either: the fire systems draw them with their own pools.
       if (kind === 'fires') { drawFires(sampled); continue; }
       if (kind === 'flood') { drawFlood(sampled); continue; }
+      if (kind === 'quake') { drawQuake(sampled); continue; }
       // The moving-cars rows are the older host's: once `cars` arrives they are not drawn.
       const rows = kind === 'vehicles' && S.hostCars ? NO_ROWS : sampled;
       // The clones are one set of instanced meshes, not proxies.

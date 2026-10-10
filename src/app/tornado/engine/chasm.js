@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { createRng } from './rng.js';
+import { QUAKE, MAX_CHASMS, quakeId, lavaFillAt, needsSync } from './net/quakeFx.js';
 import { CHASM, LAVA_VERTEX, LAVA_FRAGMENT, WALL_ORDER, LID_ORDER, LID_Y, SOIL_TOP, SOIL_MID, ROCK_DEEP, RIM_OUTER, RIM_LIP } from './chasm/config.js';
 
 /**
@@ -47,6 +49,7 @@ import { CHASM, LAVA_VERTEX, LAVA_FRAGMENT, WALL_ORDER, LID_ORDER, LID_Y, SOIL_T
  * @property {THREE.Mesh} lid
  * @property {THREE.Mesh} rims
  * @property {THREE.Mesh} lava
+ * @property {number} seed the shape's seed (the same on a co-op guest's screen)
  * @property {number} lavaFill 0..1 how far the lava has risen
  * @property {Object[]} hazards
  * @property {Set<Object>} shocked buildings already hit
@@ -60,12 +63,16 @@ import { CHASM, LAVA_VERTEX, LAVA_FRAGMENT, WALL_ORDER, LID_ORDER, LID_Y, SOIL_T
  *   updateChasms: (dt: number) => void,
  *   gapAt: (x: number, z: number) => number,
  *   setFrozen: (on: boolean) => {mesh: THREE.Mesh}[],
+ *   mirror: (rows: Map<number, number[]>) => void,
+ *   replicaState: () => ({seed: number, timer: number}[]|null),
  *   resetChasms: () => void,
  *   disposeChasms: () => void
  * }}
  */
 export function createChasmSystem(ctx) {
   const { Sim } = ctx;
+  // Co-op guest: the host's chasms are drawn from the `quake` rows (mirror) and never fall into, scored or shocked here.
+  const peerView = () => !!(ctx.systems.net && ctx.systems.net.isPeerView());
 
   /** @type {THREE.Group|null} */
   let group = null;
@@ -125,7 +132,7 @@ export function createChasmSystem(ctx) {
    * town, on a random bearing.
    * @returns {Chasm['path']}
    */
-  function makePath(cx, cz, heading) {
+  function makePath(cx, cz, heading, rand) {
     const count = Math.round(CHASM.length / CHASM.step) + 1;
     const half = Math.floor(count / 2);
     const points = new Array(count);
@@ -139,7 +146,7 @@ export function createChasmSystem(ctx) {
         const i = half + dir * k;
         if (i < 0 || i >= count) break;
         if (k > 0) {
-          h += (Math.random() - 0.5) * CHASM.wander;
+          h += (rand() - 0.5) * CHASM.wander;
           // Pulled back towards the overall bearing, so it wanders rather
           // than curling round on itself.
           h += (heading - h) * 0.15;
@@ -160,8 +167,8 @@ export function createChasmSystem(ctx) {
       p.nz = tx / len;
       const taper = Math.pow(Math.max(0, 1 - Math.pow(Math.abs(p.s), 1.8)), 0.7);
       p.half = CHASM.endHalfWidth + (CHASM.halfWidth - CHASM.endHalfWidth) * taper;
-      p.jagL = CHASM.jag[0] + Math.random() * (CHASM.jag[1] - CHASM.jag[0]);
-      p.jagR = CHASM.jag[0] + Math.random() * (CHASM.jag[1] - CHASM.jag[0]);
+      p.jagL = CHASM.jag[0] + rand() * (CHASM.jag[1] - CHASM.jag[0]);
+      p.jagR = CHASM.jag[0] + rand() * (CHASM.jag[1] - CHASM.jag[0]);
     }
     return points;
   }
@@ -172,7 +179,7 @@ export function createChasmSystem(ctx) {
    * @param {Chasm['path']} path
    * @returns {{walls: THREE.Mesh, lid: THREE.Mesh, rims: THREE.Mesh, lava: THREE.Mesh}}
    */
-  function buildMeshes(path) {
+  function buildMeshes(path, rand) {
     const n = path.length;
     const rows = CHASM.wallRows + 1;
 
@@ -194,7 +201,7 @@ export function createChasmSystem(ctx) {
           else c.copy(SOIL_MID).lerp(ROCK_DEEP, Math.min(1, Math.pow((u - 0.18) / 0.5, 0.9)));
           // Strata: alternate rows lighter and darker, so the walls are
           // banded like the cut face of the ground.
-          const grain = 0.8 + Math.random() * 0.3 + (r % 2 ? 0.16 : -0.1);
+          const grain = 0.8 + rand() * 0.3 + (r % 2 ? 0.16 : -0.1);
           const k = ((side * n + i) * rows + r) * 3;
           colours[k] = c.r * grain;
           colours[k + 1] = c.g * grain;
@@ -261,7 +268,7 @@ export function createChasmSystem(ctx) {
     for (let i = 0; i < n; i++) {
       for (let side = 0; side < 2; side++) {
         const base = (i * 4 + side * 2) * 3;
-        const grain = 0.85 + Math.random() * 0.3;
+        const grain = 0.85 + rand() * 0.3;
         rimColours.set([RIM_OUTER.r, RIM_OUTER.g, RIM_OUTER.b], base);
         rimColours.set([RIM_LIP.r * grain, RIM_LIP.g * grain, RIM_LIP.b * grain], base + 3);
       }
@@ -409,28 +416,43 @@ export function createChasmSystem(ctx) {
   // ---------------------------------------------------------------------
 
   /**
-   * Splits the ground open. Called by the earthquake; safe to call again,
-   * the oldest chasm making way past CHASM.maxChasms.
-   * @returns {void}
+   * Builds a chasm, its shape from the seed alone (so a co-op guest's screen
+   * shows the same crack), and adds it, the oldest making way past
+   * CHASM.maxChasms. Nothing here touches the game: hazards, score and the
+   * rest are openChasm's.
+   * @param {number} seed
+   * @returns {Chasm & {cx: number, cz: number}}
    */
-  function openChasm() {
-    if (!group) return;
+  function createChasm(seed) {
     if (chasms.length >= CHASM.maxChasms) disposeChasm(chasms.shift());
-    const angle = Math.random() * Math.PI * 2;
-    const r = Math.random() * 30;
+    const rand = createRng(seed);
+    const angle = rand() * Math.PI * 2;
+    const r = rand() * 30;
     const cx = Math.cos(angle) * r;
     const cz = Math.sin(angle) * r;
-    const heading = Math.random() * Math.PI;
-    const path = makePath(cx, cz, heading);
-    const { walls, lid, rims, lava } = buildMeshes(path);
+    const heading = rand() * Math.PI;
+    const path = makePath(cx, cz, heading, rand);
+    const { walls, lid, rims, lava } = buildMeshes(path, rand);
     group.add(walls, lid, rims, lava);
     const chasm = {
-      path, dirX: Math.cos(heading), dirZ: Math.sin(heading), cx, cz,
+      path, dirX: Math.cos(heading), dirZ: Math.sin(heading), cx, cz, seed,
       timer: 0, open: 0, openAt: new Float32Array(path.length),
       walls, lid, rims, lava, lavaFill: 0, hazards: [], shocked: new Set()
     };
     chasms.push(chasm);
     poseChasm(chasm);
+    return chasm;
+  }
+
+  /**
+   * Splits the ground open. Called by the earthquake; safe to call again,
+   * the oldest chasm making way past CHASM.maxChasms.
+   * @returns {void}
+   */
+  function openChasm() {
+    if (!group || peerView()) return;
+    const chasm = createChasm(Math.floor(Math.random() * 2 ** 30) + 1);
+    const { path, cx, cz } = chasm;
 
     // Hazards along the line, for the crowd to steer round: circles every
     // other point, grown with the gap as it opens.
@@ -463,6 +485,8 @@ export function createChasmSystem(ctx) {
    */
   function gapAt(x, z) {
     let best = -Infinity;
+    // Mirroring the host's chasm: it is a picture here, nothing falls into it.
+    if (peerView()) return best;
     for (const chasm of chasms) {
       // Cheap reject: far off the chasm's overall line.
       const lateral = Math.abs((x - chasm.cx) * -chasm.dirZ + (z - chasm.cz) * chasm.dirX);
@@ -649,7 +673,7 @@ export function createChasmSystem(ctx) {
       poseChasm(chasm);
       // Once it is fully open, anything of the far town standing on the line
       // (environment/backdrop.js) goes in too.
-      if (all >= 1 && ctx.systems.backdrop) {
+      if (all >= 1 && ctx.systems.backdrop && !peerView()) {
         for (let i = 0; i < chasm.path.length; i += 2) {
           const p = chasm.path[i];
           if (Math.max(Math.abs(p.x), Math.abs(p.z)) < 120) continue;
@@ -674,9 +698,59 @@ export function createChasmSystem(ctx) {
     checkTimer -= dt;
     if (checkTimer <= 0) {
       checkTimer = 1 / CHASM.checkRate;
-      if (chasms.length) checkGround();
+      if (chasms.length && !peerView()) checkGround();
     }
     updateFalling(dt);
+  }
+
+  // ---------------------------------------------------------------------
+  // Co-op guest
+  // ---------------------------------------------------------------------
+
+  /**
+   * The host's `quake` rows for the chasms, called every frame with the whole
+   * map (empty when the host has none). A chasm is built from its seed, then
+   * opens and fills with lava on the guest's own clock, set to the host's when
+   * it drifts. No hazard, fall, shock or score: only the picture, the rupture
+   * and the flash.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function mirror(rows) {
+    if (!group) return;
+    for (let i = chasms.length - 1; i >= 0; i--) {
+      let found = false;
+      for (let slot = 0; slot < MAX_CHASMS && !found; slot++) {
+        const r = rows.get(quakeId(QUAKE.chasm, slot));
+        found = !!r && r[2] === chasms[i].seed;
+      }
+      if (!found) { disposeChasm(chasms[i]); chasms.splice(i, 1); }
+    }
+    for (let slot = 0; slot < MAX_CHASMS; slot++) {
+      const r = rows.get(quakeId(QUAKE.chasm, slot));
+      if (!r) continue;
+      let chasm = chasms.find(c => c.seed === r[2]);
+      if (!chasm) {
+        chasm = createChasm(r[2]);
+        chasm.timer = r[3];
+        chasm.lavaFill = lavaFillAt(r[3], CHASM.openSeconds, CHASM.lavaRiseSeconds);
+        if (chasm.lavaFill > 0) poseLava(chasm);
+        const at = new THREE.Vector3(chasm.cx, 0, chasm.cz);
+        ctx.systems.earthquakeSound.playRupture(1);
+        ctx.systems.lightning.flashScreen(at.setY(10), 0.35, '#e8d2b0');
+      } else if (needsSync(chasm.timer, r[3])) {
+        chasm.timer = r[3];
+      }
+    }
+  }
+
+  /**
+   * The chasms as plain numbers for the snapshot's `quake` rows, read-only;
+   * null when there are none.
+   * @returns {{seed: number, timer: number}[]|null}
+   */
+  function replicaState() {
+    return chasms.length ? chasms.map(c => ({ seed: c.seed, timer: c.timer })) : null;
   }
 
   // ---------------------------------------------------------------------
@@ -732,5 +806,5 @@ export function createChasmSystem(ctx) {
     return chasms.filter(c => c.lavaFill > 0.001).map(c => ({ mesh: c.lava }));
   }
 
-  return { initChasms, openChasm, updateChasms, gapAt, setFrozen, resetChasms, disposeChasms };
+  return { initChasms, openChasm, updateChasms, gapAt, setFrozen, mirror, replicaState, resetChasms, disposeChasms };
 }

@@ -2,6 +2,7 @@
 /** @typedef {import('./config.js').Vent} Vent */
 /** @typedef {import('./config.js').HotSpot} HotSpot */
 import * as THREE from 'three';
+import { createRng } from '../rng.js';
 import { FISSURE, RIFT, CALDERA, between, lerpRange, halfWidthAt, pointAlong } from './config.js';
 
 /**
@@ -24,22 +25,28 @@ export function createFissureEruption(ctx, S, api) {
    * Tears the ground open: an epicentre, its vent, and fissures spread
    * roughly evenly around it with vents of their own.
    * @param {number} severity 0..1
+   * @param {number} [seed] Every random choice is drawn from it (a co-op guest passes the host's).
    * @returns {void}
    */
-  function erupt(severity) {
+  function erupt(severity, seed = Math.floor(Math.random() * 2 ** 30) + 1) {
+    // Every random choice below comes from the seed, so a co-op guest given the
+    // same seed and severity builds the same cracks, vents and crater.
+    const rand = createRng(seed);
+    S.rand = rand;
+    S.eruption.seed = seed;
     S.eruption.severity = severity;
     S.eruption.heat = 0;
     S.eruption.scarTimer = 0;
     S.shared.uOpacity.value = 1;
-    const angle = Math.random() * Math.PI * 2;
-    const r = between(FISSURE.epicentreRadius);
+    const angle = rand() * Math.PI * 2;
+    const r = between(FISSURE.epicentreRadius, rand);
     const cx = Math.cos(angle) * r;
     const cz = Math.sin(angle) * r;
     // The rift first: two arms leaving the epicentre in exactly opposite
     // directions, so the ground reads as splitting in two rather than
     // cracking in a few places. The radiating fissures below then open around
     // it as branches.
-    const riftHeading = Math.random() * Math.PI * 2;
+    const riftHeading = rand() * Math.PI * 2;
     for (const away of [0, Math.PI]) {
       const arm = api.createFissure(cx, cz, riftHeading + away, severity, true);
       S.fissures.push(arm);
@@ -48,20 +55,20 @@ export function createFissureEruption(ctx, S, api) {
         // which already has the biggest vent of all.
         const along = 0.2 + (v / RIFT.vents) * 0.7;
         const at = pointAlong(arm, along);
-        const radius = lerpRange(RIFT.ventRadius, severity) * (0.8 + Math.random() * 0.4);
+        const radius = lerpRange(RIFT.ventRadius, severity) * (0.8 + rand() * 0.4);
         S.vents.push(api.createVent(at.x, at.z, radius, arm, along, arm.lava));
       }
     }
 
-    const count = Math.round(lerpRange(FISSURE.count, severity * 0.8 + Math.random() * 0.2));
-    const base = Math.random() * Math.PI * 2;
+    const count = Math.round(lerpRange(FISSURE.count, severity * 0.8 + rand() * 0.2));
+    const base = rand() * Math.PI * 2;
     const sector = (Math.PI * 2) / count;
     for (let k = 0; k < count; k++) {
-      const fissure = api.createFissure(cx, cz, base + k * sector + (Math.random() - 0.5) * sector * 0.5, severity);
+      const fissure = api.createFissure(cx, cz, base + k * sector + (rand() - 0.5) * sector * 0.5, severity);
       S.fissures.push(fissure);
-      const ventCount = Math.random() < severity ? FISSURE.ventsPerFissure[1] : FISSURE.ventsPerFissure[0];
+      const ventCount = rand() < severity ? FISSURE.ventsPerFissure[1] : FISSURE.ventsPerFissure[0];
       for (let v = 0; v < ventCount; v++) {
-        const along = between(FISSURE.ventAlong);
+        const along = between(FISSURE.ventAlong, rand);
         const at = pointAlong(fissure, along);
         const radius = Math.max(FISSURE.ventRadius[0], Math.min(FISSURE.ventRadius[1], halfWidthAt(fissure, along) * 1.4));
         S.vents.push(api.createVent(at.x, at.z, radius, fissure, along, fissure.lava));
@@ -73,6 +80,7 @@ export function createFissureEruption(ctx, S, api) {
     // above it is still there when the eruption is over.
     S.calderas.push(api.createCaldera(cx, cz, severity));
     while (S.calderas.length > CALDERA.maxKept) api.disposeCaldera(S.calderas.shift());
+    S.rand = Math.random;
   }
 
   /**
@@ -146,6 +154,8 @@ export function createFissureEruption(ctx, S, api) {
   function onFissureOpened(fissure) {
     fissure.opened = true;
     ctx.systems.earthquakeSound.playRupture(S.eruption.severity);
+    // A co-op guest sees the crack open; what it breaks is the host's.
+    if (S.peerView()) return;
     shockBuildingsAlong(fissure);
     faultPolesAlong(fissure);
     undermineViaduct(fissure);
@@ -189,6 +199,8 @@ export function createFissureEruption(ctx, S, api) {
    */
   function hotSpots() {
     S.hotSpotList.length = 0;
+    // Mirroring the host's lava: a picture here, nothing stands on it.
+    if (S.peerView()) return S.hotSpotList;
     for (const vent of S.vents) {
       if (vent.quenched) continue;
       vent.spot.x = vent.x;
