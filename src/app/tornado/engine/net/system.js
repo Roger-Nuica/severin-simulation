@@ -37,6 +37,7 @@ import { cloneRows, replicatorRow, poseOriginal, writeClones, newReplicaScratch,
 import { eulerYXZ, carClass, pickCars, carRow, poseCar, colourIndex } from './carPose.js';
 import { FIRE, fireId, buildingRow, fireRow, maskOf, orderFires } from './fireFx.js';
 import { floodRow } from './floodFx.js';
+import { stormRow } from './stormFx.js';
 import { QUAKE, quakeId, quakeRow, chasmRow, sinkholeRow, eruptionRow } from './quakeFx.js';
 import { FLYER, flyerId, flyerRow, poseFlyer, motherState, throttleState, headDown, headHeight, jetLook, chopperLook, spotlessLook } from './flyerPose.js';
 import { CHOPPER } from '../environment/newsChopper.js';
@@ -1538,6 +1539,18 @@ export function createNetSystem(ctx) {
   }
 
   /**
+   * The electric storm as at most one `storm` row, built only while a guest is
+   * in the room and only while the mode is on with a funnel down (read-only
+   * state from the electric storm system).
+   * @returns {number[][]}
+   */
+  function stormRows() {
+    const state = ctx.systems.electricStorm && ctx.systems.electricStorm.replicaState();
+    const row = stormRow(state, (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound));
+    return row ? [row] : [];
+  }
+
+  /**
    * The earthquake family as `quake` rows (at most 8): the quake while it
    * shakes, the chasms, the sinkholes and the lava fissures, built only while a
    * guest is in the room (read-only state from each system).
@@ -1673,6 +1686,7 @@ export function createNetSystem(ctx) {
     const fires = live ? fireRows() : [];
     const flood = live ? floodRows() : [];
     const quake = live ? quakeRows() : [];
+    const storm = live ? stormRows() : [];
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
@@ -1687,6 +1701,7 @@ export function createNetSystem(ctx) {
       ...(fires.length ? { fires } : {}),
       ...(flood.length ? { flood } : {}),
       ...(quake.length ? { quake } : {}),
+      ...(storm.length ? { storm } : {}),
       ...(live ? worldRows(h) : {})
     };
   }
@@ -1918,6 +1933,7 @@ export function createNetSystem(ctx) {
     clearFires();
     clearFlood();
     clearQuake();
+    clearStorm();
     if (ctx.systems.meteors) ctx.systems.meteors.clearMirror();
     // Let go of the input pipeline, unless a local Hero run holds it (it cannot
     // while this is a peer, but leaving must never take Roger's keys away).
@@ -2918,6 +2934,30 @@ export function createNetSystem(ctx) {
     if (ctx.systems.flood) ctx.systems.flood.mirror(rows);
   }
 
+  let stormDrawn = false;
+
+  /**
+   * The host's electric storm (the `storm` row) into the electric storm's
+   * render-only entry: the column's arcs, shells, orbs, light and EMP ring on
+   * this screen's own funnel. Called every frame while viewing the host, with
+   * an empty map when the host sends none. Nothing is faulted, shocked,
+   * ignited, electrocuted or scored here.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function drawStorm(rows) {
+    if (rows.size) stormDrawn = true;
+    else if (!stormDrawn) return;
+    if (ctx.systems.electricStorm) ctx.systems.electricStorm.mirror(rows.get(0));
+  }
+
+  /** The host's storm gone (leaving the host's view): arcs, glow, light and ring cleared. @returns {void} */
+  function clearStorm() {
+    if (!stormDrawn) return;
+    stormDrawn = false;
+    if (ctx.systems.electricStorm) ctx.systems.electricStorm.mirror(undefined);
+  }
+
   let quakeDrawn = false;
 
   /**
@@ -3019,6 +3059,7 @@ export function createNetSystem(ctx) {
       if (kind === 'fires') { drawFires(sampled); continue; }
       if (kind === 'flood') { drawFlood(sampled); continue; }
       if (kind === 'quake') { drawQuake(sampled); continue; }
+      if (kind === 'storm') { drawStorm(sampled); continue; }
       // The moving-cars rows are the older host's: once `cars` arrives they are not drawn.
       const rows = kind === 'vehicles' && S.hostCars ? NO_ROWS : sampled;
       // The clones are one set of instanced meshes, not proxies.

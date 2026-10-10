@@ -6,6 +6,7 @@ import { ELECTRIC, ARC_VERTEX, ARC_FRAGMENT } from './electricStorm/config.js';
 import { createElectricStrikes } from './electricStorm/strikes.js';
 import { createElectricGlow } from './electricStorm/glow.js';
 import { createElectricEmp } from './electricStorm/emp.js';
+import { ringRadius, ringOpacity, ringStarted } from './net/stormFx.js';
 
 /**
  * ===========================================================================
@@ -78,6 +79,8 @@ import { createElectricEmp } from './electricStorm/emp.js';
  *   updateElectricStorm: (dt: number) => void,
  *   setElectric: (on: boolean) => void,
  *   isActive: () => boolean,
+ *   replicaState: () => ({charge: number, ring: {x: number, z: number, radius: number}|null}|null),
+ *   mirror: (row: ReadonlyArray<number>|undefined) => void,
  *   empRing: () => ({x: number, z: number, radius: number, strength: number}|null),
  *   resetElectricStorm: () => void,
  *   disposeElectricStorm: () => void,
@@ -161,6 +164,10 @@ export function createElectricStormSystem(ctx) {
 
     scratchColour: new THREE.Color()
   };
+
+  // Co-op guest: the host's storm as it was last said (net/stormFx.js). While
+  // `on`, the render half of the update runs; nothing here is gameplay.
+  const replica = { on: false, charge: 0, x: 0, z: 0, sent: 0, radius: 0 };
 
   // Every function of every module, by name, for the others to call.
   const api = {};
@@ -326,11 +333,7 @@ export function createElectricStormSystem(ctx) {
     if (on === S.state.active) return;
     S.state.active = on;
     syncButton();
-    S.arcMesh.visible = on;
-    S.orbs.visible = on;
-    S.glow.points.visible = on;
-    S.motes.points.visible = on;
-    for (const shell of S.shells) shell.mesh.visible = on;
+    showParts(on);
     if (on) {
       S.state.empTimer = 3.5;
       S.state.charge = 1;
@@ -350,6 +353,50 @@ export function createElectricStormSystem(ctx) {
         markPoolDirty(pool);
       }
     }
+  }
+
+  /**
+   * Shows or hides every part of the storm that is drawn (the mode's switch
+   * and the guest's mirror share it).
+   * @param {boolean} on
+   * @returns {void}
+   */
+  function showParts(on) {
+    S.arcMesh.visible = on;
+    S.orbs.visible = on;
+    S.glow.points.visible = on;
+    S.motes.points.visible = on;
+    for (const shell of S.shells) shell.mesh.visible = on;
+  }
+
+  /**
+   * Co-op guest: the host's `storm` row (undefined when the host sends none).
+   * It only sets what is drawn; the funnel, arcs, orbs, light and ring run in
+   * updateElectricStorm. Nothing is faulted, shocked, ignited, electrocuted,
+   * scored or shaken, and isActive()/empRing() report nothing.
+   * @param {ReadonlyArray<number>|undefined} row
+   * @returns {void}
+   */
+  function mirror(row) {
+    if (!S.group) return;
+    if (!row) {
+      if (!replica.on) return;
+      replica.on = false;
+      replica.sent = replica.radius = 0;
+      for (const instance of ctx.tornadoes.instances) instance.Vortex.electric = 0;
+      if (!S.state.active) {
+        resetElectricStorm();
+        showParts(false);
+        S.light.intensity = 0;
+      }
+      return;
+    }
+    if (!S.state.active && !replica.on) showParts(true);
+    replica.on = true;
+    replica.charge = row[1];
+    replica.x = row[2];
+    replica.z = row[3];
+    replica.sent = row[4];
   }
 
   /** @returns {boolean} */
@@ -372,7 +419,8 @@ export function createElectricStormSystem(ctx) {
     // does anyone already being electrocuted.
     api.updateSparks(dt);
     api.updateJolts(dt);
-    if (!S.state.active) return;
+    const mirroring = replica.on && !S.state.active;
+    if (!S.state.active && !mirroring) return;
 
     const instances = ctx.tornadoes.active;
     if (!instances.length) return;
@@ -392,7 +440,8 @@ export function createElectricStormSystem(ctx) {
 
     // The column glows between discharges and flares on each one -- the
     // funnel's own surface too (vortex.js applyFlash).
-    S.state.charge = Math.max(0.25, S.state.charge - dt * 1.1);
+    if (mirroring) S.state.charge += (Math.max(0.25, replica.charge) - S.state.charge) * Math.min(1, dt * 10);
+    else S.state.charge = Math.max(0.25, S.state.charge - dt * 1.1);
     for (const instance of instances) instance.Vortex.electric = (0.45 + S.state.charge * 0.55) * born;
 
     // Arcs are struck against every funnel in play, so an Outbreak of three
@@ -433,7 +482,8 @@ export function createElectricStormSystem(ctx) {
 
     // Ground strikes only once a run is under way: a tornado standing still
     // on the start screen should not be levelling the town before Start.
-    if (Sim.state.running) {
+    if (mirroring) updateReplicaRing(dt);
+    else if (Sim.state.running) {
       S.state.strikeTimer -= dt;
       while (S.state.strikeTimer <= 0) {
         api.strikeGround(instances[Math.floor(Math.random() * instances.length)]);
@@ -446,7 +496,7 @@ export function createElectricStormSystem(ctx) {
         api.fireEMP(lead);
       }
     }
-    if (S.state.empActive) api.updateEMP(dt);
+    if (S.state.empActive && !mirroring) api.updateEMP(dt);
 
     api.updateOrbs(dt, lead);
 
@@ -467,6 +517,39 @@ export function createElectricStormSystem(ctx) {
     S.light.intensity = ELECTRIC.lightPeak * (0.25 + S.state.charge * 0.75);
 
     api.writeArcs(dt);
+  }
+
+  /**
+   * Co-op guest: the host's EMP ring, drawn and nothing else (its flash and
+   * sound at the start; no fault, shock, fire, kill or score, R-053).
+   * @param {number} dt
+   * @returns {void}
+   */
+  function updateReplicaRing(dt) {
+    const radius = ringRadius(replica.radius, replica.sent, dt);
+    if (ringStarted(replica.radius, radius)) {
+      ctx.systems.lightning.flashScreen(S.scratchA.set(replica.x, 20, replica.z), 0.55, ELECTRIC.flashTint);
+      if (ctx.systems.shockwaveSound) ctx.systems.shockwaveSound.playShockwave();
+      showBanner('EMP DISCHARGE!', 'The grid is going down');
+    }
+    replica.radius = radius;
+    S.ring.visible = radius > 0;
+    if (radius <= 0) return;
+    S.ring.position.set(replica.x, 2, replica.z);
+    S.ring.scale.setScalar(Math.max(0.01, radius));
+    S.ring.material.opacity = ringOpacity(radius);
+  }
+
+  /**
+   * The storm as plain numbers for a snapshot's `storm` row, read-only; null
+   * when the mode is off or no funnel is down.
+   * @returns {{charge: number, ring: {x: number, z: number, radius: number}|null}|null}
+   */
+  function replicaState() {
+    if (!S.state.active || !S.group) return null;
+    const lead = ctx.tornadoes.active[0];
+    if (!lead || lead.Vortex.groundPresence <= 0.05) return null;
+    return { charge: S.state.charge, ring: api.empRing() };
   }
 
   /** @returns {void} */
@@ -529,6 +612,8 @@ export function createElectricStormSystem(ctx) {
     isActive,
     surfaceArc: api.surfaceArc,
     empRing: api.empRing,
+    replicaState,
+    mirror,
     // Called by the lightning strikes the player calls down too
     // (engine/strikeTargeting.js).
     electrocute: api.electrocute,

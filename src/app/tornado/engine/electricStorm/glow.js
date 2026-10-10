@@ -87,8 +87,11 @@ export function createElectricGlow(ctx, S, api) {
         const landed = S.scratchB.clone();
         api.addArc(api.boltPath(S.scratchA, S.scratchB, 12, 2.4), ELECTRIC.strikeLife, 1.2, true);
         spawnSparks(landed);
-        ctx.systems.powerLines.faultAt(landed.x, landed.z, 12);
-        ctx.systems.buildingFire.igniteNear(landed.x, landed.z, 8);
+        // The guest's orbs only draw the discharge (R-053); the host's faults and fires travel as state.
+        if (!(ctx.systems.net && ctx.systems.net.isPeerView())) {
+          ctx.systems.powerLines.faultAt(landed.x, landed.z, 12);
+          ctx.systems.buildingFire.igniteNear(landed.x, landed.z, 8);
+        }
         S.state.charge = Math.min(1, S.state.charge + 0.2);
       }
     }

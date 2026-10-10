@@ -62,6 +62,8 @@ export const LIMITS = {
   maxFlood: 1,
   /** The earthquake family: the quake (1), chasms (2), sinkholes (3), the eruption (1). */
   maxQuake: 8,
+  /** The electric storm: one row while the mode is on and a funnel is down. */
+  maxStorm: 1,
   maxAim: 8,
   maxEnv: 1
 };
@@ -95,7 +97,7 @@ export const FX_KINDS = ['bullet', 'rail', 'plasma', 'mega', 'fire', 'holeShot',
 export const FX_COLUMNS = ['id', 'kind', 'shooter', 'x', 'y', 'z', 'a', 'b', 'c', 'extra'];
 
 /** Row widths of the additive snapshot fields (`fx` is the widest). */
-export const EXTRA_ROW_WIDTH = { fx: 10, tw: 6, hole: 4, aim: 4, env: 7, cars: 8, giants: 7, replicator: 8, clones: 6, figures: 9, flyers: 10, fires: 8, flood: 6, quake: 8 };
+export const EXTRA_ROW_WIDTH = { fx: 10, tw: 6, hole: 4, aim: 4, env: 7, cars: 8, giants: 7, replicator: 8, clones: 6, figures: 9, flyers: 10, fires: 8, flood: 6, quake: 8, storm: 5 };
 
 const CODE_RE = new RegExp(`^[${ROOM.codeAlphabet}]{${ROOM.codeLength}}$`);
 
@@ -221,14 +223,15 @@ export function validateInput(msg) {
  *   flyers       [id, type, x, y, z, yaw, pitch, roll, state, a]  (type 0 GHOST jet, 1 news helicopter, 2 mothership, 3 cow, 4 Captain Spotless; net/flyerPose.js)
  *   fires        [id, type, x, z, level, a, b, c]  (type 0 building fire, 1 ground fire, 2 fuel station, 3 gas main; net/fireFx.js)
  *   quake        [id, type, a, b, c, d, e, f]  (type 0 earthquake, 1 chasm, 2 sinkhole, 3 lava fissures; only while one is on the field; net/quakeFx.js)
+ *   storm        [id 0, charge, ringX, ringZ, ringRadius]  (the Electric Tornado mode, only while a funnel is down; radius 0 = no ring; net/stormFx.js)
  *   flood        [id 0, phase, frontX, strain, fade, frozen]  (the dam break, only while it fails or the water is out; phase 1 strain, 2 breaking, 3 surge, 4 drain; net/floodFx.js)
  * The `meteor` fx kind (net/meteorFx.js): one row per rock at launch, x y z = entry, a b c = landing, extra = radius in tenths (+200 for an airburst).
- * Caps: fx 24, tw 8, hole 1, aim 8, env 1, cars 64, giants 2, replicator 1, clones 50, figures 14, flyers 14, fires 64, flood 1, quake 8. Unknown fx kinds are dropped by
+ * Caps: fx 24, tw 8, hole 1, aim 8, env 1, cars 64, giants 2, replicator 1, clones 50, figures 14, flyers 14, fires 64, flood 1, quake 8, storm 1. Unknown fx kinds are dropped by
  * `sanitizeFx`, not an error. Built and read by later subtasks; no row here
  * widens an existing one.
  * @typedef {{type:'snapshot', v:number, room:string, tick:number, t:number,
  *   score:number, players:number[][], tornadoes:number[][], terminators:number[][],
- *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][], ack?:number[][], alt?:number[][], fx?:number[][], tw?:number[][], hole?:number[][], aim?:number[][], env?:number[][], cars?:number[][], giants?:number[][], replicator?:number[][], clones?:number[][], figures?:number[][], flyers?:number[][], fires?:number[][], flood?:number[][], quake?:number[][]}} Snapshot
+ *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][], ack?:number[][], alt?:number[][], fx?:number[][], tw?:number[][], hole?:number[][], aim?:number[][], env?:number[][], cars?:number[][], giants?:number[][], replicator?:number[][], clones?:number[][], figures?:number[][], flyers?:number[][], fires?:number[][], flood?:number[][], quake?:number[][], storm?:number[][]}} Snapshot
  */
 const ROW_WIDTH = { players: 9, tornadoes: 4, terminators: 5, aliens: 5, ships: 5, vehicles: 5 };
 
@@ -291,7 +294,7 @@ export function validateSnapshot(msg) {
  */
 function validateExtraFields(msg, b) {
   /** @type {Record<string, number>} */
-  const caps = { fx: LIMITS.maxFx, tw: LIMITS.maxTw, hole: LIMITS.maxHole, aim: LIMITS.maxAim, env: LIMITS.maxEnv, cars: LIMITS.maxPerKind, giants: LIMITS.maxGiants, replicator: LIMITS.maxReplicator, clones: LIMITS.maxClones, figures: LIMITS.maxFigures, flyers: LIMITS.maxFlyers, fires: LIMITS.maxFires, flood: LIMITS.maxFlood, quake: LIMITS.maxQuake };
+  const caps = { fx: LIMITS.maxFx, tw: LIMITS.maxTw, hole: LIMITS.maxHole, aim: LIMITS.maxAim, env: LIMITS.maxEnv, cars: LIMITS.maxPerKind, giants: LIMITS.maxGiants, replicator: LIMITS.maxReplicator, clones: LIMITS.maxClones, figures: LIMITS.maxFigures, flyers: LIMITS.maxFlyers, fires: LIMITS.maxFires, flood: LIMITS.maxFlood, quake: LIMITS.maxQuake, storm: LIMITS.maxStorm };
   for (const name of Object.keys(caps)) {
     const rows = msg[name];
     if (rows === undefined) continue;
@@ -362,6 +365,8 @@ function extraRowOk(name, r, b) {
     case 'flood':
       return r[0] === 0 && Number.isInteger(r[1]) && r[1] >= 1 && r[1] <= 4
         && Math.abs(r[2]) <= b && inRange(r[3], 0, 1) && inRange(r[4], 0, 1) && (r[5] === 0 || r[5] === 1);
+    case 'storm':
+      return r[0] === 0 && inRange(r[1], 0, 1) && Math.abs(r[2]) <= b && Math.abs(r[3]) <= b && inRange(r[4], 0, 360);
     case 'quake': {
       if (!Number.isInteger(r[0]) || r[0] < 0 || !Number.isInteger(r[1]) || r[1] < 0 || r[1] > 3) return false;
       if (r[1] === 0) return inRange(r[2], 0, 1) && inRange(r[3], 0, 100);
