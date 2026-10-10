@@ -182,6 +182,7 @@ export { SHIP_DAMAGE } from './hero/config.js';
  *   hitArea: (x: number, z: number, radius: number, title: string, sub: string, source?: string) => void,
  *   guestFlame: (gun: {tick: number}, dt: number, muzzle: THREE.Vector3, dir: THREE.Vector3) => void,
  *   guestTracer: (from: THREE.Vector3, to: THREE.Vector3) => void,
+ *   guestShot: (name: 'rifle'|'minigun'|'railgun', shooter: import('./hero/shooter.js').Shooter, range: number, to: THREE.Vector3) => (string|null),
  *   rogerFireBits: () => number,
  *   rogerJetBurning: () => boolean,
  *   showRemoteJet: (id: number, x: number, y: number, z: number, yaw: number, climb: number, dt: number) => void,
@@ -898,6 +899,12 @@ export function createHeroModeSystem(ctx) {
     },
     guestFlame: (/** @type {any} */ gun, /** @type {number} */ dt, /** @type {THREE.Vector3} */ muzzle, /** @type {THREE.Vector3} */ dir) => { if (S.weapons) S.weapons.guestFlame(gun, dt, muzzle, dir); },
     guestTracer: (/** @type {THREE.Vector3} */ from, /** @type {THREE.Vector3} */ to) => { if (S.weapons) S.weapons.guestTracer(from, to); },
+    // A co-op guest's rifle, minigun or railgun shot, resolved by the host's own weapon code with the guest as shooter
+    // (hero/shooter.js; net/system.js guestFire). The `traceAim` kind it ended on, or null when it was refused.
+    guestShot: (/** @type {'rifle'|'minigun'|'railgun'} */ name, /** @type {any} */ shooter, /** @type {number} */ range, /** @type {THREE.Vector3} */ to) => {
+      if (!S.weapons) return null;
+      return name === 'rifle' ? api.guestPlasma(shooter, range, to) : S.weapons.guestShot(name, shooter, range, to);
+    },
     // Read-only (co-op `aim` rows, net/system.js): 1 Fire Gun firing, 2 minigun barrels spinning.
     rogerFireBits: () => (S.weapons ? S.weapons.fireBits() : 0),
     // Read-only (co-op `aim` rows, bit 4): the pack is burning on a Roger who is up and flying.

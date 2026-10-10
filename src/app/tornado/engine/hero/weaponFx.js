@@ -13,24 +13,25 @@
 
 /**
  * @param {any} ctx
- * @returns {{announce: (kind: string, from: {x: number, y: number, z: number}, to: {x: number, y: number, z: number}, hit: string, extra?: number) => void}}
+ * @returns {{announce: (kind: string, from: {x: number, y: number, z: number}, to: {x: number, y: number, z: number}, hit: string, extra?: number, shooter?: string) => void}}
  */
 export function createWeaponFx(ctx) {
   const payload = { shooter: '0', kind: '', from: /** @type {any} */ (null), to: /** @type {any} */ (null), hit: '', extra: 0 };
   return {
     /**
-     * Announces one shot of the host's own Roger.
+     * Announces one shot: the host's own Roger by default, or the shooter named.
      * @param {string} kind one of protocol.js FX_KINDS
      * @param {{x: number, y: number, z: number}} from where it started
      * @param {{x: number, y: number, z: number}} to where it ended
      * @param {string} hit the `traceAim` kind it ended on ('' when none)
      * @param {number} [extra] a small whole number for the kind
+     * @param {string} [shooter] the player id who fired ('0': the host's Roger)
      * @returns {void}
      */
-    announce(kind, from, to, hit, extra = 0) {
+    announce(kind, from, to, hit, extra = 0, shooter = '0') {
       const net = ctx.systems.net;
       if (!net || !net.fxLive()) return;
-      payload.shooter = '0';
+      payload.shooter = shooter;
       payload.kind = kind;
       payload.from = from;
       payload.to = to;

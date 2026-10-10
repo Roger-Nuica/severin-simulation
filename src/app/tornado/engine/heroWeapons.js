@@ -15,6 +15,8 @@ import { createKatanaBlade } from './hero/katana/blade.js';
 import { createKatanaBladeUi } from './hero/katana/bladeUi.js';
 import { createKatanaBladeCut } from './hero/katana/bladeCut.js';
 import { createWeaponFx } from './hero/weaponFx.js';
+import { createShooter, tell, credit, KILL_CREDIT, pointAlong, withinRange, tooClose } from './hero/shooter.js';
+import { IMPACT_SCORE } from './damage/config.js';
 
 /**
  * ===========================================================================
@@ -170,6 +172,12 @@ export function createHeroWeapons(ctx, hero) {
   const { Sim } = ctx;
   /** Announces this Roger's shots to the co-op guest (hero/weaponFx.js); nothing happens outside a room with a guest. */
   const weaponFx = createWeaponFx(ctx);
+  /** The host's Roger as a shooter (hero/shooter.js): refilled at the top of each shot, so the host's weapons run the same code a guest's do. */
+  const hostShot = createShooter('0', true);
+  /** @param {string} text @returns {void} the host's screen */
+  const flash = (text) => hero.flashMessage(text);
+  /** @param {import('./hero/shooter.js').Shooter} shooter @param {string} text @returns {void} to the shooter's own screen */
+  const say = (shooter, text) => tell(shooter, text, flash);
   /** Whether the trigger was held with the sights up on the last frame (read by `fireBits`, co-op `aim` rows). */
   let aimingNow = false;
   const state = {
@@ -594,6 +602,21 @@ export function createHeroWeapons(ctx, hero) {
   // ---------------------------------------------------------------------
 
   /**
+   * A round's trace: the first thing down the shooter's aim, and the other
+   * Rogers in the line of fire taking one round's value (co-op friendly
+   * fire, R-053).
+   * @param {import('./hero/shooter.js').Shooter} shooter
+   * @returns {{t: number, kind: string, obj: Object|null}}
+   */
+  function traceRound(shooter) {
+    const eye = /** @type {THREE.Vector3} */ (shooter.eye);
+    const d = /** @type {THREE.Vector3} */ (shooter.dir);
+    const hit = hero.traceAim(eye, d);
+    if (ctx.systems.net) ctx.systems.net.hurtRay(shooter.id, eye.x, eye.y, eye.z, d.x, d.y, d.z, hit.t, 'bullet');
+    return hit;
+  }
+
+  /**
    * One minigun round down the sights, with its scatter.
    * @param {THREE.Camera} cam
    * @param {THREE.Vector3} aimDir
@@ -608,9 +631,9 @@ export function createHeroWeapons(ctx, hero) {
     const a = Math.random() * Math.PI * 2;
     const r = Math.sqrt(Math.random()) * MINIGUN.spread;
     dir.copy(aimDir).addScaledVector(side, Math.cos(a) * r).addScaledVector(lift, Math.sin(a) * r).normalize();
-    const hit = hero.traceAim(cam.position, dir);
-    // The other Rogers in the line of fire take one round's value (co-op friendly fire, R-053).
-    if (ctx.systems.net) ctx.systems.net.hurtRay('0', cam.position.x, cam.position.y, cam.position.z, dir.x, dir.y, dir.z, hit.t, 'bullet');
+    hostShot.eye = cam.position;
+    hostShot.dir = dir;
+    const hit = traceRound(hostShot);
     const at = scratch.copy(cam.position).addScaledVector(dir, hit.t).clone();
     const vm = view();
     const from = vm ? vm.muzzle.getWorldPosition(new THREE.Vector3()) : cam.position.clone();
@@ -647,22 +670,24 @@ export function createHeroWeapons(ctx, hero) {
   /**
    * A round arriving where it was aimed: what it does there.
    * @param {{kind: string, obj: any, at: THREE.Vector3}} hit
+   * @param {import('./hero/shooter.js').Shooter} [shooter] who fired (default: the host's Roger)
    * @returns {void}
    */
-  function landRound(hit) {
+  function landRound(hit, shooter = hostShot) {
     const at = hit.at;
     const s = ctx.systems;
     if (hit.kind === 'person' && hit.obj) {
       if (!hit.obj.mesh || !hit.obj.mesh.parent) return;
       s.damage.damageFromImpact(hit.obj, at, MINIGUN.personEnergy);
+      credit(shooter, IMPACT_SCORE, true);
       // A killing breaks Smooth Criminal's spell (engine/smoothCriminal.js).
       ctx.events.emit('rogerKill');
     } else if (hit.kind === 'terminator' && hit.obj) {
       const n = hero.pursuerBulletHit(hit.obj, MINIGUN.terminatorHits);
-      if (n > 0 && n < MINIGUN.terminatorHits) hero.flashMessage(`TERMINATOR HIT ${n} / ${MINIGUN.terminatorHits}`);
+      if (n > 0 && n < MINIGUN.terminatorHits) say(shooter, `TERMINATOR HIT ${n} / ${MINIGUN.terminatorHits}`);
     } else if (hit.kind === 'enemy' && hit.obj) {
       // An enemy of the shared register (engine/enemies.js): the T-Rex.
-      if (s.enemies.hit(hit.obj.e, hit.obj.kind, { type: 'bullet', at })) ctx.events.emit('rogerKill');
+      if (s.enemies.hit(hit.obj.e, hit.obj.kind, { type: 'bullet', at })) { ctx.events.emit('rogerKill'); credit(shooter, KILL_CREDIT, false); }
     } else if (hit.kind === 'samurai' && hit.obj && s.spaceship) {
       // One of Landing Support's samurai: only Roger can bring one down.
       if (s.spaceship.hitSamurai(hit.obj, 'bullet')) ctx.events.emit('rogerKill');
@@ -675,7 +700,7 @@ export function createHeroWeapons(ctx, hero) {
       s.enemies.each(roundVisit);
       round.target = null;
       round.at = null;
-      if (round.stopped) ctx.events.emit('rogerKill');
+      if (round.stopped) { ctx.events.emit('rogerKill'); credit(shooter, KILL_CREDIT, false); }
     } else if (hit.kind === 'ship' && hit.obj && shipKindOf(hit.obj.name)) {
       // The alien ship or the mothership (D1, D3): a round chips its hull by the table.
       if (hit.obj.hit(tableDamage(/** @type {string} */ (shipKindOf(hit.obj.name)), { type: 'bullet' })) === 0) ctx.events.emit('rogerKill');
@@ -687,7 +712,7 @@ export function createHeroWeapons(ctx, hero) {
       s.heroMode.chipTornado(hit.obj, { type: 'bullet' });
     } else if (hit.kind === 'unit' && hit.obj && s.terminator) {
       const n = s.terminator.bulletHit(hit.obj, MINIGUN.terminatorHits);
-      if (n > 0 && n < MINIGUN.terminatorHits) hero.flashMessage(`TERMINATOR HIT ${n} / ${MINIGUN.terminatorHits}`);
+      if (n > 0 && n < MINIGUN.terminatorHits) say(shooter, `TERMINATOR HIT ${n} / ${MINIGUN.terminatorHits}`);
     }
   }
 
@@ -704,6 +729,66 @@ export function createHeroWeapons(ctx, hero) {
   }
 
   /**
+   * What a railgun bolt does where it lands, for either player: anyone -- a
+   * person or an alien -- within 5 m is killed (the bolt itself, through the
+   * Lightning tile's strike), the other Rogers there are hurt, and a killing
+   * breaks Smooth Criminal's spell (engine/smoothCriminal.js).
+   * @param {import('./hero/shooter.js').Shooter} shooter
+   * @param {THREE.Vector3} point where the bolt lands
+   * @returns {boolean} someone was under it
+   */
+  function resolveRail(shooter, point) {
+    const victims = ctx.Environment.people.some(p => p.mesh.parent && Math.hypot(p.mesh.position.x - point.x, p.mesh.position.z - point.z) < 5)
+      || (ctx.systems.aliens && ctx.systems.aliens.targets().some(a => Math.hypot(a.root.position.x - point.x, a.root.position.z - point.z) < 5))
+      // A samurai under it (Landing Support): the bolt is the shooter's, so it can.
+      || (!!ctx.systems.spaceship && ctx.systems.spaceship.hitSamuraiArea(point.x, point.z, 5, 'bolt') > 0);
+    ctx.systems.strikeTargeting.boltAt(point.x, point.z);
+    // The other Rogers where the bolt lands (the people's kill radius, 5 m; co-op friendly fire, R-053).
+    if (ctx.systems.net) ctx.systems.net.hurtArea(shooter.id, point.x, point.z, 5, 'bolt', 'Struck by');
+    if (victims) ctx.events.emit('rogerKill');
+    return !!victims;
+  }
+
+  /**
+   * A co-op guest's minigun round or railgun bolt, resolved by the host's own
+   * code with the guest as shooter. The minigun traces and lands at once (the
+   * guest's rounds have no flight on the host: the net mirror draws the
+   * tracer) through `landRound`; the railgun finds its point as the host's
+   * ring does and calls the bolt down through `resolveRail`. Both are held
+   * to the guest's reach (net/guestWeapons.js) and announced with the guest
+   * as shooter. No ammunition, spread or flash: those are the host's own.
+   * @param {'minigun'|'railgun'} name
+   * @param {import('./hero/shooter.js').Shooter} shooter
+   * @param {number} range metres
+   * @param {THREE.Vector3} to receives the end point
+   * @returns {string|null} the `traceAim` kind the shot ended on, or null when the shot was refused (nothing spent)
+   */
+  function guestShot(name, shooter, range, to) {
+    const eye = /** @type {THREE.Vector3} */ (shooter.eye);
+    const from = shooter.muzzle || eye;
+    if (name === 'minigun') {
+      const hit = withinRange(traceRound(shooter), range);
+      pointAlong(shooter, hit.t, to);
+      landRound({ kind: hit.kind, obj: hit.obj, at: to.clone() }, shooter);
+      weaponFx.announce('bullet', from, to, hit.kind, 0, shooter.id);
+      return hit.kind;
+    }
+    const hit = withinRange(hero.traceAim(eye, /** @type {THREE.Vector3} */ (shooter.dir)), range);
+    if (hit.kind === 'sky') {
+      say(shooter, 'RAILGUN — aim at the ground or a target');
+      return null;
+    }
+    pointAlong(shooter, hit.t, to);
+    if (tooClose(shooter, to, RAILGUN.minRange)) {
+      say(shooter, 'TOO CLOSE — the bolt would hit you');
+      return null;
+    }
+    const victims = resolveRail(shooter, to);
+    weaponFx.announce('rail', from, to, '', victims ? 1 : 0, shooter.id);
+    return hit.kind;
+  }
+
+  /**
    * One railgun bolt, on the ring.
    * @returns {void}
    */
@@ -714,22 +799,14 @@ export function createHeroWeapons(ctx, hero) {
       return;
     }
     const r = hero.rogerPosition();
-    if (Math.hypot(railPoint.x - r.x, railPoint.z - r.z) < RAILGUN.minRange) {
+    hostShot.feet = r;
+    if (tooClose(hostShot, railPoint, RAILGUN.minRange)) {
       hero.flashMessage('TOO CLOSE — the bolt would hit Roger');
       return;
     }
     state.railCooldown = RAILGUN.cooldown;
     state.recoil = 1;
-    // Anyone -- a person or an alien -- where it lands is killed, and a
-    // killing breaks Smooth Criminal's spell (engine/smoothCriminal.js).
-    const victims = ctx.Environment.people.some(p => p.mesh.parent && Math.hypot(p.mesh.position.x - railPoint.x, p.mesh.position.z - railPoint.z) < 5)
-      || (ctx.systems.aliens && ctx.systems.aliens.targets().some(a => Math.hypot(a.root.position.x - railPoint.x, a.root.position.z - railPoint.z) < 5))
-      // A samurai under it (Landing Support): the bolt is Roger's, so it can.
-      || (!!ctx.systems.spaceship && ctx.systems.spaceship.hitSamuraiArea(railPoint.x, railPoint.z, 5, 'bolt') > 0);
-    ctx.systems.strikeTargeting.boltAt(railPoint.x, railPoint.z);
-    // The other Rogers where the bolt lands (the people's kill radius, 5 m; co-op friendly fire, R-053).
-    if (ctx.systems.net) ctx.systems.net.hurtArea('0', railPoint.x, railPoint.z, 5, 'bolt', 'Struck by');
-    if (victims) ctx.events.emit('rogerKill');
+    const victims = resolveRail(hostShot, railPoint);
     const vm = view();
     if (vm) {
       vm.flash.visible = true;
@@ -1036,6 +1113,8 @@ export function createHeroWeapons(ctx, hero) {
     katanaBlade: () => blade,
     // Read-only, for the co-op `aim` rows (net/system.js): 1 Fire Gun firing, 2 minigun barrels spinning.
     fireBits: () => ((aimingNow && state.firing && current() === 'fire' ? 1 : 0) | (state.spin > 1 ? 2 : 0)),
+    // Co-op guests' minigun and railgun (engine/net/system.js): the host's own resolve code with the guest as shooter.
+    guestShot,
     // Co-op guests' Fire Gun (engine/net/system.js): built on first use.
     guestFlame: (/** @type {{tick: number}} */ gun, /** @type {number} */ dt, /** @type {THREE.Vector3} */ muzzle, /** @type {THREE.Vector3} */ dir) => {
       buildEffects();

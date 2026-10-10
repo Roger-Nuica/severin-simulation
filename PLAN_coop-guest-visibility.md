@@ -380,12 +380,10 @@ Common rules for every subtask: functional style, every new function typed with 
   - Acceptance: a written decision the owner approves before C2.
   - [x] **DECISION GATE** (owner approval). Approved with answers, 2026-10-10 (see "Owner's decisions, 2026-10-10").
 
-- [ ] Subtask C2: Guest hitscan through the host's trace (Stage 1; fixes A for rifle, minigun, railgun). `guestFire` replaces `scan` with `traceAim(origin, dir)` from the guest's eye (including altitude, Subtask 14b) and dispatches by `hit.kind` through the same functions the host uses (`landRound`, the person branch, `plasmaHit` for the rifle, `boltAt`-equivalent for the rail), with the guest as shooter. Walls then stop shots. Scoring through `damage.addDamageScore` once, as now (R-049). `GUEST_WEAPONS` keeps only cooldown, range and gating.
-  - Likely files: `net/system.js`, `net/guestWeapons.js`, `heroWeapons.js` (extract `landRound` to take a shooter), `hero/plasma.js` (extract `plasmaHit`), tests
-  - Depends on: C1 approved
-  - Classification: SEPARATE: weapon and damage contract (R-054 table, R-013 acceptance); a refactor of protected host code.
-  - Risks / edge cases: R-013 and R-054 (`accepts` and the table unchanged); host single-player behaviour byte-identical (bench and manual); the guest must never trigger `rogerKill`-only side effects meant for Roger (Smooth Criminal's peace is world-wide, so likely correct to keep); friendly fire stays through `hurtRay`; no double damage on the same shot.
-  - Acceptance: the guest's rifle, minigun and railgun kill people, hurt everything the host's do, and stop at walls; a headless contract table (C5) passes for both shooters.
+- [x] DONE Subtask C2: Guest hitscan through the host's trace (Stage 1; fixes A for rifle, minigun, railgun). `guestFire` no longer uses `scan` for these three (kept for the Black Hole until C4).
+  - Files changed: `hero/shooter.js` (new), `hero/plasma.js`, `heroWeapons.js`, `heroMode.js`, `hero/weaponFx.js`, `net/system.js`, `net/guestWeapons.js`, `tests/guest-combat.test.mjs` (new)
+  - Result: the guest's shot is a `Shooter` resolved by the host's `traceAim`, `landRound`, `plasmaHit` (rifle) and `resolveRail` (extracted from `fireRail`); people die, walls stop shots, `hurtRay`/`hurtArea`/`splashGuests`/`weaponFx.announce` take the shooter id; guest kills emit `rogerKill`, score once (`score` event).
+  - MANDATORY MANUAL STOP after C2 (two browsers) still open: not ticked.
 
 - [ ] Subtask C3: Rifle blast and railgun circle for the guest (Stage 2; fixes C's splash and area gaps). The guest's rifle uses the host's blast (`plasmaHit` radius, `hurtRogerInBlast` equivalent through `splashGuests` for the other player, `launchRings` effects cosmetic), the railgun the 5 m kill circle and `hurtArea`. The charged mega beam is the owner's call (Clarification 13).
   - Likely files: `hero/plasma.js`, `heroWeapons.js`, `net/system.js`, `net/guestWeapons.js`

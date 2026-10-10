@@ -6,8 +6,9 @@ import { createSnapshotBuffer } from './interp.js';
 import { createEventEmitter, createEventDeduper } from './events.js';
 import { createPlayerRegistry, REVIVE, FRIENDLY_FIRE } from './players.js';
 import { PROTOCOL_VERSION, LIMITS, WEAPONS, SNAPSHOT_KINDS } from './protocol.js';
-import { createFxRing, hitCode, HIT_CODES, aimRow, holeRow, twRow, envRow } from './fxOut.js';
-import { GUEST_WEAPONS, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrigger, coolDown, weaponAt } from './guestWeapons.js';
+import { createFxRing, hitCode, aimRow, holeRow, twRow, envRow } from './fxOut.js';
+import { createShooter, KILL_CREDIT } from '../hero/shooter.js';
+import { GUEST_WEAPONS, RAY_FX, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrigger, coolDown, weaponAt } from './guestWeapons.js';
 import { createMirror } from './mirror.js';
 import { createFunnels } from './funnels.js';
 import { createSky } from './skyMirror.js';
@@ -110,7 +111,7 @@ const HOLE_MIN_RANGE = 12;
 const EYE = 1.4;
 /** The hero's own walking speeds, read from the protected values, for the shared movement step. @type {import('./movement.js').MoveSpeeds} */
 const GUEST_SPEEDS = { run: HERO.runSpeed, aim: HERO.aimWalkSpeed, back: HERO.backSpeed };
-const KILL_SCORE = 20;
+const KILL_SCORE = KILL_CREDIT;
 /** The car Roger drives is the one co-op vehicle (Hero Mode car flow). */
 const CAR_ID = 9000;
 const SEAT_REACH = 6;
@@ -138,8 +139,6 @@ export function createNetSystem(ctx) {
   const dbgRayD = dbg ? new THREE.Vector3() : null;
   /** The host's `fx` rows waiting for the next snapshot (fxOut.js): fixed size, nothing allocated per shot. */
   const fxRing = createFxRing();
-  /** The `HIT_CODES` index of an enemy hit (a guest shot the host found a target for). */
-  const HIT_ENEMY = HIT_CODES.indexOf('enemy');
   /** The host's shots drawn here (net/mirror.js): the guest's snapshot rows, its own predicted shot, and a guest's shot on the host. One pool, released with the session. */
   const mirror = createMirror(ctx);
   /** The host's tornado drawn by the guest's own funnels (funnels.js); idle on the host and outside a session. */
@@ -167,7 +166,7 @@ export function createNetSystem(ctx) {
     bypass: false,
     holdRevive: false,
     pendingWelcome: false,
-    /** @type {Map<string, {obj: any, cd: number, pending: import('./guestWeapons.js').Trigger|null, tpCd: number, alt: number, vy: number, air: boolean, speed: number, lastUse: boolean, flame: {tick: number, shooter: string}, run: import('./rogerView.js').RunCycle, owned: import('../hero/rogerLook.js').Owned, limbs: any, held: import('../hero/heldWeapons.js').Held}>} */
+    /** @type {Map<string, {obj: any, shot: import('../hero/shooter.js').Shooter, cd: number, pending: import('./guestWeapons.js').Trigger|null, tpCd: number, alt: number, vy: number, air: boolean, speed: number, lastUse: boolean, flame: {tick: number, shooter: string}, run: import('./rogerView.js').RunCycle, owned: import('../hero/rogerLook.js').Owned, limbs: any, held: import('../hero/heldWeapons.js').Held}>} */
     avatars: new Map(),
     /** @type {WeakMap<object, number>} */
     ids: new WeakMap(),
@@ -578,7 +577,27 @@ export function createNetSystem(ctx) {
     dressAsRoger(obj.mesh, owned.keep, { tee: style.tee });
     Sim.three.scene.add(obj.mesh);
     const limbs = rogerLimbs(obj.mesh);
-    S.avatars.set(id, { obj, cd: 0, pending: null, tpCd: 0, alt: 0, vy: 0, air: false, speed: 0, lastUse: false, flame: { tick: 0, shooter: id }, run: newRunCycle(), owned, limbs, held: attachHeld(limbs.armR, owned.keep) });
+    S.avatars.set(id, { obj, shot: guestShooter(id), cd: 0, pending: null, tpCd: 0, alt: 0, vy: 0, air: false, speed: 0, lastUse: false, flame: { tick: 0, shooter: id }, run: newRunCycle(), owned, limbs, held: attachHeld(limbs.armR, owned.keep) });
+  }
+
+  /**
+   * The shooter a guest's shots resolve with (hero/shooter.js): its own eye, aim and feet,
+   * its notices and the credit it is sent.
+   * @param {string} id
+   * @returns {import('../hero/shooter.js').Shooter}
+   */
+  function guestShooter(id) {
+    const shot = createShooter(id, false);
+    shot.eye = new THREE.Vector3();
+    shot.dir = new THREE.Vector3();
+    shot.muzzle = muzzleVec;
+    shot.notify = (text) => sendEvent('notice', { text }, id);
+    // `counted`: the shared scoring path already added the points; otherwise this adds them, as a guest's kills always have.
+    shot.score = (points, counted) => {
+      if (counted) sendEvent('score', { id: Number(id), points });
+      else credit(points, id);
+    };
+    return shot;
   }
 
   /** @param {string} id */
@@ -744,19 +763,20 @@ export function createNetSystem(ctx) {
    * @param {{x: number, y: number, z: number}} at
    * @param {number} radius
    * @param {string} weapon A `HEALTH.damageToPlayer` key.
+   * @param {string} [shooterId] Whose blast it is (`'0'`, Roger's, by default; a guest's own blast hurts that guest too, as Roger's hurts him).
    * @returns {void}
    */
-  function splashGuests(at, radius, weapon) {
+  function splashGuests(at, radius, weapon, shooterId = '0') {
     if (dbg) dbg.host(0);
     if (!coopActive() || !ctx.systems.health) return;
     for (const p of players.list()) {
       if (p.id === '0') continue;
-      if (!mayHurt('0', p.id)) { if (dbg) dbgHurt('splashGuests', '0', p.id, 'mayHurt', ` ${weapon}`); continue; }
+      if (!mayHurt(shooterId, p.id)) { if (dbg) dbgHurt('splashGuests', shooterId, p.id, 'mayHurt', ` ${weapon}`); continue; }
       const d = Math.hypot(p.x - at.x, p.z - at.z);
       const amount = splashAmount(weapon, d, radius);
       if (amount <= 0) { if (dbg) dbgHurt('splashGuests', '0', p.id, 'out', ` ${weapon} ${fixed1(d)} m of ${fixed1(radius)}`); continue; }
-      const r = ctx.systems.health.damagePlayer({ source: 'friendlyFire', amount, type: 'blast', position: at, targetId: p.id, title: 'FRIENDLY FIRE', sub: "Caught in Roger's blast" });
-      if (dbg) dbgResult('splashGuests', '0', p.id, r, ` ${weapon} ${fixed1(d)} m`);
+      const r = ctx.systems.health.damagePlayer({ source: 'friendlyFire', amount, type: 'blast', position: at, targetId: p.id, title: 'FRIENDLY FIRE', sub: `Caught in ${attacker(shooterId)}'s blast` });
+      if (dbg) dbgResult('splashGuests', shooterId, p.id, r, ` ${weapon} ${fixed1(d)} m`);
     }
   }
 
@@ -1250,14 +1270,16 @@ export function createNetSystem(ctx) {
   }
 
   /**
-   * One trigger pull from a guest, whatever is in their hand. Every weapon
-   * resolves through the paths Roger's use: the enemy registry (so each
+   * One trigger pull from a guest, whatever is in their hand. The rifle,
+   * minigun and railgun resolve through the host's own weapon code with the
+   * guest as shooter (hero/shooter.js; `hero().guestShot`: traceAim, landRound,
+   * plasmaHit, the bolt). Every weapon resolves through the paths Roger's use: the enemy registry (so each
    * enemy's own `accepts` and damage handler decide), the building-fire and
    * black-hole systems, and damage.addDamageScore. The other players in the
    * line of fire, arc or cone are hurt through health.damagePlayer (friendly
    * fire is on, R-053).
    * @param {import('./players.js').Player} p
-   * @param {{cd: number, alt: number, flame: {tick: number}}} a
+   * @param {{cd: number, alt: number, flame: {tick: number}, shot: import('../hero/shooter.js').Shooter}} a
    * @param {import('./protocol.js').PlayerInput} input the latest input (aim direction)
    * @param {number} dt
    * @param {import('./guestWeapons.js').Trigger} trigger the pull being acted on (weapon and raised state when it was made)
@@ -1288,24 +1310,24 @@ export function createNetSystem(ctx) {
     if (name === 'rifle' || name === 'minigun' || name === 'railgun') {
       const w = /** @type {typeof GUEST_WEAPONS.rifle} */ (GUEST_WEAPONS[name]);
       a.cd = w.cooldown;
-      const hit = scan(p, yaw, pitch, w.range, oy);
-      if (dbg) { dbgShot(p.id, name, ox, oy, oz, dx, dy, dz, hit, w.range); if (hit) dbg.fire(trigger.weapon, 2); }
-      // What the host sees of the guest's shot: one tracer in the shared round
-      // pool, from just ahead of the guest's eye to where the ray ends. Cosmetic
-      // (no hit, no casing, no sound, no particles); the damage is the call below.
-      const reach = hit ? hit.t : w.range;
+      // The guest as a shooter (hero/shooter.js): its eye (the jetpack's height included), its aim and its feet.
+      // The host's own weapon code resolves the shot from there (traceAim, landRound / plasmaHit / the bolt, friendly
+      // fire, scoring, the guest's `fx` row); walls stop it and people die, as for the host's Roger.
+      const shot = a.shot;
+      shot.eye.set(ox, oy, oz);
+      shot.dir.set(dx, dy, dz);
+      shot.feet.x = ox; shot.feet.z = oz;
+      shot.alt = a.alt; shot.heading = p.heading;
+      // The tracer starts just ahead of the guest's eye (what the host and the guest's other screen see of the shot).
       muzzleVec.set(ox + dx * 0.8, oy - 0.2 + dy * 0.8, oz + dz * 0.8);
-      tracerEnd.set(ox + dx * reach, oy + dy * reach, oz + dz * reach);
-      // All three go through the mirror (the minigun's round with casings and sparks, the rail bolt, the
-      // rifle's plasma beam, each with its cue), as on the guest's screen.
-      if (name === 'minigun') mirror.drawGuestShot('bullet', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
-      else if (name === 'railgun') mirror.drawGuestShot('rail', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
-      else mirror.drawGuestShot('plasma', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
-      if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: oy + dy * hit.t, z: oz + dz * hit.t } })) { if (dbg) dbg.fire(trigger.weapon, 3); credit(KILL_SCORE, p.id); }
-      // Friendly fire (D4): the partner in the line of fire, if nearer than the enemy hit.
-      hurtRay(p.id, ox, oy, oz, dx, dy, dz, hit ? hit.t : w.range, w.type);
-      // Last: what the guest's other screen is told of this shot (muzzleVec and tracerEnd are still the tracer's ends).
-      announceGuestShot(name === 'rifle' ? 'plasma' : name === 'minigun' ? 'bullet' : 'rail', p.id, muzzleVec, tracerEnd, hit ? 'enemy' : '');
+      const kind = hero().guestShot(name, shot, w.range, tracerEnd);
+      // Refused (the railgun with nothing to strike, or too close): no shot, no cooldown spent, as the host's.
+      if (kind === null) { a.cd = 0; return; }
+      const hit = kind === 'sky' ? 0 : hitCode(kind);
+      if (dbg) { dbgShot(p.id, name, ox, oy, oz, dx, dy, dz, hit ? { kind: { kind }, t: Math.hypot(tracerEnd.x - ox, tracerEnd.y - oy, tracerEnd.z - oz) } : null, w.range); if (hit) dbg.fire(trigger.weapon, 2); }
+      // The shot drawn on the host's screen (the minigun's round with casings and sparks, the rail bolt, the rifle's
+      // plasma beam, each with its cue), as on the guest's own: cosmetic; the damage was the call above.
+      mirror.drawGuestShot(RAY_FX[name], muzzleVec, tracerEnd, hit);
     } else if (name === 'katana') {
       a.cd = KATANA.cooldown;
       // A cut in front of the guest: the nearest enemy inside the arc takes a blade hit.

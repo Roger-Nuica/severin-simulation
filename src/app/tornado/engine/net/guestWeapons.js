@@ -16,6 +16,8 @@
  *  - a click shorter than the host's frame, or one overwritten by a newer
  *    message in the same frame, is kept as a pending trigger until the host
  *    has looked at it once.
+ * The rifle, minigun and railgun resolve on the host through the host's own weapon
+ * code (hero/shooter.js, Subtask C2); their rows here are gating only (cooldown, reach).
  * The wheel order (R-049) comes from `WEAPONS` in protocol.js; nothing here
  * reorders it or touches `accepts`, the damage table or any health value.
  */
@@ -39,6 +41,12 @@ export const GUEST_WEAPONS = /** @type {const} */ ({
   blackhole: { mode: 'hole', cooldown: 0.6, range: 200, needsAim: true, type: null },
   katana: { mode: 'blade', cooldown: 0.5, range: 3.6, needsAim: false, type: 'blade' }
 });
+
+/**
+ * The `fx` kind each hitscan weapon is drawn and announced as (protocol.js FX_KINDS):
+ * the rifle's plasma beam, the minigun's round, the railgun's bolt.
+ */
+export const RAY_FX = /** @type {const} */ ({ rifle: 'plasma', minigun: 'bullet', railgun: 'rail' });
 
 /** The Katana's arc, half-angle in radians (the reach is the table's `range`). */
 export const KATANA_HALF_ANGLE = 0.9;

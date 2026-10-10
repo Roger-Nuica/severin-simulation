@@ -7,6 +7,7 @@ import { chipTarget, fullHealth } from '../health/enemyDamage.js';
 import { insideMuzzleGuard, mayHurtPlayer, splashAmount } from '../health/friendlyFire.js';
 import { HEALTH } from '../health/config.js';
 import { createWeaponFx } from './weaponFx.js';
+import { createShooter, tell, credit, KILL_CREDIT, pointAlong, withinRange } from './shooter.js';
 import { buildBeamMeshes, placeBeamMesh, fadeBeamMeshes, buildRingMeshes, placeRingMeshes, ringsTotal } from './plasmaBeam.js';
 
 /**
@@ -27,6 +28,12 @@ export function createHeroPlasma(ctx, S, api) {
   const { Sim, container } = ctx;
   /** Announces the rifle's shots to the co-op guest (hero/weaponFx.js); nothing happens outside a room with a guest. */
   const weaponFx = createWeaponFx(ctx);
+  /** The host's Roger as a shooter (hero/shooter.js): refilled with the camera and the aim at the top of each shot. */
+  const hostShot = createShooter('0', true);
+  /** @param {string} text @returns {void} the host's screen */
+  const flash = (text) => api.flashMessage(text);
+  /** @param {import('./shooter.js').Shooter} shooter @param {string} text @returns {void} to the shooter's own screen */
+  const say = (shooter, text) => tell(shooter, text, flash);
 
   /**
    * The trigger goes down: the charge starts. The rifle has no ammunition
@@ -398,11 +405,9 @@ export function createHeroPlasma(ctx, S, api) {
     S.state.recoil = mega ? 1.6 : 1;
     S.state.spread = 1;
     const cam = Sim.three.camera;
-    const hit = traceAim(cam.position, S.aimDir);
-    S.beamTo.copy(cam.position).addScaledVector(S.aimDir, hit.t);
-    // The other Rogers in the line of fire take the weapon's value once (co-op
-    // friendly fire, R-053); the blast at the end then finds them already hit.
-    if (ctx.systems.net) ctx.systems.net.hurtRay('0', cam.position.x, cam.position.y, cam.position.z, S.aimDir.x, S.aimDir.y, S.aimDir.z, hit.t, mega ? 'mega' : 'plasma');
+    hostShot.eye = cam.position;
+    hostShot.dir = S.aimDir;
+    const hit = traceBeam(hostShot, mega, S.beamTo);
     if (!S.beam) buildBeam();
     S.beam.visible = true;
     S.beamSplash.visible = hit.kind !== 'sky';
@@ -421,8 +426,49 @@ export function createHeroPlasma(ctx, S, api) {
     } else {
       ctx.systems.gamefeel.addShake(0.9, 0.35);
     }
-    if (hit.kind !== 'sky') plasmaHit(hit, S.beamTo, mega);
+    if (hit.kind !== 'sky') plasmaHit(hit, S.beamTo, mega, hostShot);
     weaponFx.announce(mega ? 'mega' : 'plasma', cam.position, S.beamTo, hit.kind, Math.round(level * 100));
+  }
+
+  /**
+   * The beam's trace: down the shooter's aim from its eye to whatever is first
+   * there, the end point into `to`, and the other Rogers in the line of fire
+   * hurt once (co-op friendly fire, R-053; the blast at the end then finds
+   * them already hit).
+   * @param {import('./shooter.js').Shooter} shooter
+   * @param {boolean} mega
+   * @param {THREE.Vector3} to receives the end point
+   * @returns {{t: number, kind: string, obj: Object|null}}
+   */
+  function traceBeam(shooter, mega, to) {
+    const eye = /** @type {THREE.Vector3} */ (shooter.eye);
+    const dir = /** @type {THREE.Vector3} */ (shooter.dir);
+    const hit = traceAim(eye, dir);
+    to.copy(eye).addScaledVector(dir, hit.t);
+    if (ctx.systems.net) ctx.systems.net.hurtRay(shooter.id, eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, hit.t, mega ? 'mega' : 'plasma');
+    return hit;
+  }
+
+  /**
+   * A co-op guest's rifle tap, resolved by the host's own code: the same
+   * trace and friendly-fire ray, the same `plasmaHit` where it lands (the
+   * thing hit, the blast round the point, the people in it), announced with
+   * the guest as shooter. No charge, no beam on this screen (the net mirror
+   * draws that), no shake, no sound of the host's own.
+   * @param {import('./shooter.js').Shooter} shooter
+   * @param {number} range metres the guest's rifle reaches
+   * @param {THREE.Vector3} to receives the end point
+   * @returns {string} the `traceAim` kind the shot ended on
+   */
+  function guestPlasma(shooter, range, to) {
+    const eye = /** @type {THREE.Vector3} */ (shooter.eye);
+    const dir = /** @type {THREE.Vector3} */ (shooter.dir);
+    const hit = withinRange(traceAim(eye, dir), range);
+    pointAlong(shooter, hit.t, to);
+    if (ctx.systems.net) ctx.systems.net.hurtRay(shooter.id, eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, hit.t, 'plasma');
+    if (hit.kind !== 'sky') plasmaHit(hit, to, false, shooter);
+    weaponFx.announce('plasma', shooter.muzzle || eye, to, hit.kind, 0, shooter.id);
+    return hit.kind;
   }
 
   /**
@@ -479,19 +525,20 @@ export function createHeroPlasma(ctx, S, api) {
    * @param {THREE.Vector3} at
    * @param {number} radius
    * @param {boolean} mega
+   * @param {import('./shooter.js').Shooter} shooter whose blast it is (a guest's hurts the host's Roger too)
    * @returns {void}
    */
-  function hurtRogerInBlast(hit, at, radius, mega) {
+  function hurtRogerInBlast(hit, at, radius, mega, shooter) {
     if (!HEALTH.friendlyFire.enabled || insideMuzzleGuard(hit.t)) return;
     // The partner in the blast (co-op friendly fire, D4).
-    if (ctx.systems.net) ctx.systems.net.splashGuests(at, radius, mega ? 'mega' : 'plasma');
-    if (!mayHurtPlayer('0', '0', { coop: false, friendlyFire: true })) return;
+    if (ctx.systems.net) ctx.systems.net.splashGuests(at, radius, mega ? 'mega' : 'plasma', shooter.id);
+    if (!mayHurtPlayer(shooter.id, '0', { coop: !shooter.isHost, friendlyFire: true })) return;
     const p = S.roger.mesh.position;
     const amount = splashAmount(mega ? 'mega' : 'plasma', Math.hypot(p.x - at.x, p.z - at.z), radius);
     if (amount <= 0) return;
     ctx.systems.health.damagePlayer({
       source: 'friendlyFire', amount, type: 'blast', position: { x: at.x, y: at.y, z: at.z },
-      title: 'FRIENDLY FIRE', sub: 'Caught in your own blast'
+      title: 'FRIENDLY FIRE', sub: shooter.isHost ? 'Caught in your own blast' : `Caught in Player ${shooter.id}'s blast`
     });
   }
 
@@ -501,9 +548,10 @@ export function createHeroPlasma(ctx, S, api) {
    * @param {{t: number, kind: string, obj: Object|null}} hit
    * @param {THREE.Vector3} at
    * @param {boolean} mega
+   * @param {import('./shooter.js').Shooter} [shooter] who fired (default: the host's Roger)
    * @returns {void}
    */
-  function plasmaHit(hit, at, mega) {
+  function plasmaHit(hit, at, mega, shooter = hostShot) {
     const s = ctx.systems;
     // Scaled down up close, or a point-blank shot whites out the view.
     const near = THREE.MathUtils.clamp(hit.t / 25, 0.3, 1);
@@ -513,7 +561,7 @@ export function createHeroPlasma(ctx, S, api) {
       // A MEGA BEAM is enough for a funnel; a normal shot only chips its health (D3).
       if (mega) neutralise(hit.obj);
       else if (!chipTornado(hit.obj, { type: 'plasma' })) {
-        api.flashMessage(`STRONG FUNNEL ${Math.round((hit.obj.health / fullHealth('tornado')) * 100)}% — hold ENTER ${HERO.chargeSeconds} s for a MEGA BEAM`);
+        say(shooter, `STRONG FUNNEL ${Math.round((hit.obj.health / fullHealth('tornado')) * 100)}% — hold ENTER ${HERO.chargeSeconds} s for a MEGA BEAM`);
       }
       return;
     }
@@ -521,18 +569,18 @@ export function createHeroPlasma(ctx, S, api) {
       // Every shot holes it; a mega beam does SHIP_DAMAGE.mega times as much.
       const left = hit.obj.hit(mega ? SHIP_DAMAGE.mega : SHIP_DAMAGE.normal, at);
       if (left < 0) return;
-      api.flashMessage(left === 0 ? `${hit.obj.name} GOING DOWN!` : `DIRECT HIT ON THE ${hit.obj.name} · HULL ${Math.round(left * 100)}%`);
+      say(shooter, left === 0 ? `${hit.obj.name} GOING DOWN!` : `DIRECT HIT ON THE ${hit.obj.name} · HULL ${Math.round(left * 100)}%`);
       return;
     }
     if (hit.kind === 'nuclear') {
       // A mega beam goes straight through the containment; a normal shot chips it (engine/nuclear.js, D3).
       if (mega) {
         s.nuclear.megaHit(hit.obj);
-        api.flashMessage('REACTOR BREACHED — GET CLEAR');
+        say(shooter, 'REACTOR BREACHED — GET CLEAR');
       } else if (s.nuclear.chipPlant(hit.obj, { type: 'plasma' })) {
-        api.flashMessage('REACTOR BREACHED — GET CLEAR');
+        say(shooter, 'REACTOR BREACHED — GET CLEAR');
       } else {
-        api.flashMessage('REINFORCED CONTAINMENT — a MEGA BEAM breaks it at once');
+        say(shooter, 'REINFORCED CONTAINMENT — a MEGA BEAM breaks it at once');
       }
       return;
     }
@@ -541,16 +589,16 @@ export function createHeroPlasma(ctx, S, api) {
       // Whichever of them it was: the one on the ring, or a parked one.
       if (hit.obj && hit.obj.detonate) hit.obj.detonate();
       else s.tanker.detonate();
-      api.flashMessage('FUEL TANKER DETONATED');
+      say(shooter, 'FUEL TANKER DETONATED');
       return;
     }
     if (hit.kind === 'terminator') {
       if (mega) api.megaKillPursuer(hit.obj);
       else api.knockdownPursuer(hit.obj);
     }
-    if (hit.kind === 'unit') s.terminator.plasmaHit(hit.obj, mega, S.roger.mesh.position);
+    if (hit.kind === 'unit') s.terminator.plasmaHit(hit.obj, mega, shooter.isHost ? S.roger.mesh.position : shooter.feet);
     if (hit.kind === 'enemy') {
-      if (s.enemies.hit(hit.obj.e, hit.obj.kind, { type: 'plasma', mega, at })) ctx.events.emit('rogerKill');
+      if (s.enemies.hit(hit.obj.e, hit.obj.kind, { type: 'plasma', mega, at })) { ctx.events.emit('rogerKill'); credit(shooter, KILL_CREDIT, false); }
     }
     if (hit.kind === 'alien') {
       s.aliens.plasmaKill(hit.obj, at);
@@ -564,7 +612,7 @@ export function createHeroPlasma(ctx, S, api) {
     // The tanker, the chemical works, a gas main or a power line in the blast
     // goes off (engine/explosives.js).
     setOffExplosivesAt(ctx, at.x, at.z, R);
-    hurtRogerInBlast(hit, at, R, mega);
+    hurtRogerInBlast(hit, at, R, mega, shooter);
     const { damageFromImpact, shockBuilding, addDamageScore, flattenTree } = s.damage;
     // The building it struck takes the whole of it, and catches.
     if (hit.kind === 'building') {
@@ -592,6 +640,7 @@ export function createHeroPlasma(ctx, S, api) {
       }
     }
     if (killed) addDamageScore(20 * killed);
+    if (killed) credit(shooter, 20 * killed, true);
     // A killing breaks Smooth Criminal's spell (engine/smoothCriminal.js).
     if (killed) ctx.events.emit('rogerKill');
     // Trees knocked flat, cars and anything loose thrown.
@@ -721,5 +770,5 @@ export function createHeroPlasma(ctx, S, api) {
     if (S.state.beamTimer <= 0) S.beam.visible = S.beamSplash.visible = false;
   }
 
-  return { beginCharge, releaseCharge, cancelCharge, updateCharge, toggleAim, enterAim, leaveAim, rayCylinder, rayCappedCylinder, rayBox, traceAim, buildBeam, placeBeam, firePlasma, launchRings, updateRings, trailFire, plasmaHit, neutralise, chipTornado, updatePlasma };
+  return { beginCharge, releaseCharge, cancelCharge, updateCharge, toggleAim, enterAim, leaveAim, rayCylinder, rayCappedCylinder, rayBox, traceAim, buildBeam, placeBeam, firePlasma, guestPlasma, launchRings, updateRings, trailFire, plasmaHit, neutralise, chipTornado, updatePlasma };
 }
