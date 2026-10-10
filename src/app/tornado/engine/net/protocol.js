@@ -89,7 +89,7 @@ export const EVENT_TYPES = ['welcome', 'announce', 'notice', 'explosion', 'playe
  * Append only: an index is part of the wire contract. A row whose kind is not
  * in this list (a newer host) is dropped by `sanitizeFx`, never an error.
  */
-export const FX_KINDS = ['bullet', 'rail', 'plasma', 'mega', 'fire', 'holeShot', 'cut', 'blast', 'bolt', 'emp', 'ray', 'round', 'missile', 'warp'];
+export const FX_KINDS = ['bullet', 'rail', 'plasma', 'mega', 'fire', 'holeShot', 'cut', 'blast', 'bolt', 'emp', 'ray', 'round', 'missile', 'warp', 'meteor'];
 
 /** Column order of an `fx` row: [id, kind, shooter, x, y, z, a, b, c, extra]. */
 export const FX_COLUMNS = ['id', 'kind', 'shooter', 'x', 'y', 'z', 'a', 'b', 'c', 'extra'];
@@ -222,6 +222,7 @@ export function validateInput(msg) {
  *   fires        [id, type, x, z, level, a, b, c]  (type 0 building fire, 1 ground fire, 2 fuel station, 3 gas main; net/fireFx.js)
  *   quake        [id, type, a, b, c, d, e, f]  (type 0 earthquake, 1 chasm, 2 sinkhole, 3 lava fissures; only while one is on the field; net/quakeFx.js)
  *   flood        [id 0, phase, frontX, strain, fade, frozen]  (the dam break, only while it fails or the water is out; phase 1 strain, 2 breaking, 3 surge, 4 drain; net/floodFx.js)
+ * The `meteor` fx kind (net/meteorFx.js): one row per rock at launch, x y z = entry, a b c = landing, extra = radius in tenths (+200 for an airburst).
  * Caps: fx 24, tw 8, hole 1, aim 8, env 1, cars 64, giants 2, replicator 1, clones 50, figures 14, flyers 14, fires 64, flood 1, quake 8. Unknown fx kinds are dropped by
  * `sanitizeFx`, not an error. Built and read by later subtasks; no row here
  * widens an existing one.

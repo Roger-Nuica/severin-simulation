@@ -8,6 +8,10 @@ import { METEOR, createCraterTexture, UP } from './meteors/config.js';
 import { createMeteorRocks } from './meteors/rocks.js';
 import { createMeteorImpact } from './meteors/impact.js';
 import { createMeteorTrails } from './meteors/trails.js';
+import { createWeaponFx } from './hero/weaponFx.js';
+import { meteorExtra } from './net/meteorFx.js';
+import { LIMITS } from './net/protocol.js';
+import { createRng } from './rng.js';
 export { createCraterTexture } from './meteors/config.js';
 
 /**
@@ -56,12 +60,16 @@ export { createCraterTexture } from './meteors/config.js';
  *   initMeteors: () => void,
  *   updateMeteors: (dt: number) => void,
  *   callVolley: (count: number) => void,
+ *   mirrorRock: (r: {seed: number, from: {x: number, y: number, z: number}, to: {x: number, y: number, z: number}, radius: number, airburst: boolean}, sound: boolean) => void,
+ *   clearMirror: () => void,
  *   resetMeteors: () => void,
  *   disposeMeteors: () => void
  * }}
  */
 export function createMeteorSystem(ctx) {
   const { Sim } = ctx;
+  /** Announces each rock's launch to the co-op guest (hero/weaponFx.js); nothing happens outside a room with a guest. */
+  const weaponFx = createWeaponFx(ctx);
   // Everything this system's modules share (see the header): each of them
   // reads and writes it as S.
   const S = {
@@ -75,6 +83,8 @@ export function createMeteorSystem(ctx) {
     /** @type {Array<{x: number, y: number, z: number, radius: number, hit: WeakSet<Object>}>} */
     bursts: [],
 
+    /** Co-op guest: a host's rock has been drawn here, so leaving must clear the scars. */
+    mirrored: false,
     bannerTimer: 0,
     /** @type {HTMLDivElement|null} */
     banner: null,
@@ -190,17 +200,19 @@ export function createMeteorSystem(ctx) {
         meteor.state = 'falling';
         meteor.mesh.visible = true;
         meteor.mesh.position.copy(meteor.from);
+        // One row is the whole flight: the entry, the landing and the size (net/meteorFx.js).
+        if (!meteor.shown) weaponFx.announce('meteor', meteor.from, meteor.to, '', meteorExtra(meteor.radius, meteor.airburst));
       }
       if (meteor.state !== 'falling') continue;
       meteor.t += dt / METEOR.fallTime;
       if (meteor.t >= meteor.burstAt) {
-        api.detonateAirburst(meteor);
+        if (meteor.shown) api.finishShown(meteor, true); else api.detonateAirburst(meteor);
         api.disposeMeteor(meteor);
         S.meteors.splice(i, 1);
         continue;
       }
       if (meteor.t >= 1) {
-        api.impact(meteor);
+        if (meteor.shown) api.finishShown(meteor, false); else api.impact(meteor);
         // Everything it owns is its own and it will never be seen again;
         // volleys are unlimited, so leaving the generated rock, its glow
         // and fragments in the scene would be an unbounded leak.
@@ -264,6 +276,37 @@ export function createMeteorSystem(ctx) {
   }
 
   /**
+   * Co-op guest: one of the host's rocks (an `fx` row of kind `meteor`), flown
+   * from its entry to where it comes down with the same mesh and trail, and
+   * burst cosmetically at the end. Starts nothing that hurts (R-053); no shake
+   * (R-055). Held to the fx queue's size, so no new cap (R-048).
+   * @param {{seed: number, from: {x: number, y: number, z: number}, to: {x: number, y: number, z: number}, radius: number, airburst: boolean}} r
+   * @param {boolean} sound the landing may sound
+   * @returns {void}
+   */
+  function mirrorRock(r, sound) {
+    if (!S.group || S.meteors.length >= LIMITS.maxFx) return;
+    const rand = createRng(r.seed);
+    const meteor = api.createMeteor(0, 1, { ...r, rand });
+    meteor.shown = true;
+    meteor.sound = sound;
+    meteor.rand = rand;
+    S.meteors.push(meteor);
+    S.mirrored = true;
+    showBanner('METEOR STRIKE!', 'Meteors inbound');
+  }
+
+  /**
+   * Leaving the host's view: the host's rocks, scars and trails gone, this town's own back.
+   * @returns {void}
+   */
+  function clearMirror() {
+    if (!S.mirrored) return;
+    S.mirrored = false;
+    resetMeteors();
+  }
+
+  /**
    * Clears the rocks and craters for a fresh run.
    * @returns {void}
    */
@@ -279,6 +322,7 @@ export function createMeteorSystem(ctx) {
     }
     S.craters = [];
     S.bursts.length = 0;
+    S.mirrored = false;
     for (const pool of [S.trail, S.smoke]) {
       if (!pool) continue;
       pool.life.fill(0);
@@ -315,6 +359,6 @@ export function createMeteorSystem(ctx) {
   }
 
   return {
-    initMeteors, updateMeteors, resetMeteors, disposeMeteors, callVolley: api.callVolley
+    initMeteors, updateMeteors, resetMeteors, disposeMeteors, callVolley: api.callVolley, mirrorRock, clearMirror
   };
 }

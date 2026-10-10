@@ -1918,6 +1918,7 @@ export function createNetSystem(ctx) {
     clearFires();
     clearFlood();
     clearQuake();
+    if (ctx.systems.meteors) ctx.systems.meteors.clearMirror();
     // Let go of the input pipeline, unless a local Hero run holds it (it cannot
     // while this is a peer, but leaving must never take Roger's keys away).
     if (!(ctx.Hero && ctx.Hero.active)) ctx.systems.playerInput.detachInput();

@@ -11,7 +11,7 @@ import {
 const ix = (k) => FX_KINDS.indexOf(k);
 
 test('warp is appended after the older kinds and the mirror plays warp and cut with a sound cap', () => {
-  assert.equal(FX_KINDS[FX_KINDS.length - 1], 'warp');
+  assert.equal(FX_KINDS[13], 'warp');
   assert.deepEqual(FX_KINDS.slice(0, 13).slice(10), ['ray', 'round', 'missile']);
   for (const k of ['warp', 'cut']) {
     assert.equal(playedKind(ix(k)), k);

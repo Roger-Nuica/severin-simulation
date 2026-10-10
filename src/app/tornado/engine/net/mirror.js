@@ -5,6 +5,7 @@ import { newFxQueue, dueFx } from './fxQueue.js';
 import { unpackExtra } from './fxOut.js';
 import { boltFromRow, empFromRow } from './skyFx.js';
 import { rayFromRow, roundFromRow, missileFromRow } from './enemyFx.js';
+import { meteorFromRow } from './meteorFx.js';
 import { warpFromRow, cutFromRow, swingBearing, swingFade, SWING_ARC } from './figureFx.js';
 import { createRoundView } from '../gunner/roundView.js';
 import { playedKind, shotEnd, takeRows, cueDue, CUE_GAP, RAIL_POWER, beamLook } from './mirrorRules.js';
@@ -90,7 +91,7 @@ export function createMirror(ctx) {
   /** The landing of each round in flight: one record per pool slot, in firing order (the pool reuses its slots round-robin). */
   const hits = Array.from({ length: ROUNDS }, () => ({ kind: 'ground', obj: null, at: new THREE.Vector3() }));
   let nextHit = 0;
-  const lastCue = { bullet: -Infinity, rail: -Infinity, plasma: -Infinity, mega: -Infinity, holeShot: -Infinity, bolt: -Infinity, emp: -Infinity, ray: -Infinity, round: -Infinity, missile: -Infinity, cut: -Infinity, warp: -Infinity };
+  const lastCue = { bullet: -Infinity, rail: -Infinity, plasma: -Infinity, mega: -Infinity, holeShot: -Infinity, bolt: -Infinity, emp: -Infinity, ray: -Infinity, round: -Infinity, missile: -Infinity, cut: -Infinity, warp: -Infinity, meteor: -Infinity };
   /** HAVOC's announced rounds (made on the first one). @type {ReturnType<typeof createRoundView>|null} */
   let roundView = null;
   let roundLands = 0;
@@ -290,7 +291,7 @@ export function createMirror(ctx) {
 
   /**
    * Whether a cue of `kind` may sound now (and notes it): the per-kind rate cap.
-   * @param {'ray'|'round'|'missile'|'cut'|'warp'} kind
+   * @param {'ray'|'round'|'missile'|'cut'|'warp'|'meteor'} kind
    * @returns {boolean}
    */
   function soundDue(kind) {
@@ -365,6 +366,20 @@ export function createMirror(ctx) {
     tele.warpAt(w.fromX, w.fromZ, true);
     tele.warpAt(w.toX, w.toZ, false);
     if (soundDue('warp') && ctx.systems.powerArcSound) ctx.systems.powerArcSound.playZap(1);
+  }
+
+  /**
+   * One of the host's meteors, flown from its entry to where it comes down with the meteor
+   * system's own rock and trail (`meteors.mirrorRock`); it bursts cosmetically and harms nothing.
+   * The thunder is rate-capped like the other cues.
+   * @param {ReadonlyArray<number>} row
+   * @returns {void}
+   */
+  function meteorRock(row) {
+    const r = meteorFromRow(row);
+    const meteors = ctx.systems.meteors;
+    if (!r || !meteors) return;
+    meteors.mirrorRock(r, soundDue('meteor'));
   }
 
   /** The swing crescents, made once: a flat ring segment of the blade's reach, additive. @returns {NonNullable<typeof arcs>} */
@@ -447,6 +462,7 @@ export function createMirror(ctx) {
     if (kind === 'round') { enemyRound(row); return; }
     if (kind === 'missile') { enemyMissile(row); return; }
     if (kind === 'warp') { warp(row); return; }
+    if (kind === 'meteor') { meteorRock(row); return; }
     if (kind === 'cut') {
       const c = cutFromRow(row);
       if (c) swing(c.x, c.y, c.z, c.heading, c.hasHeading && !c.blade, c.hit);
