@@ -42,7 +42,7 @@ import * as THREE from 'three';
  * like a bad physics bug. Those keep the old behaviour.
  */
 
-const TOPPLE = {
+export const TOPPLE = {
   // How tall a building has to be, against the narrower side of its own
   // footprint, before it can go over rather than in.
   minAspect: 0.85,
@@ -98,6 +98,59 @@ const TOPPLE = {
  */
 
 /**
+ * How far a box of this footprint extends from its centre along a bearing.
+ * The support function of a rectangle, which is what decides where the
+ * pivot edge is and how wide the swept rectangle is.
+ * @param {{width: number, depth: number}} fp footprint, already in world axes
+ * @param {number} dx
+ * @param {number} dz
+ * @returns {number}
+ */
+export function extentAlong(fp, dx, dz) {
+  return Math.abs(dx) * fp.width * 0.5 + Math.abs(dz) * fp.depth * 0.5;
+}
+
+/**
+ * The solid boxes a fallen building lies as: along the fall line from the
+ * pivot edge for its height (see `lie`). Pure; shared by the host and by the
+ * co-op guest's render-only copy (net/bldMirror.js), so both lie the same way.
+ * @param {{width: number, depth: number}} fp footprint, in world axes
+ * @param {{x: number, z: number}} dir unit fall direction
+ * @param {{x: number, z: number}} axis horizontal axis it turned about
+ * @param {{x: number, z: number}} pivot base edge it turned over
+ * @param {number} height
+ * @param {number} halfWidth across the fall line, spread included
+ * @returns {{x: number, z: number, hw: number, hd: number, top: number}[]}
+ */
+export function lyingBoxes(fp, dir, axis, pivot, height, halfWidth) {
+  const across = Math.max(1, halfWidth - TOPPLE.spread);
+  const thick = extentAlong(fp, dir.x, dir.z) * 2 * Math.sin(TOPPLE.finalAngle);
+  const step = Math.max(3, Math.min(across * 2, 8));
+  const boxes = [];
+  for (let s = 0; s < height; s += step) {
+    const len = Math.min(step, height - s);
+    const mid = s + len / 2;
+    boxes.push({
+      x: pivot.x + dir.x * mid,
+      z: pivot.z + dir.z * mid,
+      hw: Math.abs(dir.x) * len / 2 + Math.abs(axis.x) * across,
+      hd: Math.abs(dir.z) * len / 2 + Math.abs(axis.z) * across,
+      top: thick
+    });
+  }
+  return boxes;
+}
+
+/**
+ * The fall angle at a fraction of the fall (the eased, accelerating curve).
+ * @param {number} progress 0..1
+ * @returns {number}
+ */
+export function toppleAngle(progress) {
+  return TOPPLE.finalAngle * Math.pow(progress, TOPPLE.gravityCurve);
+}
+
+/**
  * @param {Object} ctx
  * @returns {{
  *   toppleBuilding: (obj: SimObject, from: THREE.Vector3|null, depth: number) => boolean,
@@ -122,19 +175,6 @@ export function createToppleSystem(ctx) {
    */
   function between(range) {
     return range[0] + Math.random() * (range[1] - range[0]);
-  }
-
-  /**
-   * How far a box of this footprint extends from its centre along a bearing.
-   * The support function of a rectangle, which is what decides where the
-   * pivot edge is and how wide the swept rectangle is.
-   * @param {{width: number, depth: number}} fp footprint, already in world axes
-   * @param {number} dx
-   * @param {number} dz
-   * @returns {number}
-   */
-  function extentAlong(fp, dx, dz) {
-    return Math.abs(dx) * fp.width * 0.5 + Math.abs(dz) * fp.depth * 0.5;
   }
 
   /**
@@ -178,6 +218,8 @@ export function createToppleSystem(ctx) {
     const axis = new THREE.Vector3(dir.z, 0, -dir.x);
 
     root.userData.lying = null;
+    // The bearing it goes over, whole degrees 0..359 (atan2(x, z)): what the co-op host tells the guest (net/bldFx.js).
+    root.userData.toppleDir = (Math.round(Math.atan2(dir.x, dir.z) * 180 / Math.PI) + 360) % 360;
     falling.push({
       obj, root, dir, axis, pivot,
       origin: base.clone(),
@@ -312,7 +354,7 @@ export function createToppleSystem(ctx) {
       }
       fall.t += dt;
       const progress = Math.min(1, fall.t / fall.duration);
-      const angle = TOPPLE.finalAngle * Math.pow(progress, TOPPLE.gravityCurve);
+      const angle = toppleAngle(progress);
 
       scratchQuat.setFromAxisAngle(fall.axis, angle);
       // Rigid rotation about the pivot edge: the root is carried round with
@@ -343,21 +385,7 @@ export function createToppleSystem(ctx) {
   function lie(fall) {
     const fp = fall.root.userData.footprint;
     if (!fp) return;
-    const across = Math.max(1, fall.halfWidth - TOPPLE.spread);
-    const thick = extentAlong(fp, fall.dir.x, fall.dir.z) * 2 * Math.sin(TOPPLE.finalAngle);
-    const step = Math.max(3, Math.min(across * 2, 8));
-    const boxes = [];
-    for (let s = 0; s < fall.height; s += step) {
-      const len = Math.min(step, fall.height - s);
-      const mid = s + len / 2;
-      boxes.push({
-        x: fall.pivot.x + fall.dir.x * mid,
-        z: fall.pivot.z + fall.dir.z * mid,
-        hw: Math.abs(fall.dir.x) * len / 2 + Math.abs(fall.axis.x) * across,
-        hd: Math.abs(fall.dir.z) * len / 2 + Math.abs(fall.axis.z) * across,
-        top: thick
-      });
-    }
+    const boxes = lyingBoxes(fp, fall.dir, fall.axis, fall.pivot, fall.height, fall.halfWidth);
     fall.root.userData.lying = boxes;
   }
 

@@ -13,6 +13,30 @@ import { WINDOW_DARK_COLOUR, CHAIN_SHOCK_BASE, CHAIN_SHOCK_PER_HEIGHT, CHAIN_REA
  */
 
 /**
+ * Darkens a building's still-lit windows on damage: a fifth of its total
+ * pane count per call (so successive hits read as a progressively spreading
+ * outage), or every remaining pane at once when `full` is set (used on
+ * collapse for a decisive final blackout). Only recolours existing
+ * instances via setColorAt -- geometry, matrices and draw-call count are
+ * untouched, so this stays cheap regardless of how many buildings are hit.
+ * Module-level and visual-only: the co-op guest calls it too (net/bldMirror.js).
+ * @param {SimObject} obj
+ * @param {boolean} [full]
+ * @returns {void}
+ */
+export function darkenBuildingWindows(obj, full) {
+  const windows = obj.mesh.userData.windows;
+  if (!windows || windows.darkCount >= windows.totalCount) return;
+  const step = full ? windows.totalCount : Math.max(1, Math.ceil(windows.totalCount / 5));
+  const end = Math.min(windows.totalCount, windows.darkCount + step);
+  for (let i = windows.darkCount; i < end; i++) {
+    windows.mesh.setColorAt(i, WINDOW_DARK_COLOUR);
+  }
+  windows.darkCount = end;
+  windows.mesh.instanceColor.needsUpdate = true;
+}
+
+/**
  * @param {Object} ctx
  * @param {Object} S the shared state (see damage.js)
  * @param {Object} api every module's functions, by name
@@ -296,29 +320,6 @@ export function createBuildingDamage(ctx, S, api) {
     if (walls.reduce((n, wall) => n + (wall.userData.lost ? 1 : 0), 0) >= 3) {
       collapseBuilding(building, depth, origin);
     }
-  }
-
-  /**
-   * Darkens a building's still-lit windows on damage: a fifth of its total
-   * pane count per call (so successive hits read as a progressively spreading
-   * outage), or every remaining pane at once when `full` is set (used on
-   * collapse for a decisive final blackout). Only recolours existing
-   * instances via setColorAt -- geometry, matrices and draw-call count are
-   * untouched, so this stays cheap regardless of how many buildings are hit.
-   * @param {SimObject} obj
-   * @param {boolean} [full]
-   * @returns {void}
-   */
-  function darkenBuildingWindows(obj, full) {
-    const windows = obj.mesh.userData.windows;
-    if (!windows || windows.darkCount >= windows.totalCount) return;
-    const step = full ? windows.totalCount : Math.max(1, Math.ceil(windows.totalCount / 5));
-    const end = Math.min(windows.totalCount, windows.darkCount + step);
-    for (let i = windows.darkCount; i < end; i++) {
-      windows.mesh.setColorAt(i, WINDOW_DARK_COLOUR);
-    }
-    windows.darkCount = end;
-    windows.mesh.instanceColor.needsUpdate = true;
   }
 
   /**

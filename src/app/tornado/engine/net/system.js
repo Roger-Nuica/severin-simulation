@@ -40,6 +40,8 @@ import { FIRE, fireId, buildingRow, fireRow, maskOf, orderFires } from './fireFx
 import { floodRow } from './floodFx.js';
 import { stormRow } from './stormFx.js';
 import { firenadoRow } from './firenadoFx.js';
+import { BLD_BIT, createBldTracker, pieceBit } from './bldFx.js';
+import { createBuildingMirror } from './bldMirror.js';
 import { QUAKE, quakeId, quakeRow, chasmRow, sinkholeRow, eruptionRow } from './quakeFx.js';
 import { FLYER, flyerId, flyerRow, poseFlyer, motherState, throttleState, headDown, headHeight, jetLook, chopperLook, spotlessLook } from './flyerPose.js';
 import { CHOPPER } from '../environment/newsChopper.js';
@@ -1573,6 +1575,48 @@ export function createNetSystem(ctx) {
     return row ? [row] : [];
   }
 
+  const bldTracker = createBldTracker();
+  let bldWasLive = false;
+
+  /**
+   * @param {number} i index in Environment.buildings
+   * @returns {number} the building's damage mask (net/bldFx.js), read-only
+   */
+  function bldMaskAt(i) {
+    const b = ctx.Environment.buildings[i];
+    if (!b || !b.mesh) return 0;
+    const pieces = b.mesh.userData.pieces;
+    let mask = 0;
+    if (pieces) {
+      if (pieces.roof && pieces.roof.userData.lost) mask |= BLD_BIT.roof;
+      for (const w of pieces.walls) if (w.userData.lost) mask |= pieceBit(w.userData.pieceName);
+    }
+    if (b.damageState === 'collapsed') mask |= BLD_BIT.collapsed;
+    if (b.consumed) mask |= BLD_BIT.consumed;
+    return mask;
+  }
+
+  /**
+   * @param {number} i index in Environment.buildings
+   * @returns {number} the bearing it toppled (whole degrees), -1 when it did not
+   */
+  function bldDirAt(i) {
+    const d = ctx.Environment.buildings[i].mesh.userData.toppleDir;
+    return typeof d === 'number' && d >= 0 ? d : -1;
+  }
+
+  /**
+   * The damaged buildings as `bld` rows (at most 36): the rows that changed
+   * since the last snapshot plus a full table about every 2 s, built only while
+   * a guest is in the room (read-only; a table that was never damaged sends
+   * nothing).
+   * @returns {number[][]}
+   */
+  function bldRows() {
+    if (!bldWasLive) { bldWasLive = true; bldTracker.forceFull(); }
+    return bldTracker.rows(ctx.Environment.buildings.length, bldMaskAt, bldDirAt, performance.now() / 1000);
+  }
+
   /**
    * The Firenado as at most one `firenado` row, built only while a guest is in
    * the room and only while the funnel burns (read-only state).
@@ -1721,6 +1765,8 @@ export function createNetSystem(ctx) {
     const quake = live ? quakeRows() : [];
     const storm = live ? stormRows() : [];
     const firenado = live ? firenadoRows() : [];
+    const bld = live ? bldRows() : [];
+    if (!live) bldWasLive = false;
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
@@ -1737,6 +1783,7 @@ export function createNetSystem(ctx) {
       ...(quake.length ? { quake } : {}),
       ...(storm.length ? { storm } : {}),
       ...(firenado.length ? { firenado } : {}),
+      ...(bld.length ? { bld } : {}),
       ...(live ? worldRows(h) : {})
     };
   }
@@ -1970,6 +2017,7 @@ export function createNetSystem(ctx) {
     clearQuake();
     clearStorm();
     clearFirenado();
+    clearBuildings();
     if (ctx.systems.meteors) ctx.systems.meteors.clearMirror();
     // Let go of the input pipeline, unless a local Hero run holds it (it cannot
     // while this is a peer, but leaving must never take Roger's keys away).
@@ -3020,6 +3068,40 @@ export function createNetSystem(ctx) {
     }
   }
 
+  const bldMirror = createBuildingMirror(ctx);
+  let bldDrawn = false;
+  let townResetting = false;
+
+  /**
+   * The host's building damage (the `bld` rows) onto this screen's own
+   * buildings: pieces gone, windows, collapse, the lying pose, the hidden
+   * (swallowed) ones. Render-only (net/bldMirror.js); called every frame while
+   * viewing the host, with an empty map between deltas.
+   * @param {Map<number, number[]>} rows
+   * @param {number} dt
+   * @returns {void}
+   */
+  function drawBuildings(rows, dt) {
+    if (!rows.size && !bldMirror.active()) return;
+    bldDrawn = true;
+    bldMirror.apply(rows, dt);
+  }
+
+  /**
+   * Leaving the host's view: forget what was mirrored and rebuild this screen's
+   * own town intact by the existing reset path (the same one a seed uses). Not
+   * when a Reset is already doing that.
+   * @returns {void}
+   */
+  function clearBuildings() {
+    bldMirror.clear();
+    if (!bldDrawn) return;
+    bldDrawn = false;
+    if (townResetting || S.resetting || typeof ctx.resetSim !== 'function') return;
+    S.resetting = true;
+    try { ctx.resetSim(); } finally { S.resetting = false; }
+  }
+
   let quakeDrawn = false;
 
   /**
@@ -3123,6 +3205,7 @@ export function createNetSystem(ctx) {
       if (kind === 'quake') { drawQuake(sampled); continue; }
       if (kind === 'storm') { drawStorm(sampled); continue; }
       if (kind === 'firenado') { drawFirenado(sampled); continue; }
+      if (kind === 'bld') { drawBuildings(sampled, dt); continue; }
       // The moving-cars rows are the older host's: once `cars` arrives they are not drawn.
       const rows = kind === 'vehicles' && S.hostCars ? NO_ROWS : sampled;
       // The clones are one set of instanced meshes, not proxies.
@@ -3478,7 +3561,11 @@ export function createNetSystem(ctx) {
   function resetNet() {
     // The seed-triggered reset (applySeed) must not end its own session.
     if (S.resetting) return;
-    if (S.client) { S.client.leave(); endSession(); }
+    // A Reset rebuilds the town itself: leaving here must not reset it again.
+    townResetting = true;
+    try {
+      if (S.client) { S.client.leave(); endSession(); }
+    } finally { townResetting = false; }
     S.seed = 0;
     ctx.townSeed = undefined;
   }
