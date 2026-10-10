@@ -316,6 +316,26 @@ Measured/derived, not a GPU benchmark (the container has none):
   local originals. Seed-matching covers town construction only; runtime
   gameplay randomness is not shared.
 
+#### Co-op mirror: bytes per new snapshot kind (estimates, not measurements), 2026-10-10
+
+Derived from the row widths in `net/protocol.js` (`EXTRA_ROW_WIDTH`) and the
+plan's done notes; nothing was measured over the relay yet (the `?netdebug`
+read-out is still owed, `TODO.md`). All kinds are additive and optional, built
+only with a guest in the room, keys omitted when nothing exists. At 15 Hz:
+
+- `fx`: about 60 B a row, cap 24, so at most about 1.5 KB a snapshot (about 22 KB/s).
+- `giants`: about 40 B a row, 40 to 85 B a snapshot (0.6 to 1.3 KB/s).
+- `replicator` and `clones`: 39 B original, about 37 B a clone; 50 clones about 1.8 KB (about 27 KB/s worst case).
+- `figures`: about 42 B a row; 10 samurai about 420 B; worst case 14 rows about 590 B (8.8 KB/s).
+- `flyers`: about 41 B a row; herd and helicopter 387 B (5.8 KB/s), with 3 jets 519 B, 14 rows about 600 B (9 KB/s).
+- `fires`: typical blaze about 685 B (10 KB/s); 64-row worst case about 2.5 KB (38 KB/s).
+- `flood`: about 35 B while a flood lasts (0.5 KB/s). `quake`: 33 B alone, 240 B with every part (3.6 KB/s).
+- `storm`: about 28 B (0.4 KB/s). `firenado`: about 22 B for 13 s (0.3 KB/s). `meteor` fx rows: about 44 B once per rock.
+- `tw`, `hole`, `aim`, `env`, `cars`: no estimate was recorded in the plan.
+- Building damage (not built): at most about 250 changed rows a run (about 2 KB) plus a full table of about 290 B every 2 s; 4.4 to 7.4 KB/s if sent every tick.
+
+Every worst case stays under 4 percent of the 64 KiB frame; the 162 KiB/s worst case of the 2026-10-02 note is the bound that still matters.
+
 ### Key findings (the essentials)
 
 1. **The funnel's surface noise was the single biggest CPU cost** (half a

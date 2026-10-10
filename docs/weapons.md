@@ -43,7 +43,11 @@ The weapon x enemy table (`engine/health/damageTable.js`, R-054) gives each weap
 
 ## Weapons against players
 
-Friendly fire is on (R-053). Roger's own plasma or MEGA BEAM blast hurts him with linear falloff (15 / 40 at the centre, 1.5 m muzzle guard, none when there is no partner); minigun 3, railgun bolt 20, Fire Gun tick 2 and Katana 10 are the values against a co-op partner, but only rays, the Katana, the plasma splash, explosions and the black hole are routed. Not routed: Roger's minigun, railgun, Fire Gun and Katana against the guest, and the guest's plasma splash and Fire Gun against Roger.
+Friendly fire is on (R-053). Roger's own plasma or MEGA BEAM blast hurts him with linear falloff (15 / 40 at the centre, 1.5 m muzzle guard, none when there is no partner); minigun 3, railgun bolt 20, Fire Gun tick 2 and Katana 10 are the values against a co-op partner. The code routes Roger's minigun, railgun, Fire Gun and Katana against the guest, and the guest's Fire Gun against Roger, along with rays, the plasma splash of Roger's rifle, explosions and the black hole. Only the guest's plasma splash is not routed (Subtask C3). The rule for who may hurt whom, and altitude in the body test, is Subtask C6 (not done).
+
+## How a guest shot is drawn (R-061, proposed)
+
+A shot looks the same on both screens and in single player, because the same builders draw it. The host announces each shot (its own and, in `guestFire`, a guest's) as one `fx` row (`weaponFx`, `net/fxOut.js`); the guest plays due rows in `net/mirror.js`: the minigun round through `createBullets` with casings and sparks-only hits, the railgun bolt through `lightning.strikeAt`, the rifle and MEGA BEAM through `hero/plasmaBeam.js`, the cut as an arc, the Black Hole Gun as the zap cue (the hole itself is the `hole` row). The Fire Gun is state, not a row: bit 1 of the `aim` row makes each other player's muzzle breathe flame from the shared `createTrexFlames` pool. A player never sees its own shot twice (the own `shooter` is filtered). The old single tracer (`guestTracer`) is no longer used (unused code remains in `heroWeapons.js`). None of this damages anything: damage stays on the host through `enemies.hit` and the friendly-fire path.
 
 ## Input and firing
 
