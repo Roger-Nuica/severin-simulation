@@ -68,6 +68,8 @@ import { createGasFire } from './gasMains/fire.js';
  *   ruptureAt: (x: number, z: number, radius: number, options?: {ignite?: boolean, announce?: boolean}) => number,
  *   ruptureRandom: () => void,
  *   burningCount: () => number,
+ *   replicaState: () => {index: number, burn: number, vent: number, spent: number}[],
+ *   mirror: (rows: Map<number, number[]>) => void,
  *   resetGasMains: () => void,
  *   disposeGasMains: () => void
  * }}
@@ -108,6 +110,9 @@ export function createGasMainsSystem(ctx) {
     jetsAlive: 0,
 
     smokeAlive: 0,
+
+    // Co-op guest: how many more particles the budget allows this frame (see stepReplica).
+    room: 0,
 
     scratch: new THREE.Color(),
 
@@ -173,8 +178,15 @@ export function createGasMainsSystem(ctx) {
       if (S.bannerTimer <= 0 && S.banner) S.banner.classList.remove('visible');
     }
 
+    // Co-op guest: the host's mains arrive as states (mirror) and are only drawn here.
+    const peer = !!(ctx.systems.net && ctx.systems.net.isPeerView());
+    if (peer) S.room = ctx.systems.caps.particleRoom();
     let live = 0;
     for (const segment of S.segments) {
+      if (peer) {
+        if (api.stepReplica(segment, dt)) live++;
+        continue;
+      }
       if (segment.state === 'sealed' || segment.state === 'spent') continue;
       live++;
 
@@ -231,7 +243,7 @@ export function createGasMainsSystem(ctx) {
 
     if (live) {
       api.requestLights();
-      api.updateHazards();
+      if (!peer) api.updateHazards();
     } else if (S.mains.some(m => m.hazard)) {
       api.updateHazards();
     }
@@ -327,6 +339,7 @@ export function createGasMainsSystem(ctx) {
 
   return {
     initGasMains, updateGasMains, ruptureAt: api.ruptureAt, ruptureRandom: api.ruptureRandom, burningCount: api.burningCount,
+    replicaState: api.replicaState, mirror: api.mirror,
     resetGasMains, disposeGasMains
   };
 }

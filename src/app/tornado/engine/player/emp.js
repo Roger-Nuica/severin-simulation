@@ -1,6 +1,8 @@
 // @ts-check
 import * as THREE from 'three';
 import { SOLAR } from '../solarStorm.js';
+import { createWeaponFx } from '../hero/weaponFx.js';
+import { empFxTo } from '../net/skyFx.js';
 
 /**
  * ===========================================================================
@@ -45,6 +47,7 @@ const AMPLIFIED_COLOUR = new THREE.Color(0.4, 3.0, 1.6);
  * @param {Object} ctx
  * @returns {{
  *   pulse: (x: number, z: number) => number,
+ *   showPulse: (x: number, z: number, radius: number, amplified: boolean, sound?: boolean) => void,
  *   initEmp: () => void,
  *   updateEmp: (rawDt: number) => void,
  *   resetEmp: () => void,
@@ -65,6 +68,39 @@ export function createEmpSystem(ctx) {
   let wave = 1;          // 0..1 through the ring; 1 idle
   let zap = 0;
   let reach = EMP.radius; // the ring's full radius: wider when amplified
+  /** Announces the pulse to the co-op guest (hero/weaponFx.js); nothing happens outside a room with a guest. */
+  const weaponFx = createWeaponFx(ctx);
+  const fxAt = { x: 0, y: 2, z: 0 };
+  const fxTo = { x: 0, y: 0, z: 0 };
+
+  /**
+   * The visual half of a pulse: the screen flash, the shock ring and dome, and the
+   * two sounds. No enemy, line, notice or shake: shared by `pulse` (the host, in the
+   * same order as before) and the co-op guest's mirror (net/mirror.js), which draws
+   * the partner's pulse and never its effect (R-053).
+   * @param {number} x
+   * @param {number} z
+   * @param {number} radius the ring's full radius
+   * @param {boolean} amplified a solar storm's green pulse
+   * @param {boolean} [sound] false skips both sounds (the guest's per-kind rate cap)
+   * @returns {void}
+   */
+  function showPulse(x, z, radius, amplified, sound = true) {
+    reach = radius;
+    const at = new THREE.Vector3(x, 2, z);
+    ctx.systems.lightning.flashScreen(at, amplified ? 0.8 : 0.55, amplified ? '#8fffd0' : '#8fd0ff');
+    if (sound) {
+      if (ctx.systems.shockwaveSound) ctx.systems.shockwaveSound.playShockwave();
+      if (ctx.systems.powerArcSound) ctx.systems.powerArcSound.playZap(1);
+    }
+    wave = 0;
+    if (ring && dome) {
+      ring.position.set(x, 0.3, z);
+      dome.position.set(x, 0, z);
+      ring.visible = dome.visible = true;
+      for (const m of [ring, dome]) /** @type {THREE.MeshBasicMaterial} */ (m.material).color.copy(amplified ? AMPLIFIED_COLOUR : EMP.colour);
+    }
+  }
 
   /**
    * The pulse at (x, z): every enemy that answers to an EMP in the radius.
@@ -81,16 +117,12 @@ export function createEmpSystem(ctx) {
     const poles = amplified ? storm.chainEmp(x, z) : 0;
     if (!amplified && ctx.systems.powerLines) ctx.systems.powerLines.faultAt(x, z, EMP.lineRadius);
     const at = new THREE.Vector3(x, 2, z);
-    ctx.systems.lightning.flashScreen(at, amplified ? 0.8 : 0.55, amplified ? '#8fffd0' : '#8fd0ff');
     ctx.systems.gamefeel.event('gas', at);
-    if (ctx.systems.shockwaveSound) ctx.systems.shockwaveSound.playShockwave();
-    if (ctx.systems.powerArcSound) ctx.systems.powerArcSound.playZap(1);
-    wave = 0;
-    if (ring && dome) {
-      ring.position.set(x, 0.3, z);
-      dome.position.set(x, 0, z);
-      ring.visible = dome.visible = true;
-      for (const m of [ring, dome]) /** @type {THREE.MeshBasicMaterial} */ (m.material).color.copy(amplified ? AMPLIFIED_COLOUR : EMP.colour);
+    showPulse(x, z, reach, amplified, true);
+    if (ctx.systems.net && ctx.systems.net.fxLive()) {
+      fxAt.x = x;
+      fxAt.z = z;
+      weaponFx.announce('emp', fxAt, empFxTo(fxTo, reach, amplified ? 'solar' : 'pulse'), '');
     }
     const label = amplified ? `⚡ SOLAR EMP · into the grid (${poles} poles)` : '⚡ EMP';
     ctx.events.emit('notice', { text: stopped ? `${label} · ${stopped} knocked out` : label });
@@ -186,5 +218,5 @@ export function createEmpSystem(ctx) {
     geometries.length = 0;
   }
 
-  return { pulse, initEmp, updateEmp, resetEmp, disposeEmp };
+  return { pulse, showPulse, initEmp, updateEmp, resetEmp, disposeEmp };
 }

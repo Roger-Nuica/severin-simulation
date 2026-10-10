@@ -62,11 +62,13 @@ export function createOffsetEstimator(windowSize = OFFSET_WINDOW, slew = OFFSET_
 }
 
 /** Columns holding angles (wrapped when blended), by kind. */
-const ANGLE_COL = { players: 3, terminators: 3, aliens: 4, ships: 4, vehicles: 3 };
+const ANGLE_COL = { players: [3], terminators: [3], aliens: [4], ships: [4], vehicles: [3], cars: [4, 5, 6], giants: [3], replicator: [3], clones: [3], figures: [5], flyers: [5, 6, 7] };
 /** Columns that blend linearly, by kind (everything after the id). */
-const WIDTH = { players: 9, tornadoes: 4, terminators: 5, aliens: 5, ships: 5, vehicles: 5 };
+const WIDTH = { players: 9, tornadoes: 4, terminators: 5, aliens: 5, ships: 5, vehicles: 5, cars: 8, giants: 7, replicator: 8, clones: 6, figures: 9, flyers: 10, fires: 8, flood: 6, quake: 8, storm: 5, firenado: 2 };
 /** Columns that are discrete and take the nearer snapshot's value, by kind. */
-const DISCRETE = { players: [4, 5, 7, 8], terminators: [4] };
+const DISCRETE = { players: [4, 5, 7, 8], terminators: [4], cars: [7], giants: [4], figures: [1, 6], flyers: [1, 8], fires: [1, 5, 6, 7], flood: [1, 5], quake: [1, 2, 3, 4, 5, 6, 7], storm: [2, 3, 4], firenado: [] };
+/** Optional kinds (additive, absent from an older host): interpolated like the rest, an empty map when absent. */
+const OPTIONAL_KINDS = ['cars', 'giants', 'replicator', 'clones', 'figures', 'flyers', 'fires', 'flood', 'quake', 'storm', 'firenado'];
 
 /** @param {number} a @param {number} b @param {number} k */
 const lerp = (a, b, k) => a + (b - a) * k;
@@ -130,19 +132,19 @@ export function createSnapshotBuffer(opts = {}) {
     const k = span > 1e-6 ? Math.min(1, Math.max(0, (renderT - a.t) / span)) : (renderT >= b.t ? 1 : 0);
     /** @type {Record<string, Map<number, number[]>>} */
     const kinds = {};
-    for (const kind of SNAPSHOT_KINDS) {
+    for (const kind of [...SNAPSHOT_KINDS, ...OPTIONAL_KINDS]) {
       const out = new Map();
-      const before = new Map(a[kind].map((/** @type {number[]} */ r) => [r[0], r]));
-      for (const rb of b[kind]) {
+      const before = new Map((a[kind] || []).map((/** @type {number[]} */ r) => [r[0], r]));
+      for (const rb of b[kind] || []) {
         const ra = before.get(rb[0]);
         if (!ra || a === b) { out.set(rb[0], rb.slice()); continue; }
         const row = rb.slice();
         const w = WIDTH[/** @type {keyof typeof WIDTH} */ (kind)];
-        const ang = /** @type {any} */ (ANGLE_COL)[kind];
+        const ang = /** @type {any} */ (ANGLE_COL)[kind] || [];
         const disc = /** @type {any} */ (DISCRETE)[kind] || [];
         for (let c = 1; c < w; c++) {
           if (disc.includes(c)) row[c] = k < 0.5 ? ra[c] : rb[c];
-          else if (c === ang) row[c] = lerpAngle(ra[c], rb[c], k);
+          else if (ang.includes(c)) row[c] = lerpAngle(ra[c], rb[c], k);
           else row[c] = lerp(ra[c], rb[c], k);
         }
         out.set(rb[0], row);

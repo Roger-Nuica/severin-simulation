@@ -3,6 +3,7 @@ import { createFireTexture } from '../utils/textures.js';
 import { createParticlePool, pointScaleFor, markPoolDirty, disposeParticlePool } from './particlePool.js';
 import { createGroundFireSystem } from './groundFire.js';
 import { bannerHost } from '../utils/banners.js';
+import { easeStrength, fireStarted } from './net/firenadoFx.js';
 
 /**
  * ===========================================================================
@@ -125,6 +126,10 @@ const SPARKS = {
  *   quench: () => void,
  *   damageMultiplier: () => number,
  *   groundContactAt: (x: number, z: number) => boolean,
+ *   groundFireState: () => {slot: number, x: number, z: number, level: number}[],
+ *   mirrorGroundFire: (rows: Map<number, number[]>) => void,
+ *   replicaState: () => number|null,
+ *   mirror: (row: ReadonlyArray<number>|undefined) => void,
  *   burning: () => boolean,
  *   resetFirenado: () => void,
  *   disposeFirenado: () => void
@@ -161,6 +166,9 @@ export function createFirenadoSystem(ctx) {
     lean: new Float32Array(TONGUES.count)
   };
   const groundFire = createGroundFireSystem(ctx);
+  // Co-op guest: the host's fire envelope (`firenado` row). It only sets how strongly the fire is drawn; nothing is ignited, multiplied or scored here (R-053).
+  const replica = { sent: 0, strength: 0 };
+  const peerView = () => !!(ctx.systems.net && ctx.systems.net.isPeerView());
   /** @type {THREE.Object3D|null} */
   let light = null;
   /** @type {HTMLDivElement|null} */
@@ -229,6 +237,8 @@ export function createFirenadoSystem(ctx) {
    * @returns {void}
    */
   function ignite(manual = false) {
+    // Co-op guest: the host's fire is drawn from its row, never lit here.
+    if (peerView()) return;
     if (state.phase === 'burning') return;
     // No fire in an ice tornado (engine/blizzard.js).
     if (ctx.systems.blizzard && ctx.systems.blizzard.active()) return;
@@ -253,7 +263,7 @@ export function createFirenadoSystem(ctx) {
     state.fireCheck -= dt;
     if (state.fireCheck > 0) return;
     state.fireCheck = FIRENADO.fireCheck;
-    if (state.phase !== 'idle' || !funnelThere() || !ctx.systems.buildingFire) return;
+    if (peerView() || state.phase !== 'idle' || !funnelThere() || !ctx.systems.buildingFire) return;
     const { x, z } = Vortex.center;
     let n = 0;
     for (const b of ctx.systems.buildingFire.burning()) {
@@ -539,11 +549,19 @@ export function createFirenadoSystem(ctx) {
       }
     }
     const a = state.age;
-    state.strength = state.phase === 'burning'
-      ? THREE.MathUtils.smoothstep(a, 0, FIRENADO.fadeIn)
-        * (1 - THREE.MathUtils.smoothstep(a, FIRENADO.duration - FIRENADO.fadeOut, FIRENADO.duration))
-        * Math.min(1, Vortex.presence)
-      : 0;
+    if (peerView()) {
+      // Co-op guest: the host's envelope, eased, on this screen's own funnel.
+      const before = replica.strength;
+      replica.strength = Vortex.active ? easeStrength(before, replica.sent, dt) : 0;
+      if (fireStarted(before, replica.strength)) showBanner('FIRENADO!', 'The funnel is on fire');
+      state.strength = replica.strength;
+    } else {
+      state.strength = state.phase === 'burning'
+        ? THREE.MathUtils.smoothstep(a, 0, FIRENADO.fadeIn)
+          * (1 - THREE.MathUtils.smoothstep(a, FIRENADO.duration - FIRENADO.fadeOut, FIRENADO.duration))
+          * Math.min(1, Vortex.presence)
+        : 0;
+    }
 
     // Firelight flicker: two quick sines and a little noise, never a clean
     // pulse.
@@ -586,6 +604,8 @@ export function createFirenadoSystem(ctx) {
    * @returns {void}
    */
   function resetFirenado() {
+    replica.sent = 0;
+    replica.strength = 0;
     state.phase = 'idle';
     state.age = 0;
     state.strength = 0;
@@ -648,5 +668,36 @@ export function createFirenadoSystem(ctx) {
    */
   const groundContactAt = (x, z) => groundFire.contactAt(x, z);
 
-  return { initFirenado, updateFirenado, ignite, quench, damageMultiplier, groundContactAt, burning, resetFirenado, disposeFirenado };
+  /** @returns {{slot: number, x: number, z: number, level: number}[]} the ground fire's patches, read-only (the co-op host's `fires` rows) */
+  const groundFireState = () => groundFire.replicaState();
+
+  /**
+   * Co-op guest: draws the host's ground fires from the `fires` rows.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  const mirrorGroundFire = (rows) => groundFire.mirror(rows);
+
+  /**
+   * The fire's envelope as a plain number for a snapshot's `firenado` row,
+   * read-only; null when the funnel is not burning (or on the guest).
+   * @returns {number|null}
+   */
+  function replicaState() {
+    return state.phase === 'burning' && state.strength > 0 && !peerView() ? state.strength : null;
+  }
+
+  /**
+   * Co-op guest: the host's `firenado` row (undefined when the host sends
+   * none). It only sets the strength the flames, tongues, embers, glow, light
+   * and roar are drawn at in updateFirenado; the phase never changes, so
+   * burning() and damageMultiplier() report nothing.
+   * @param {ReadonlyArray<number>|undefined} row
+   * @returns {void}
+   */
+  function mirror(row) {
+    replica.sent = row ? row[1] : 0;
+  }
+
+  return { initFirenado, updateFirenado, ignite, quench, damageMultiplier, groundContactAt, groundFireState, mirrorGroundFire, replicaState, mirror, burning, resetFirenado, disposeFirenado };
 }

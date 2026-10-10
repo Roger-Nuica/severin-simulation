@@ -14,6 +14,7 @@ import { createKatanaFeel } from './hero/katana/feel.js';
 import { createKatanaBlade } from './hero/katana/blade.js';
 import { createKatanaBladeUi } from './hero/katana/bladeUi.js';
 import { createKatanaBladeCut } from './hero/katana/bladeCut.js';
+import { createWeaponFx } from './hero/weaponFx.js';
 
 /**
  * ===========================================================================
@@ -159,6 +160,7 @@ const UP = new THREE.Vector3(0, 1, 0);
  *   katanaState: () => Readonly<KatanaInput>,
  *   guestFlame: (gun: {tick: number}, dt: number, muzzle: THREE.Vector3, dir: THREE.Vector3) => void,
  *   guestTracer: (from: THREE.Vector3, to: THREE.Vector3) => void,
+ *   fireBits: () => number,
  *   katanaBladeToggle: () => boolean,
  *   katanaBlade: () => import('./hero/katana/blade.js').KatanaBlade,
  *   katanaBladeLine: () => Readonly<import('./hero/katana/bladeUi.js').BladeLine>
@@ -166,6 +168,10 @@ const UP = new THREE.Vector3(0, 1, 0);
  */
 export function createHeroWeapons(ctx, hero) {
   const { Sim } = ctx;
+  /** Announces this Roger's shots to the co-op guest (hero/weaponFx.js); nothing happens outside a room with a guest. */
+  const weaponFx = createWeaponFx(ctx);
+  /** Whether the trigger was held with the sights up on the last frame (read by `fireBits`, co-op `aim` rows). */
+  let aimingNow = false;
   const state = {
     weapon: 0,
     ammo: MINIGUN.ammo,
@@ -623,6 +629,7 @@ export function createHeroWeapons(ctx, hero) {
       state.firing = false;
       hero.flashMessage('MINIGUN EMPTY — wheel for another weapon');
     }
+    weaponFx.announce('bullet', from, at, hit.kind);
   }
 
   /**
@@ -731,6 +738,7 @@ export function createHeroWeapons(ctx, hero) {
       vm.flash.userData.life = 0.12;
     }
     ctx.systems.heroSound.playZap();
+    weaponFx.announce('rail', r, railPoint, '', victims ? 1 : 0);
   }
 
   /**
@@ -772,6 +780,7 @@ export function createHeroWeapons(ctx, hero) {
       vm.flash.userData.life = 0.18;
     }
     ctx.systems.heroSound.playZap();
+    weaponFx.announce('holeShot', r, railPoint, '', result === 'queued' ? 1 : 0);
   }
 
   /**
@@ -831,6 +840,7 @@ export function createHeroWeapons(ctx, hero) {
    * @returns {void}
    */
   function update(rawDt, aiming, cam, aimDir) {
+    aimingNow = aiming;
     state.recoil = Math.max(0, state.recoil - rawDt * 5);
     state.railCooldown = Math.max(0, state.railCooldown - rawDt);
     // Blade Mode times itself out on real time (it is begun by Q, katanaBladeToggle).
@@ -1024,6 +1034,8 @@ export function createHeroWeapons(ctx, hero) {
     placeView, update, hudLine, isHot, bulletTime,
     katanaDraw, katanaPress, katanaRelease, katanaCancel, katanaLook, katanaState, katanaBladeToggle,
     katanaBlade: () => blade,
+    // Read-only, for the co-op `aim` rows (net/system.js): 1 Fire Gun firing, 2 minigun barrels spinning.
+    fireBits: () => ((aimingNow && state.firing && current() === 'fire' ? 1 : 0) | (state.spin > 1 ? 2 : 0)),
     // Co-op guests' Fire Gun (engine/net/system.js): built on first use.
     guestFlame: (/** @type {{tick: number}} */ gun, /** @type {number} */ dt, /** @type {THREE.Vector3} */ muzzle, /** @type {THREE.Vector3} */ dir) => {
       buildEffects();

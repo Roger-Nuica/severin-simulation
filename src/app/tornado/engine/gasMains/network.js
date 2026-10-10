@@ -286,6 +286,8 @@ export function createGasNetwork(ctx, S, api) {
    */
   function ruptureAt(x, z, radius, options = {}) {
     if (!S.segments.length) return 0;
+    // The co-op guest never opens a main of its own (R-053): the host's arrive as `fires` rows.
+    if (ctx.systems.net && ctx.systems.net.isPeerView()) return 0;
     const ignite = options.ignite !== false;
     let opened = 0;
     for (const segment of S.segments) {
@@ -310,6 +312,7 @@ export function createGasNetwork(ctx, S, api) {
    * @returns {void}
    */
   function ruptureRandom() {
+    if (ctx.systems.net && ctx.systems.net.isPeerView()) return;
     // The middle two thirds of a main, still sealed.
     const middle = (main) => {
       const count = main.segments.length;

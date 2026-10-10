@@ -47,6 +47,7 @@ import { createParticlePool, markPoolDirty, disposeParticlePool } from '../parti
  *   ImpactBursts: Object,
  *   initImpactBursts: () => void,
  *   spawnImpactBurst: (position: THREE.Vector3, strength?: number) => void,
+ *   cosmeticExplosion: (x: number, y: number, z: number, strength: number, withSound?: boolean) => void,
  *   updateImpactBursts: (dt: number) => void,
  *   resetImpactBursts: () => void,
  *   disposeImpactBursts: () => void
@@ -106,6 +107,7 @@ export function createExplosionsSystem(ctx) {
   /** @type {import('../particlePool.js').ParticlePool|null} */
   let smokePool = null;
   const bufferSize = new THREE.Vector2();
+  const cosmeticAt = new THREE.Vector3();
 
   /**
    * One layer of one slot (its fire, embers or smoke): a fixed run of
@@ -273,29 +275,15 @@ export function createExplosionsSystem(ctx) {
   }
 
   /**
-   * Detonates one explosion at a world position. `strength` (~0.4 .. 2) scales
-   * blast radius, fireball size, light output and sound together, so a
-   * building collapsing reads far bigger than a chip of debris being drawn
-   * into the column without each call site needing its own tuning.
-   *
-   * Slots are claimed round-robin and overwritten unconditionally, so a storm
-   * dense enough to saturate the pool cuts the oldest explosion short rather
-   * than allocating or dropping the newest -- the newest is always the one the
-   * player is most likely to be looking at.
+   * The visual half of a detonation: claims the next slot and starts the
+   * burst, fireball, shock ring and flash light. No shake, no sound, nothing
+   * else; shared by spawnImpactBurst (host, single player) and
+   * cosmeticExplosion (the co-op guest).
    * @param {THREE.Vector3} position
-   * @param {number} [strength]
+   * @param {number} s strength, already clamped
    * @returns {void}
    */
-  function spawnImpactBurst(position, strength = 1) {
-    if (!ImpactBursts.slots.length) return;
-    // Ceiling raised from 2 for the fuel tanker (environment/tanker.js),
-    // whose detonation is meant to read as comparable to the funnel itself.
-    // Everything else still asks for 0.6-2.6, so the range below 2 is
-    // unchanged and nothing else is affected by this.
-    // Raised again, to 60, for the tanker at six times and the chemical works
-    // at five times their original blasts.
-    const s = THREE.MathUtils.clamp(strength, 0.4, 60);
-
+  function igniteBurst(position, s) {
     const slot = ImpactBursts.slots[ImpactBursts.nextSlot];
     ImpactBursts.nextSlot = (ImpactBursts.nextSlot + 1) % BURST_SLOT_COUNT;
     slot.active = true;
@@ -333,6 +321,57 @@ export function createExplosionsSystem(ctx) {
     entry.peak = BURST_FLASH_PEAK * s;
     entry.life = 0;
     entry.light.intensity = entry.peak;
+  }
+
+  /**
+   * COSMETIC ONLY: the host's explosion as the co-op guest sees it. Burst,
+   * flash light and (rate-capped by the caller) sound, and nothing else: no
+   * damage, no impulse on Sim.objects, no people, fires or score, no
+   * 'explosion' event (net/system.js forwards that bus, so emitting here
+   * would loop), and no camera shake (owner decision 10). R-053: only the
+   * host damages.
+   * @param {number} x
+   * @param {number} y
+   * @param {number} z
+   * @param {number} strength burst strength, as spawnImpactBurst's
+   * @param {boolean} [withSound]
+   * @returns {void}
+   */
+  function cosmeticExplosion(x, y, z, strength, withSound = true) {
+    if (!ImpactBursts.slots.length) return;
+    // R-048: skip it when the shared particle budget has no room for one burst.
+    if (ctx.systems.caps.particleRoom() < BURST_FIRE_COUNT + BURST_EMBER_COUNT + BURST_SMOKE_COUNT) return;
+    const s = THREE.MathUtils.clamp(strength, 0.4, 60);
+    cosmeticAt.set(x, y, z);
+    igniteBurst(cosmeticAt, s);
+    if (withSound) playImpactSound(s, Sim.three.camera.position.distanceTo(cosmeticAt));
+  }
+
+  /**
+   * Detonates one explosion at a world position. `strength` (~0.4 .. 2) scales
+   * blast radius, fireball size, light output and sound together, so a
+   * building collapsing reads far bigger than a chip of debris being drawn
+   * into the column without each call site needing its own tuning.
+   *
+   * Slots are claimed round-robin and overwritten unconditionally, so a storm
+   * dense enough to saturate the pool cuts the oldest explosion short rather
+   * than allocating or dropping the newest -- the newest is always the one the
+   * player is most likely to be looking at.
+   * @param {THREE.Vector3} position
+   * @param {number} [strength]
+   * @returns {void}
+   */
+  function spawnImpactBurst(position, strength = 1) {
+    if (!ImpactBursts.slots.length) return;
+    // Ceiling raised from 2 for the fuel tanker (environment/tanker.js),
+    // whose detonation is meant to read as comparable to the funnel itself.
+    // Everything else still asks for 0.6-2.6, so the range below 2 is
+    // unchanged and nothing else is affected by this.
+    // Raised again, to 60, for the tanker at six times and the chemical works
+    // at five times their original blasts.
+    const s = THREE.MathUtils.clamp(strength, 0.4, 60);
+
+    igniteBurst(position, s);
 
     // Camera shake for big, close blasts, reusing the lightning shake rather
     // than duplicating the machinery -- updateLightning() already applies it
@@ -520,5 +559,5 @@ export function createExplosionsSystem(ctx) {
     smokePool = null;
   }
 
-  return { ImpactBursts, initImpactBursts, spawnImpactBurst, updateImpactBursts, resetImpactBursts, disposeImpactBursts };
+  return { ImpactBursts, initImpactBursts, spawnImpactBurst, cosmeticExplosion, updateImpactBursts, resetImpactBursts, disposeImpactBursts };
 }

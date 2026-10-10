@@ -252,6 +252,9 @@ export function createRockGeometry(radius) {
  *   that reaches the ground
  * @property {THREE.Material[]} materials its own, freed when it has landed
  * @property {'waiting'|'falling'|'done'} state
+ * @property {boolean} [shown] co-op guest: the host's rock, drawn only (net/meteorFx.js)
+ * @property {boolean} [sound] a shown rock's landing may sound
+ * @property {() => number} [rand] a shown rock's seeded generator (ejecta, crater turn)
  */
 
 /**

@@ -1,11 +1,13 @@
 // @ts-check
 import * as THREE from 'three';
 import { setOffExplosivesAt } from '../explosives.js';
-import { SHIP_DAMAGE, HERO, UP, Z_AXIS } from './config.js';
+import { SHIP_DAMAGE, HERO } from './config.js';
 import { PERSON, CHARACTERS } from '../scale.js';
 import { chipTarget, fullHealth } from '../health/enemyDamage.js';
 import { insideMuzzleGuard, mayHurtPlayer, splashAmount } from '../health/friendlyFire.js';
 import { HEALTH } from '../health/config.js';
+import { createWeaponFx } from './weaponFx.js';
+import { buildBeamMeshes, placeBeamMesh, fadeBeamMeshes, buildRingMeshes, placeRingMeshes, ringsTotal } from './plasmaBeam.js';
 
 /**
  * ===========================================================================
@@ -23,6 +25,8 @@ import { HEALTH } from '../health/config.js';
  */
 export function createHeroPlasma(ctx, S, api) {
   const { Sim, container } = ctx;
+  /** Announces the rifle's shots to the co-op guest (hero/weaponFx.js); nothing happens outside a room with a guest. */
+  const weaponFx = createWeaponFx(ctx);
 
   /**
    * The trigger goes down: the charge starts. The rifle has no ammunition
@@ -361,41 +365,9 @@ export function createHeroPlasma(ctx, S, api) {
    * @returns {void}
    */
   function buildBeam() {
-    S.beam = new THREE.Group();
-    S.beam.name = 'hero_plasma';
-    // Each layer a long cone, thin at the muzzle and full width at the far
-    // end: a sheath as wide as the target end right in front of the eye
-    // whites out the whole view.
-    /**
-     * @param {number} radius at the far end
-     * @param {THREE.Color} colour
-     * @returns {THREE.Mesh}
-     */
-    const layer = (radius, colour) => {
-      const geo = api.keepGeo(new THREE.CylinderGeometry(radius, radius * 0.08, 1, 16, 1, true));
-      geo.translate(0, 0.5, 0);
-      const mesh = new THREE.Mesh(geo, api.keepMat(new THREE.MeshBasicMaterial({
-        color: colour, transparent: true, opacity: 0,
-        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
-      })));
-      mesh.frustumCulled = false;
-      S.beam.add(mesh);
-      return mesh;
-    };
-    S.beam.userData.layers = [
-      layer(0.3, new THREE.Color(3, 4.5, 7)),       // white-hot core
-      layer(0.9, new THREE.Color(0.45, 1.35, 3.75)), // blue sheath (darker)
-      layer(2, new THREE.Color(0.2, 0.55, 2))       // halo
-    ];
-    S.beam.visible = false;
-    S.beam.frustumCulled = false;
-    Sim.three.scene.add(S.beam);
-    S.beamSplash = new THREE.Mesh(api.keepGeo(new THREE.SphereGeometry(1, 16, 12)), api.keepMat(new THREE.MeshBasicMaterial({
-      color: new THREE.Color(1.5, 3.2, 8), transparent: true, opacity: 0,
-      blending: THREE.AdditiveBlending, depthWrite: false
-    })));
-    S.beamSplash.visible = false;
-    Sim.three.scene.add(S.beamSplash);
+    const meshes = buildBeamMeshes(Sim.three.scene, api);
+    S.beam = meshes.beam;
+    S.beamSplash = meshes.splash;
   }
 
   /**
@@ -404,11 +376,7 @@ export function createHeroPlasma(ctx, S, api) {
    * @returns {void}
    */
   function placeBeam(from, to) {
-    const dir = S.scratchB.subVectors(to, from);
-    const length = dir.length();
-    S.beam.position.copy(from);
-    S.beam.quaternion.setFromUnitVectors(UP, dir.divideScalar(length || 1));
-    S.beam.scale.set(1, length, 1);
+    placeBeamMesh(S.beam, from, to, S.scratchB);
   }
 
   /**
@@ -454,6 +422,7 @@ export function createHeroPlasma(ctx, S, api) {
       ctx.systems.gamefeel.addShake(0.9, 0.35);
     }
     if (hit.kind !== 'sky') plasmaHit(hit, S.beamTo, mega);
+    weaponFx.announce(mega ? 'mega' : 'plasma', cam.position, S.beamTo, hit.kind, Math.round(level * 100));
   }
 
   /**
@@ -463,20 +432,8 @@ export function createHeroPlasma(ctx, S, api) {
    * @returns {void}
    */
   function launchRings() {
-    if (!S.rings.length) {
-      for (let i = 0; i < HERO.megaRings; i++) {
-        const ring = new THREE.Mesh(api.keepGeo(new THREE.TorusGeometry(1, 0.09, 8, 40)), api.keepMat(new THREE.MeshBasicMaterial({
-          color: new THREE.Color(0.8, 2.2, 5), transparent: true, opacity: 0,
-          blending: THREE.AdditiveBlending, depthWrite: false
-        })));
-        ring.name = 'hero_mega_ring';
-        ring.frustumCulled = false;
-        ring.visible = false;
-        Sim.three.scene.add(ring);
-        S.rings.push(ring);
-      }
-    }
-    S.state.ringTimer = HERO.megaRingSeconds + (HERO.megaRings - 1) * 0.1;
+    if (!S.rings.length) S.rings.push(...buildRingMeshes(Sim.three.scene, api));
+    S.state.ringTimer = ringsTotal();
   }
 
   /**
@@ -488,23 +445,10 @@ export function createHeroPlasma(ctx, S, api) {
   function updateRings(dt) {
     if (S.state.ringTimer <= 0 || !S.rings.length) return;
     S.state.ringTimer -= dt;
-    const total = HERO.megaRingSeconds + (HERO.megaRings - 1) * 0.1;
+    const total = ringsTotal();
     const since = total - S.state.ringTimer;
     const from = S.viewRifle ? S.viewRifle.muzzle.getWorldPosition(S.scratch) : S.scratch.copy(S.roger.mesh.position).setY(S.state.alt + HERO.muzzleHeight);
-    const dir = S.scratchB.subVectors(S.beamTo, from);
-    const length = dir.length() || 1;
-    dir.divideScalar(length);
-    S.rings.forEach((ring, i) => {
-      const u = (since - i * 0.1) / HERO.megaRingSeconds;
-      ring.visible = u > 0 && u < 1;
-      if (!ring.visible) return;
-      // Kept well out from the eye: a ring opening up right in front of the
-      // camera whites out the view.
-      ring.position.copy(from).addScaledVector(dir, Math.min(length, 10 + u * (18 + i * 14)));
-      ring.quaternion.setFromUnitVectors(Z_AXIS, dir);
-      ring.scale.setScalar(1 + u * (3 + i * 1.6));
-      ring.material.opacity = (1 - u) * 0.65;
-    });
+    placeRingMeshes(S.rings, since, from, S.beamTo, S.scratchB);
     if (S.state.ringTimer <= 0) for (const ring of S.rings) ring.visible = false;
   }
 
@@ -773,18 +717,7 @@ export function createHeroPlasma(ctx, S, api) {
       : (S.muzzle ? S.muzzle.getWorldPosition(S.scratch) : S.scratch.copy(S.roger.mesh.position).setY(S.state.alt + HERO.muzzleHeight));
     placeBeam(from, S.beamTo);
     const k = Math.max(0, S.state.beamTimer / S.state.beamLength);
-    const flicker = 0.85 + 0.15 * Math.random();
-    const [core, sheath, halo] = S.beam.userData.layers;
-    core.material.opacity = Math.min(1, k * 1.6) * flicker;
-    // The mega beam's wider layers are thinner, or they add up to a glare.
-    const thin = S.state.beamMega ? 0.55 : 1;
-    sheath.material.opacity = 0.8 * k * flicker * thin;
-    halo.material.opacity = 0.35 * k * flicker * thin;
-    // Fat at the moment it fires, drawing thin as it burns out.
-    const width = (0.4 + 0.9 * k + 0.12 * Math.random()) * S.state.beamWidth;
-    S.beam.scale.x = S.beam.scale.z = width;
-    S.beamSplash.material.opacity = 0.9 * k;
-    S.beamSplash.scale.setScalar((1.5 + (1 - k) * 4) * (S.state.beamMega ? 2.5 : 1));
+    fadeBeamMeshes(S.beam, S.beamSplash, k, S.state.beamWidth, S.state.beamMega);
     if (S.state.beamTimer <= 0) S.beam.visible = S.beamSplash.visible = false;
   }
 

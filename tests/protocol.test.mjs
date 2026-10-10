@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PROTOCOL_VERSION as V, validateInput, validateSnapshot, validateEvent, validateControl, parseFrame, isValidCode } from '../src/app/tornado/engine/net/protocol.js';
+import { PROTOCOL_VERSION as V, FX_KINDS, sanitizeFx, LIMITS as LIM, validateInput, validateSnapshot, validateEvent, validateControl, parseFrame, isValidCode } from '../src/app/tornado/engine/net/protocol.js';
 
 const input = (o = {}) => ({ type: 'input', v: V, seq: 1, mx: 0, mz: 1, yaw: 0.5, pitch: 0, fire: false, aim: false, weapon: 0, abil: 0, use: false, hero: false, ...o });
 
@@ -68,7 +68,7 @@ test('snapshot ack field is optional and validated (older hosts omit it)', () =>
   const bad = [{ ack: 'x' }, { ack: [[1]] }, { ack: [[1, 2, 3]] }, { ack: [[1, -1]] }, { ack: [[1, 1.5]] }, { ack: [[1.5, 1]] }, { ack: [[1, NaN]] }, { ack: [[1, 0x80000000]] }, { ack: new Array(65).fill([1, 1]) }];
   for (const b of bad) assert.equal(validateSnapshot(snap(b)).error, 'ack', JSON.stringify(b));
   assert.equal(validateSnapshot(snap({ players: [[0, 1, 2, 0, 0, 0, 100, -1, -1, 80]], ack: [[1, 1]] })).ok, false);
-  assert.equal(V, 3);
+  assert.equal(V, 4);
 });
 
 test('playerDamage is a replicable event', () => {
@@ -97,4 +97,63 @@ test('input accepts the Space bit (abil 16) and the snapshot carries optional al
   for (const bad of [[[0]], [[0, -1]], [[0, 5000]], [[0.5, 3]], 'x']) {
     assert.equal(validateSnapshot(snap({ alt: bad })).ok, false, JSON.stringify(bad));
   }
+});
+
+const FX = [1, 0, 0, 10, 1.4, 20, 30, 1.2, 40, 0];
+const FULL = {
+  fx: Array.from({ length: 24 }, (_, i) => [i + 1000, i % FX_KINDS.length, 1, -123.45, 1.4, 234.56, -150.25, 1.25, 99.5, 0.75]),
+  tw: Array.from({ length: 8 }, (_, i) => [i, 12.345, 1.5, 0.75, 0.125, -0.125]),
+  hole: [[-123.45, 234.56, 3.5, 0]],
+  aim: Array.from({ length: 8 }, (_, i) => [i, -1.2345, 0.1234, 3]),
+  env: [[1, 0.5, 2.5, 30.5, 120.5, 0.8, 1]]
+};
+
+test('version 4 snapshot fields are optional: with and without validate', () => {
+  assert.equal(validateSnapshot(snap()).ok, true);
+  assert.equal(validateSnapshot(snap({ fx: [FX], tw: [[0, 1, 1, 1, 0, 0]], hole: [[1, 2, 3, 1]], aim: [[1, 0, 0, 0]], env: [[0, 0, 0, 0, 0, 1, 1]] })).ok, true);
+  assert.equal(validateSnapshot(snap({ fx: [], tw: [], hole: [], aim: [], env: [] })).ok, true);
+  assert.equal(validateSnapshot(snap(FULL)).ok, true);
+  assert.equal(validateSnapshot(snap({ players: [[0, 1, 2, 0, 0, 0, 100, -1, -1, 80]], fx: [FX] })).ok, false);
+});
+
+test('version 4 snapshot fields reject out-of-range, bad width and over-cap rows', () => {
+  const bad = {
+    fx: [[[...FX.slice(0, 3), 999, 0, 0, 0, 0, 0, 0]], [[...FX.slice(0, 9)]], [[...FX.slice(0, 9), NaN]], [[1.5, ...FX.slice(1)]],
+      [[1, 300, ...FX.slice(2)]], new Array(25).fill(FX), 'x'],
+    tw: [[[0, 1, 1, 1, 0]], [[0, 1, 1, 2, 0, 0]], [[0, 1, 1, 1, 999, 0]], [[0, -1, 1, 1, 0, 0]], new Array(9).fill([0, 1, 1, 1, 0, 0])],
+    hole: [[[1, 2, 3]], [[999, 0, 0, 0]], [[0, 0, -1, 0]], [[0, 0, 0, 2]], [[0, 0, 0, 0], [0, 0, 0, 0]]],
+    aim: [[[1, 0, 0]], [[1, 0, 5, 0]], [[1, 99, 0, 0]], [[-1, 0, 0, 0]], new Array(9).fill([1, 0, 0, 0])],
+    env: [[[1, 0, 0, 0, 0, 1]], [[2, 0, 0, 0, 0, 1, 1]], [[1, 0, 0, 0, 0, 5, 1]], [[1, 0, 0, 0, 0, 1, Infinity]], [new Array(7).fill(0), new Array(7).fill(0)]]
+  };
+  for (const [name, cases] of Object.entries(bad)) for (const c of cases) assert.equal(validateSnapshot(snap({ [name]: c })).error, name, `${name} ${JSON.stringify(c)}`);
+});
+
+test('unknown fx kinds are dropped by sanitizeFx, not an error', () => {
+  const unknown = [2, FX_KINDS.length, ...FX.slice(2)];
+  assert.equal(validateSnapshot(snap({ fx: [FX, unknown] })).ok, true);
+  assert.deepEqual(sanitizeFx([FX, unknown]), [FX]);
+  assert.deepEqual(sanitizeFx(undefined), []);
+});
+
+test('input accepts optional charge and ability, and older inputs still validate', () => {
+  assert.equal(validateInput(input()).ok, true);
+  assert.equal('charge' in validateInput(input()).input, false);
+  const r = validateInput(input({ charge: 0.5, ability: 3 }));
+  assert.equal(r.ok, true);
+  assert.equal(r.input.charge, 0.5);
+  assert.equal(r.input.ability, 3);
+  for (const [k, v] of [['charge', 2], ['charge', -0.1], ['charge', NaN], ['ability', 256], ['ability', -1], ['ability', 1.5]]) {
+    assert.equal(validateInput(input({ [k]: v })).error, k, `${k}=${v}`);
+  }
+});
+
+test('an all-fields-present snapshot at every cap stays under 16 KB', () => {
+  const rows = (n, w) => Array.from({ length: n }, (_, i) => [i, -123.45, 234.56, 3.14, 1, 4, 100, -1, -1].slice(0, w));
+  const full = snap({ ...FULL, players: rows(2, 9), tornadoes: rows(8, 4), terminators: rows(8, 5), aliens: rows(8, 5), ships: rows(2, 5), vehicles: rows(16, 5), hp: [[0, 100, 0], [1, 100, 0]], ack: [[1, 99999]], alt: [[1, 12.5]] });
+  assert.equal(validateSnapshot(full).ok, true);
+  const bytes = JSON.stringify(full).length;
+  assert.ok(bytes < 16384, `${bytes} bytes`);
+  const extraOnly = JSON.stringify(FULL).length;
+  assert.ok(extraOnly < LIM.maxBytes / 8, `${extraOnly} bytes`);
+  console.log(`# version 4 fields at cap: +${extraOnly} B; typical full snapshot ${bytes} B`);
 });

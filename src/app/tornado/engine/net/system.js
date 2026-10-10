@@ -5,30 +5,53 @@ import { createInputGate } from './inputGate.js';
 import { createSnapshotBuffer } from './interp.js';
 import { createEventEmitter, createEventDeduper } from './events.js';
 import { createPlayerRegistry, REVIVE, FRIENDLY_FIRE } from './players.js';
-import { PROTOCOL_VERSION, LIMITS, WEAPONS } from './protocol.js';
+import { PROTOCOL_VERSION, LIMITS, WEAPONS, SNAPSHOT_KINDS } from './protocol.js';
+import { createFxRing, hitCode, HIT_CODES, aimRow, holeRow, twRow, envRow } from './fxOut.js';
 import { GUEST_WEAPONS, KATANA_HALF_ANGLE, pickTrigger, notePending, resolveTrigger, coolDown, weaponAt } from './guestWeapons.js';
-import { createBullets } from '../hero/bullets.js';
+import { createMirror } from './mirror.js';
+import { createFunnels } from './funnels.js';
+import { createSky } from './skyMirror.js';
+import { explosionParams, createSoundGate } from './explosionFx.js';
+import { flameWanted, flameMuzzle } from './mirrorRules.js';
+import { withJetBit, jetWanted, guestBurning, climbFrom, scoreMarker, HIT_MARK_SECONDS } from './figureFx.js';
 import { HERO } from '../hero/config.js';
 import { JETPACK } from '../hero/jetpack.js';
-import { stepAir } from './flight.js';
+import { stepAir, jetHeld, eyeAt } from './flight.js';
 import { TELEPORT } from '../player/teleport.js';
 import { newPrediction, viewPoint, predictFrame, recordSent, reconcile } from './prediction.js';
 import { stepRun, aimDirection } from '../hero/walk.js';
 import { HOLE } from '../player/blackHole.js';
+import { newHoleClock, stepHoleClock } from './fxQueue.js';
 import { ENERGY } from '../player/energy.js';
 import { IMPACT_SCORE } from '../damage/config.js';
 import { HEALTH } from '../health/config.js';
 import { glowLevel } from '../health/state.js';
 import { mayHurtPlayer, splashAmount, rayBodyDistance, inSector } from '../health/friendlyFire.js';
 import { dressAsRoger, rogerLimbs, newOwned, disposeRoger } from '../hero/rogerLook.js';
+import { poseWalk, lieAngle, mapJoints } from './terminatorPose.js';
+import { poseAlienWalk, spinSaucer, ALIEN_STRIDE } from './alienPose.js';
+import { giantRow, fallPose, poseTrex, poseYeti, GIANT } from './giantPose.js';
+import { FIGURE, hankRow, havocRow, samuraiRow, newHankPose, hankWant, hankGlow, applyHank, poseHavoc, poseSamurai } from './figurePose.js';
+import { GUNNER } from '../gunner/config.js';
+import { cloneRows, replicatorRow, poseOriginal, writeClones, newReplicaScratch, easeHeat, standingCount, glowLevels } from './replicatorPose.js';
+import { eulerYXZ, carClass, pickCars, carRow, poseCar, colourIndex } from './carPose.js';
+import { FIRE, fireId, buildingRow, fireRow, maskOf, orderFires } from './fireFx.js';
+import { floodRow } from './floodFx.js';
+import { stormRow } from './stormFx.js';
+import { firenadoRow } from './firenadoFx.js';
+import { QUAKE, quakeId, quakeRow, chasmRow, sinkholeRow, eruptionRow } from './quakeFx.js';
+import { FLYER, flyerId, flyerRow, poseFlyer, motherState, throttleState, headDown, headHeight, jetLook, chopperLook, spotlessLook } from './flyerPose.js';
+import { CHOPPER } from '../environment/newsChopper.js';
+import { ALIENS } from '../aliens/config.js';
+import { T800 } from '../terminator/config.js';
 import { rogerStyle, newRunCycle, stepRunCycle, swingLimbs, newCameraPose, followCamera, wheelHtml, wrapAngle, newFireLatch, fireLatchPress, fireLatchRelease, fireLatchSample } from './rogerView.js';
-import { createNetMetrics, isNetDebug } from './metrics.js';
+import { createNetMetrics, isNetDebug, fixed1 } from './metrics.js';
 import { createWeaponModels } from '../hero/weaponModels.js';
 import { attachHeld } from '../hero/heldWeapons.js';
 import { heldKey } from './heldWeapon.js';
 import { fillKatana, buildKatanaView, placeKatanaViewIdle } from '../hero/katana/model.js';
 import { shownKey, swayOf, viewOffset } from './viewModel.js';
-import { newFeedback, stepFeedback, flashOpacity, SHOT_LOOK, SWING, swingAmount } from './shotFeedback.js';
+import { newFeedback, stepFeedback, flashOpacity, SHOT_LOOK, SWING, swingAmount, MIRROR_KEYS, TRACER_KEYS } from './shotFeedback.js';
 import { createTrexFlames } from '../trex/flames.js';
 import { FIRE_GUN } from '../hero/fireGun.js';
 import { createHeroRequests, heroRequestOutcome, mayRequestLock, HERO_FLAG_SECONDS } from './heroRequest.js';
@@ -109,7 +132,22 @@ export function createNetSystem(ctx) {
   const buffer = createSnapshotBuffer();
   const heroRequests = createHeroRequests();
   /** Dev-only diagnostics: null (and every hook below skipped) unless the page has `?netdebug`. */
-  const dbg = typeof location !== 'undefined' && isNetDebug(location.search) ? createNetMetrics({ weapons: WEAPONS.length }) : null;
+  const dbg = typeof location !== 'undefined' && isNetDebug(location.search) ? createNetMetrics({ weapons: WEAPONS.length, kinds: SNAPSHOT_KINDS }) : null;
+  /** Scratch for the combat diagnostic's `traceAim` call (only made with `?netdebug`). */
+  const dbgRayO = dbg ? new THREE.Vector3() : null;
+  const dbgRayD = dbg ? new THREE.Vector3() : null;
+  /** The host's `fx` rows waiting for the next snapshot (fxOut.js): fixed size, nothing allocated per shot. */
+  const fxRing = createFxRing();
+  /** The `HIT_CODES` index of an enemy hit (a guest shot the host found a target for). */
+  const HIT_ENEMY = HIT_CODES.indexOf('enemy');
+  /** The host's shots drawn here (net/mirror.js): the guest's snapshot rows, its own predicted shot, and a guest's shot on the host. One pool, released with the session. */
+  const mirror = createMirror(ctx);
+  /** The host's tornado drawn by the guest's own funnels (funnels.js); idle on the host and outside a session. */
+  const funnels = createFunnels(ctx);
+  /** The host's sky (storm, wind, daylight, Time Slow look) on the guest's screen (skyMirror.js); idle on the host. */
+  const sky = createSky(ctx);
+  /** The one payload a guest's shot is announced with (reused: the listener copies what it keeps). */
+  const guestShotFx = { shooter: '1', kind: '', from: /** @type {any} */ (null), to: /** @type {any} */ (null), hit: '', extra: 0 };
 
   const S = {
     /** @type {ReturnType<typeof createRelayClient>|null} */
@@ -148,6 +186,9 @@ export function createNetSystem(ctx) {
     dbgEl: null,
     dbgAcc: 0,
     dbgPingAcc: 0,
+    /** Combat diagnostic: who fired the last hole, when, and whether it was seen open last frame. */
+    dbgHole: { shooter: '0', at: 0, open: false },
+    dbgTornadoes: -1,
     peerReadyShown: false,
     resetting: false,
     /** @type {{pos: THREE.Vector3, target: THREE.Vector3}|null} */
@@ -163,6 +204,16 @@ export function createNetSystem(ctx) {
     predStats: { snaps: 0, blends: 0, last: 0, worst: 0 },
     /** Latest synced health per player id: value, seconds since last damage, receipt time (ms). */
     peerHp: /** @type {Map<number, {v: number, since: number, at: number}>} */ (new Map()),
+    /** The host sends the `cars` kind (an older host does not: the guest then draws its `vehicles` rows). */
+    hostCars: false,
+    /** The guest's own town cars, hidden while the host's are drawn from `cars` rows (put back on leaving). */
+    hiddenCars: /** @type {THREE.Object3D[]} */ ([]),
+    /** The host sends the `flyers` kind (an older host does not: the guest's own cows, helicopter and jets then stay). */
+    hostFlyers: false,
+    /** The guest's own cows, helicopter, jets, mothership and Spotless, hidden while the host's are drawn from `flyers` rows (put back on leaving). */
+    hiddenSky: /** @type {THREE.Object3D[]} */ ([]),
+    /** Seconds since the guest's own sky was last held back (it is checked a few times a second). */
+    skyHideAcc: 1,
     hudHtml: '',
     hurtFlip: false,
     peerMission: /** @type {{id: string, value: number, goal: number, left: number}|null} */ (null),
@@ -185,6 +236,14 @@ export function createNetSystem(ctx) {
     /** Heights of the players' feet (metres), newest snapshot and the eased value drawn, by player id (the jetpack). */
     altTarget: new Map(),
     altNow: new Map(),
+    /** The newest snapshot's `aim` rows ([id, yaw, pitch, bits]); null when it carried none (the flames' state, so a cleared bit stops a flame within one snapshot). */
+    aimRows: null,
+    /** Seconds the crosshair's hit marker (class `on`) has left on a guest. */
+    hitMark: 0,
+    /** The newest snapshot's `hole` row ([x, z, age, closing 0|1]) or null, whether it came this frame, and the clock that times the collapse from the flag flipping (the Black Hole mirrored on this screen). */
+    holeRow: null,
+    holeFresh: false,
+    holeClock: newHoleClock(),
     /** The own authoritative position in the last snapshot, and when E was last pressed (to show the warp). */
     lastAuth: null,
     tpAt: 0,
@@ -225,6 +284,8 @@ export function createNetSystem(ctx) {
   /** @type {Map<string, number>} Per guest: ability bits pressed since the host last acted on them, and the bits of the last message. */
   const abilEdges = new Map();
   const abilSeen = new Map();
+  /** Each figure's eased height last frame, for how hard it climbs (guest). @type {Map<number, number>} */
+  const jetAlt = new Map();
   // Scratch for the peer camera.
   const camPose = newCameraPose();
   const camGoal = new THREE.Vector3();
@@ -268,11 +329,23 @@ export function createNetSystem(ctx) {
     if (ui.leave) /** @type {HTMLButtonElement} */ (ui.leave).disabled = idle;
   }
 
+  /**
+   * Diagnostic only (`?netdebug`): the bytes and per-kind rows of one snapshot.
+   * @param {any} snap
+   * @returns {void}
+   */
+  function dbgSnapshot(snap) {
+    if (!dbg) return;
+    dbg.snapshotBytes(JSON.stringify(snap).length);
+    for (const k of SNAPSHOT_KINDS) if (Array.isArray(snap[k])) dbg.snapshotRows(k, snap[k].length);
+  }
+
   /** @param {string} kind @param {Object} data @param {string} [to] */
   function sendEvent(kind, data, to) {
     if (S.role !== 'host' || !S.client) return;
     const ev = emitter.make(kind, data);
-    if (!ev) return;
+    if (!ev) { if (dbg) dbg.eventDropped(kind); return; }
+    if (dbg) dbg.eventBytes(JSON.stringify(ev).length);
     S.client.send(to === undefined ? ev : { ...ev, to });
   }
 
@@ -302,16 +375,31 @@ export function createNetSystem(ctx) {
     deduper.reset();
     emitter.reset();
     buffer.clear();
-    if (dbg) { dbg.reset(); S.dbgAcc = S.dbgPingAcc = 0; }
+    fxRing.clear();
+    mirror.dispose();
+    funnels.release();
+    sky.release();
+    if (dbg) { dbg.reset(); S.dbgAcc = S.dbgPingAcc = 0; S.dbgTornadoes = -1; S.dbgHole.open = false; S.dbgHole.shooter = '0'; S.dbgHole.at = 0; }
     S.tick = 0;
     S.peerScore = 0;
     S.peerRow = null;
     S.pred = newPrediction();
     S.altTarget.clear();
     S.altNow.clear();
+    S.aimRows = null;
+    S.hitMark = 0;
+    if (S.cross) S.cross.classList.remove('on');
+    jetAlt.clear();
+    if (ctx.systems.heroMode) ctx.systems.heroMode.clearRemoteJets();
+    S.holeRow = null;
+    S.holeFresh = false;
+    S.holeClock = newHoleClock();
+    if (ctx.systems.blackHole) ctx.systems.blackHole.mirrorOff(true);
     S.lastAuth = null;
     S.predStats = { snaps: 0, blends: 0, last: 0, worst: 0 };
     S.peerHp.clear();
+    S.hostCars = false;
+    S.hostFlyers = false;
     S.peerInv.clear();
     reviveShown.clear();
     partnerRows.clear();
@@ -502,6 +590,43 @@ export function createNetSystem(ctx) {
     S.avatars.delete(id);
   }
 
+  /**
+   * @returns {boolean} the host has a guest in the room, so the weapons' `weaponFx`
+   * announcements are worth building (no allocation: the per-shot gate).
+   */
+  function fxLive() {
+    return S.role === 'host' && players.count() > 1;
+  }
+
+  /**
+   * A weapon announced a shot (`weaponFx`, engine/events.js): into the ring for
+   * the next snapshot. The payload is the emitter's reused object, so it is read
+   * here and never kept. Nothing outside a room with a guest.
+   * @param {{shooter: string, kind: string, from: {x: number, y: number, z: number}|null, to: {x: number, y: number, z: number}|null, hit: string, extra: number}} e
+   * @returns {void}
+   */
+  function onWeaponFx(e) {
+    if (!fxLive() || !e.from || !e.to) return;
+    fxRing.push(e.kind, Number(e.shooter), e.from.x, e.from.y, e.from.z, e.to.x, e.to.y, e.to.z, hitCode(e.hit), e.extra);
+  }
+
+  /**
+   * A guest's shot, announced on the same bus as the host's own, with the guest as shooter.
+   * @param {string} kind @param {string} id the guest's room id
+   * @param {THREE.Vector3} from @param {THREE.Vector3} to
+   * @param {string} hit the `traceAim` kind, or '' @param {number} [extra]
+   * @returns {void}
+   */
+  function announceGuestShot(kind, id, from, to, hit, extra = 0) {
+    guestShotFx.shooter = id;
+    guestShotFx.kind = kind;
+    guestShotFx.from = from;
+    guestShotFx.to = to;
+    guestShotFx.hit = hit;
+    guestShotFx.extra = extra;
+    ctx.events.emit('weaponFx', guestShotFx);
+  }
+
   /** @returns {boolean} a guest is in the room */
   function coopActive() {
     return S.role === 'host' && players.list().length > 1;
@@ -565,6 +690,30 @@ export function createNetSystem(ctx) {
   const mayHurt = (shooterId, targetId) => mayHurtPlayer(shooterId, targetId, { coop: coopActive(), friendlyFire: FRIENDLY_FIRE });
 
   /**
+   * Diagnostic only (`?netdebug`): one line of the combat ring, repeats folded.
+   * @param {string} fn The entry point (`hurtRay`, `hitGuestsArea`...).
+   * @param {string} shooterId
+   * @param {string} targetId
+   * @param {string} outcome `applied`, `miss`, `out`, `mayHurt` or `refused:<reason>`.
+   * @param {string} [extra] Detail that may vary without making a new line.
+   * @returns {void}
+   */
+  function dbgHurt(fn, shooterId, targetId, outcome, extra = '') {
+    if (dbg) dbg.combat(`${fn} ${shooterId}->${targetId}: ${outcome}${extra}`, `${fn}|${shooterId}|${targetId}|${outcome}`);
+  }
+
+  /**
+   * Diagnostic only: the outcome of a `damagePlayer` call.
+   * @param {string} fn @param {string} shooterId @param {string} targetId
+   * @param {{applied: boolean, killed: boolean, health: number, reason?: string}} r
+   * @param {string} [extra]
+   * @returns {void}
+   */
+  function dbgResult(fn, shooterId, targetId, r, extra = '') {
+    if (dbg) dbgHurt(fn, shooterId, targetId, r.applied ? (r.killed ? 'applied+down' : 'applied') : `refused:${r.reason || 'unknown'}`, `${extra} hp ${Math.round(r.health)}`);
+  }
+
+  /**
    * An area event (explosion, ship crash, black hole zone) reaching the
    * guests: every guest inside the radius takes the same request Roger would,
    * through the one health API (host only; the API ignores a downed guest).
@@ -576,7 +725,16 @@ export function createNetSystem(ctx) {
     if (!coopActive() || !ctx.systems.health) return;
     for (const p of players.list()) {
       if (p.id === '0' || Math.hypot(p.x - x, p.z - z) >= radius) continue;
-      ctx.systems.health.damagePlayer({ ...request, targetId: p.id });
+      const r = ctx.systems.health.damagePlayer({ ...request, targetId: p.id });
+      if (dbg) {
+        const d = Math.hypot(p.x - x, p.z - z);
+        if (request.source === 'blackHole') {
+          // Shooter-to-centre and the zone radius at this swallow.
+          const shooter = players.get(S.dbgHole.shooter);
+          const sd = shooter ? Math.hypot(shooter.x - x, shooter.z - z) : NaN;
+          if (dbg) dbgResult('hole-swallow', S.dbgHole.shooter, p.id, r, ` centre ${fixed1(x)},${fixed1(z)} shooter-to-centre ${fixed1(sd)} m zone ${fixed1(radius)} m target-to-centre ${fixed1(d)} m`);
+        } else dbgResult('hitGuestsArea', request.source, p.id, r, ` at ${fixed1(x)},${fixed1(z)} ${fixed1(d)} m of ${fixed1(radius)}`);
+      }
     }
   }
 
@@ -589,12 +747,16 @@ export function createNetSystem(ctx) {
    * @returns {void}
    */
   function splashGuests(at, radius, weapon) {
+    if (dbg) dbg.host(0);
     if (!coopActive() || !ctx.systems.health) return;
     for (const p of players.list()) {
-      if (p.id === '0' || !mayHurt('0', p.id)) continue;
-      const amount = splashAmount(weapon, Math.hypot(p.x - at.x, p.z - at.z), radius);
-      if (amount <= 0) continue;
-      ctx.systems.health.damagePlayer({ source: 'friendlyFire', amount, type: 'blast', position: at, targetId: p.id, title: 'FRIENDLY FIRE', sub: "Caught in Roger's blast" });
+      if (p.id === '0') continue;
+      if (!mayHurt('0', p.id)) { if (dbg) dbgHurt('splashGuests', '0', p.id, 'mayHurt', ` ${weapon}`); continue; }
+      const d = Math.hypot(p.x - at.x, p.z - at.z);
+      const amount = splashAmount(weapon, d, radius);
+      if (amount <= 0) { if (dbg) dbgHurt('splashGuests', '0', p.id, 'out', ` ${weapon} ${fixed1(d)} m of ${fixed1(radius)}`); continue; }
+      const r = ctx.systems.health.damagePlayer({ source: 'friendlyFire', amount, type: 'blast', position: at, targetId: p.id, title: 'FRIENDLY FIRE', sub: "Caught in Roger's blast" });
+      if (dbg) dbgResult('splashGuests', '0', p.id, r, ` ${weapon} ${fixed1(d)} m`);
     }
   }
 
@@ -622,16 +784,19 @@ export function createNetSystem(ctx) {
    * @returns {void}
    */
   function hurtRay(shooterId, ox, oy, oz, dx, dy, dz, maxT, weapon) {
+    if (dbg && shooterId === '0') dbg.host(0);
     if (!coopActive() || !ctx.systems.health) return;
     const amount = /** @type {Record<string, number>} */ (HEALTH.damageToPlayer)[weapon];
     if (!(amount > 0)) return;
     for (const p of players.list()) {
-      if (p.id === shooterId || !mayHurt(shooterId, p.id)) continue;
-      if (rayBodyDistance(ox, oy, oz, dx, dy, dz, maxT, p.x, p.z) < 0) continue;
-      ctx.systems.health.damagePlayer({
+      if (p.id === shooterId) continue;
+      if (!mayHurt(shooterId, p.id)) { if (dbg) dbgHurt('hurtRay', shooterId, p.id, 'mayHurt', ` ${weapon}`); continue; }
+      if (rayBodyDistance(ox, oy, oz, dx, dy, dz, maxT, p.x, p.z) < 0) { if (dbg) dbgHurt('hurtRay', shooterId, p.id, 'miss', ` ${weapon} reach ${fixed1(maxT)} m, target ${fixed1(Math.hypot(p.x - ox, p.z - oz))} m away`); continue; }
+      const r = ctx.systems.health.damagePlayer({
         source: 'friendlyFire', amount, type: 'ray',
         position: { x: ox, y: 0, z: oz }, targetId: p.id, title: 'FRIENDLY FIRE', sub: `Shot by ${attacker(shooterId)}`
       });
+      if (dbg) dbgResult('hurtRay', shooterId, p.id, r, ` ${weapon}`);
     }
   }
 
@@ -652,17 +817,20 @@ export function createNetSystem(ctx) {
    * @returns {void}
    */
   function hurtSector(shooterId, ox, oz, fx, fz, reach, cosArc, near, weapon, type, verb) {
+    if (dbg && shooterId === '0') dbg.host(0);
     if (!coopActive() || !ctx.systems.health) return;
     const amount = /** @type {Record<string, number>} */ (HEALTH.damageToPlayer)[weapon];
     if (!(amount > 0)) return;
     const len = Math.hypot(fx, fz) || 1;
     for (const p of players.list()) {
-      if (p.id === shooterId || !mayHurt(shooterId, p.id)) continue;
-      if (!inSector(ox, oz, fx / len, fz / len, p.x, p.z, reach, cosArc, near)) continue;
-      ctx.systems.health.damagePlayer({
+      if (p.id === shooterId) continue;
+      if (!mayHurt(shooterId, p.id)) { if (dbg) dbgHurt('hurtSector', shooterId, p.id, 'mayHurt', ` ${weapon}`); continue; }
+      if (!inSector(ox, oz, fx / len, fz / len, p.x, p.z, reach, cosArc, near)) { if (dbg) dbgHurt('hurtSector', shooterId, p.id, 'out', ` ${weapon} target ${fixed1(Math.hypot(p.x - ox, p.z - oz))} m of reach ${fixed1(reach)}`); continue; }
+      const r = ctx.systems.health.damagePlayer({
         source: 'friendlyFire', amount, type, position: { x: ox, y: 0, z: oz },
         targetId: p.id, title: 'FRIENDLY FIRE', sub: `${verb} ${attacker(shooterId)}`
       });
+      if (dbg) dbgResult('hurtSector', shooterId, p.id, r, ` ${weapon}`);
     }
   }
 
@@ -678,15 +846,20 @@ export function createNetSystem(ctx) {
    * @returns {void}
    */
   function hurtArea(shooterId, x, z, radius, weapon, verb) {
+    if (dbg && shooterId === '0') dbg.host(0);
     if (!coopActive() || !ctx.systems.health) return;
     const amount = /** @type {Record<string, number>} */ (HEALTH.damageToPlayer)[weapon];
     if (!(amount > 0)) return;
     for (const p of players.list()) {
-      if (p.id === shooterId || !mayHurt(shooterId, p.id) || Math.hypot(p.x - x, p.z - z) >= radius) continue;
-      ctx.systems.health.damagePlayer({
+      if (p.id === shooterId) continue;
+      if (!mayHurt(shooterId, p.id)) { if (dbg) dbgHurt('hurtArea', shooterId, p.id, 'mayHurt', ` ${weapon}`); continue; }
+      const d = Math.hypot(p.x - x, p.z - z);
+      if (d >= radius) { if (dbg) dbgHurt('hurtArea', shooterId, p.id, 'out', ` ${weapon} ${fixed1(d)} m of ${fixed1(radius)}`); continue; }
+      const r = ctx.systems.health.damagePlayer({
         source: 'friendlyFire', amount, type: 'ray', position: { x, y: 0, z },
         targetId: p.id, title: 'FRIENDLY FIRE', sub: `${verb} ${attacker(shooterId)}`
       });
+      if (dbg) dbgResult('hurtArea', shooterId, p.id, r, ` ${weapon}`);
     }
   }
 
@@ -821,7 +994,7 @@ export function createNetSystem(ctx) {
         }
       }
       // The jetpack: Space held climbs, let go it sinks gently; down or seated, it lets go.
-      stepGuestAir(p, a, !!input && ctl.move && p.state === 'up' && (input.abil & JET_BIT) !== 0, ctl.move, dt, h);
+      stepGuestAir(p, a, jetHeld(input, ctl.move && p.state === 'up', JET_BIT), ctl.move, dt, h);
       pos.set(p.x, a.alt, p.z);
       a.obj.mesh.rotation.y = p.heading;
       // Down: lying flat; revived: upright.
@@ -831,9 +1004,14 @@ export function createNetSystem(ctx) {
       swingLimbs(a.limbs, a.run.phase, p.state === 'up' ? stepRunCycle(a.run, p.x, p.z, dt, HERO.stride, HERO.runSpeed) : 0);
       // The guest's weapon in its hand, as the host sees the guest's Roger.
       a.held.show(heldKey(p.weapon, p.state === 'up', !!p.seat));
+      // The guest's jetpack flames and smoke on the host's screen (drawing only; the pack burns while it is in the air).
+      if (guestBurning(a.air, p.state === 'up', !p.seat)) h.showRemoteJet(Number(p.id), p.x, a.alt, p.z, p.heading, THREE.MathUtils.clamp(a.vy / JETPACK.climbSpeed, 0, 1), dt);
       // Hunters now hurt a guest through the health API (melee touches, rays),
       // which calls catchPlayer at 0 health; there is no instant catch here.
     }
+
+    // Ends the frame for the co-op packs (hides the ones not shown, steps the shared smoke).
+    h.stepRemoteJets(dt);
 
     const { revived, died } = players.update(dt);
     for (const id of revived) {
@@ -1001,10 +1179,11 @@ export function createNetSystem(ctx) {
    * @param {number} yaw Aim yaw, radians.
    * @param {number} pitch Aim pitch, radians.
    * @param {number} range
+   * @param {number} oy Eye height (`eyeAt` of the guest's altitude).
    * @returns {{e: any, kind: any, t: number}|null}
    */
-  function scan(p, yaw, pitch, range) {
-    const ox = p.x, oy = EYE, oz = p.z;
+  function scan(p, yaw, pitch, range, oy) {
+    const ox = p.x, oz = p.z;
     const cp = Math.cos(pitch);
     const dx = Math.sin(yaw) * cp, dy = Math.sin(pitch), dz = Math.cos(yaw) * cp;
     /** @type {{e: any, kind: any, t: number}|null} */
@@ -1025,6 +1204,45 @@ export function createNetSystem(ctx) {
     return best;
   }
 
+  /**
+   * Diagnostic only (`?netdebug`): one line per guest hitscan shot. The enemy
+   * `scan` found, what Roger's own `traceAim` finds along the same ray (a
+   * read-only query, checked: it only reads the world), and the people within
+   * 5 m of where the ray ends.
+   * @param {string} id The shooter.
+   * @param {string} weapon
+   * @param {number} ox Origin x.
+   * @param {number} oy Origin height (the eye: `eyeAt` of the altitude).
+   * @param {number} oz Origin z.
+   * @param {number} dx Unit direction.
+   * @param {number} dy
+   * @param {number} dz
+   * @param {{kind: any, t: number}|null} hit What `scan` found.
+   * @param {number} range The weapon's range.
+   * @returns {void}
+   */
+  function dbgShot(id, weapon, ox, oy, oz, dx, dy, dz, hit, range) {
+    if (!dbg || !dbgRayO || !dbgRayD) return;
+    const h = hero();
+    let aim = 'traceAim n/a';
+    let reach = hit ? hit.t : range;
+    if (h && typeof h.traceAim === 'function') {
+      dbgRayO.set(ox, oy, oz);
+      dbgRayD.set(dx, dy, dz);
+      const a = h.traceAim(dbgRayO, dbgRayD);
+      aim = `traceAim ${a.kind} at ${fixed1(a.t)} m`;
+      reach = Math.min(reach, a.t);
+    }
+    const ix = ox + dx * reach, iz = oz + dz * reach;
+    let near = 0, avatars = 0;
+    for (const person of ctx.Environment.people) {
+      if (!person.mesh.parent || person.abducted) continue;
+      if (Math.hypot(person.mesh.position.x - ix, person.mesh.position.z - iz) > 5) continue;
+      if (person.mesh.name.startsWith('coop_player_')) avatars++; else near++;
+    }
+    dbg.combat(`shot ${id} ${weapon} from ${fixed1(ox)},${fixed1(oy)},${fixed1(oz)} dir ${fixed1(dx)},${fixed1(dy)},${fixed1(dz)}: scan ${hit ? `${hit.kind.kind} at ${fixed1(hit.t)} m` : 'none'}; ${aim}; people within 5 m of impact ${near} (+${avatars} avatars)`);
+  }
+
   /** @param {number} points @param {string} id */
   function credit(points, id) {
     ctx.systems.damage.addDamageScore(points);
@@ -1039,7 +1257,7 @@ export function createNetSystem(ctx) {
    * line of fire, arc or cone are hurt through health.damagePlayer (friendly
    * fire is on, R-053).
    * @param {import('./players.js').Player} p
-   * @param {{cd: number, flame: {tick: number}}} a
+   * @param {{cd: number, alt: number, flame: {tick: number}}} a
    * @param {import('./protocol.js').PlayerInput} input the latest input (aim direction)
    * @param {number} dt
    * @param {import('./guestWeapons.js').Trigger} trigger the pull being acted on (weapon and raised state when it was made)
@@ -1051,6 +1269,8 @@ export function createNetSystem(ctx) {
     // The weapon must be raised first (the Katana excepted): no shot, no cooldown spent.
     if (verdict === 'unraised' || verdict === 'none') return;
     const ox = p.x, oz = p.z;
+    // The eye rides the jetpack: shots from the air start at eye height above the guest's feet.
+    const oy = eyeAt(a.alt, EYE);
     // Aiming, the shot goes where the guest looks; on foot (the Katana's
     // cut), straight ahead of the body.
     const yaw = input.aim ? input.yaw : p.heading;
@@ -1060,7 +1280,7 @@ export function createNetSystem(ctx) {
     if (verdict === 'flame') {
       // Held: the same flame, sound and burning as Roger's, from the guest.
       aimVec.set(dx, dy, dz);
-      muzzleVec.set(ox, EYE, oz);
+      muzzleVec.set(ox, oy, oz);
       hero().guestFlame(a.flame, dt, muzzleVec, aimVec);
       return;
     }
@@ -1068,18 +1288,24 @@ export function createNetSystem(ctx) {
     if (name === 'rifle' || name === 'minigun' || name === 'railgun') {
       const w = /** @type {typeof GUEST_WEAPONS.rifle} */ (GUEST_WEAPONS[name]);
       a.cd = w.cooldown;
-      const hit = scan(p, yaw, pitch, w.range);
-      if (dbg && hit) dbg.fire(trigger.weapon, 2);
+      const hit = scan(p, yaw, pitch, w.range, oy);
+      if (dbg) { dbgShot(p.id, name, ox, oy, oz, dx, dy, dz, hit, w.range); if (hit) dbg.fire(trigger.weapon, 2); }
       // What the host sees of the guest's shot: one tracer in the shared round
       // pool, from just ahead of the guest's eye to where the ray ends. Cosmetic
       // (no hit, no casing, no sound, no particles); the damage is the call below.
       const reach = hit ? hit.t : w.range;
-      muzzleVec.set(ox + dx * 0.8, EYE - 0.2 + dy * 0.8, oz + dz * 0.8);
-      tracerEnd.set(ox + dx * reach, EYE + dy * reach, oz + dz * reach);
-      hero().guestTracer(muzzleVec, tracerEnd);
-      if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: EYE + dy * hit.t, z: oz + dz * hit.t } })) { if (dbg) dbg.fire(trigger.weapon, 3); credit(KILL_SCORE, p.id); }
+      muzzleVec.set(ox + dx * 0.8, oy - 0.2 + dy * 0.8, oz + dz * 0.8);
+      tracerEnd.set(ox + dx * reach, oy + dy * reach, oz + dz * reach);
+      // All three go through the mirror (the minigun's round with casings and sparks, the rail bolt, the
+      // rifle's plasma beam, each with its cue), as on the guest's screen.
+      if (name === 'minigun') mirror.drawGuestShot('bullet', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
+      else if (name === 'railgun') mirror.drawGuestShot('rail', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
+      else mirror.drawGuestShot('plasma', muzzleVec, tracerEnd, hit ? HIT_ENEMY : 0);
+      if (hit && ctx.systems.enemies.hit(hit.e, hit.kind, { type: w.type, at: { x: ox + dx * hit.t, y: oy + dy * hit.t, z: oz + dz * hit.t } })) { if (dbg) dbg.fire(trigger.weapon, 3); credit(KILL_SCORE, p.id); }
       // Friendly fire (D4): the partner in the line of fire, if nearer than the enemy hit.
-      hurtRay(p.id, ox, EYE, oz, dx, dy, dz, hit ? hit.t : w.range, w.type);
+      hurtRay(p.id, ox, oy, oz, dx, dy, dz, hit ? hit.t : w.range, w.type);
+      // Last: what the guest's other screen is told of this shot (muzzleVec and tracerEnd are still the tracer's ends).
+      announceGuestShot(name === 'rifle' ? 'plasma' : name === 'minigun' ? 'bullet' : 'rail', p.id, muzzleVec, tracerEnd, hit ? 'enemy' : '');
     } else if (name === 'katana') {
       a.cd = KATANA.cooldown;
       // A cut in front of the guest: the nearest enemy inside the arc takes a blade hit.
@@ -1121,14 +1347,19 @@ export function createNetSystem(ctx) {
         ctx.systems.people.explodePerson(person);
         credit(IMPACT_SCORE, p.id);
       }
+      // The crescent on the host's screen, and the cut row for the guest's other screen: both ends at the guest's feet.
+      muzzleVec.set(ox, a.alt, oz);
+      tracerEnd.set(ox + Math.sin(yaw) * KATANA.reach, a.alt, oz + Math.cos(yaw) * KATANA.reach);
+      mirror.drawGuestSwing(ox, a.alt, oz, yaw, !!(target || person));
+      announceGuestShot('cut', p.id, muzzleVec, tracerEnd, target || person ? 'enemy' : '');
     } else if (name === 'blackhole') {
       a.cd = HOLE_COOLDOWN;
       // Where the aim meets the ground, or the enemy it is on.
       let gx = 0, gz = 0, ok = false;
-      const hit = scan(p, yaw, pitch, 200);
+      const hit = scan(p, yaw, pitch, 200, oy);
       if (hit) { const q = hit.kind.position(hit.e); gx = q.x; gz = q.z; ok = true; }
       else if (dy < -0.02) {
-        const t = EYE / -dy;
+        const t = oy / -dy;
         gx = ox + dx * t; gz = oz + dz * t; ok = true;
       }
       if (!ok) { sendEvent('notice', { text: 'BLACK HOLE GUN — aim at the ground or a target' }, p.id); return; }
@@ -1136,7 +1367,16 @@ export function createNetSystem(ctx) {
       const cost = HOLE.cost * 10;
       if (!ENERGY.infinite && p.energy < cost) { sendEvent('notice', { text: `BLACK HOLE GUN — needs ${cost}% energy` }, p.id); return; }
       const result = ctx.systems.blackHole.fire(Math.max(-HERO.bound, Math.min(HERO.bound, gx)), Math.max(-HERO.bound, Math.min(HERO.bound, gz)));
+      if (dbg) {
+        if (result) { S.dbgHole.shooter = p.id; S.dbgHole.at = performance.now(); }
+        dbg.combat(`blackhole ${p.id}: ${result || 'refused'} centre ${fixed1(gx)},${fixed1(gz)} shooter-to-centre ${fixed1(Math.hypot(gx - ox, gz - oz))} m, scan ${hit ? hit.kind.kind : 'ground'}`);
+      }
       if (result && !ENERGY.infinite) p.energy -= cost;
+      if (result) {
+        muzzleVec.set(ox, oy, oz);
+        tracerEnd.set(gx, 0, gz);
+        announceGuestShot('holeShot', p.id, muzzleVec, tracerEnd, hit ? 'enemy' : 'ground', result === 'queued' ? 1 : 0);
+      }
     }
   }
 
@@ -1158,6 +1398,235 @@ export function createNetSystem(ctx) {
     return rows.slice(0, LIMITS.maxPerKind);
   }
 
+  /**
+   * The `aim` rows (version 4): [playerId, yaw, pitch, firing bits] for each player in the run.
+   * The host's Roger reads its live aim and weapon state; a guest's comes from its own input
+   * (bits: 1 Fire Gun firing, 2 minigun spinning).
+   * @param {any} h heroMode
+   * @returns {number[][]}
+   */
+  function aimRows(h) {
+    /** @type {number[][]} */
+    const rows = [];
+    const pose = h.rogerPose();
+    if (pose) {
+      const d = h.rogerAim();
+      rows.push(aimRow(0, d ? Math.atan2(d.x, d.z) : pose.heading, d ? Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)) : 0, withJetBit(h.rogerFireBits(), h.rogerJetBurning())));
+    }
+    for (const p of players.list()) {
+      if (p.id === '0' || rows.length >= LIMITS.maxAim || !S.avatars.has(p.id) || !p.input) continue;
+      const input = p.input;
+      const firing = input.fire && input.aim && p.state === 'up';
+      const w = WEAPONS[input.weapon];
+      rows.push(aimRow(Number(p.id), input.aim ? input.yaw : p.heading, input.aim ? input.pitch : 0, withJetBit(firing ? (w === 'fire' ? 1 : w === 'minigun' ? 2 : 0) : 0, guestBurning(S.avatars.get(p.id).air, p.state === 'up', !p.seat))));
+    }
+    return rows;
+  }
+
+  /**
+   * The version 4 world fields (`fx`, `tw`, `hole`, `aim`, `env`), built only when
+   * a guest is in the room. Empty `fx`, `tw` and `hole` are left out (absent means none).
+   * @param {any} h heroMode
+   * @returns {{fx?: number[][], tw?: number[][], hole?: number[][], aim?: number[][], env?: number[][]}}
+   */
+  function worldRows(h) {
+    /** @type {{fx?: number[][], tw?: number[][], hole?: number[][], aim?: number[][], env?: number[][]}} */
+    const out = {};
+    const fx = fxRing.drain(LIMITS.maxFx);
+    if (fx.length) out.fx = fx;
+    /** @type {number[][]} */
+    const tw = [];
+    ctx.tornadoes.active.forEach((/** @type {any} */ t) => {
+      const v = t.Vortex;
+      if (tw.length < LIMITS.maxTw) tw.push(twRow(v.index, v.birth, v.sizeMul, v.fade, v.leanX, v.leanZ));
+    });
+    if (tw.length) out.tw = tw;
+    const lens = ctx.systems.blackHole ? ctx.systems.blackHole.lensInfo() : null;
+    if (lens) out.hole = [holeRow(lens.x, lens.z, lens.age, lens.closing >= 0)];
+    const aim = aimRows(h);
+    if (aim.length) out.aim = aim;
+    out.env = [envRow(Sim.state.running, Sim.state.stormRamp, Sim.params.intensity, Sim.params.windSpeed, Sim.params.radius, ctx.DayNight ? ctx.DayNight.daylight : 0, ctx.GameFeel ? ctx.GameFeel.timeScale : 1)];
+    return out;
+  }
+
+  /**
+   * Every car as a `cars` row (position, height, tilt, body colour), the
+   * driven, thrown or lifted and moving ones first, at most the per-kind cap.
+   * Built only while a guest is in the room.
+   * @param {THREE.Object3D|null} driven The car the host is driving.
+   * @returns {number[][]}
+   */
+  function carRows(driven) {
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    const list = [];
+    for (const car of ctx.Environment.cars) {
+      const m = car.mesh;
+      if (!m || !m.parent) continue;
+      const e = eulerYXZ(m.quaternion);
+      const v = car.velocity;
+      const cls = carClass({ y: m.position.y, speedSq: v ? v.lengthSq() : 0, pitch: e.pitch, roll: e.roll, driven: m === driven, lifted: car.captureState !== undefined && car.captureState !== 'grounded' });
+      list.push({ cls, row: carRow(idOf(car), { x: clamp(m.position.x), y: m.position.y, z: clamp(m.position.z) }, e, m.userData.carColour ?? 0) });
+    }
+    return pickCars(list, LIMITS.maxPerKind).map((c) => c.row);
+  }
+
+  /**
+   * The cyber T-Rex and Yeti as `giants` rows (at most one each), built only
+   * while a guest is in the room.
+   * @returns {number[][]}
+   */
+  function giantRows() {
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    /** @type {number[][]} */
+    const out = [];
+    const trex = ctx.systems.trex && ctx.systems.trex.replicaState();
+    if (trex) out.push(giantRow(GIANT.trex, trex, clamp));
+    const yeti = ctx.systems.yeti && ctx.systems.yeti.replicaState();
+    if (yeti) out.push(giantRow(GIANT.yeti, yeti, clamp));
+    return out;
+  }
+
+  /**
+   * Hank Granite, HAVOC and the samurai as `figures` rows (at most 14), built
+   * only while a guest is in the room and one of them is on the field.
+   * @returns {number[][]}
+   */
+  function figureRows() {
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    /** @type {number[][]} */
+    const out = [];
+    const hank = ctx.systems.actionHero && ctx.systems.actionHero.replicaState();
+    if (hank) out.push(hankRow(hank, clamp));
+    const gunners = ctx.systems.gunner && ctx.systems.gunner.replicaState();
+    if (gunners) for (const u of gunners) if (out.length < LIMITS.maxFigures) out.push(havocRow(idOf(u.key) + 1, u, clamp));
+    const squad = ctx.systems.spaceship && ctx.systems.spaceship.replicaState();
+    if (squad) for (const u of squad) if (out.length < LIMITS.maxFigures) out.push(samuraiRow(idOf(u.key) + 1, u, clamp));
+    return out;
+  }
+
+  /**
+   * The fires as `fires` rows (at most 64), built only while a guest is in the
+   * room: the gas mains' masks, the fuel stations, the Firenado's ground fire
+   * patches and the building fires, fiercest first. Each system hands over
+   * read-only state; nothing here touches a fire.
+   * @returns {number[][]}
+   */
+  function fireRows() {
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    const sys = ctx.systems;
+    const groups = { gas: /** @type {number[][]} */ ([]), fuel: /** @type {number[][]} */ ([]), ground: /** @type {number[][]} */ ([]), buildings: /** @type {number[][]} */ ([]) };
+    const mains = sys.gasMains && sys.gasMains.replicaState();
+    if (mains) for (const m of mains) groups.gas.push(fireRow(FIRE.gas, m.index, { x: 0, z: 0, level: 0, a: m.burn, b: m.vent, c: m.spent }, clamp));
+    const stations = sys.fuelFire && sys.fuelFire.replicaState();
+    if (stations) for (const f of stations) groups.fuel.push(fireRow(FIRE.fuel, f.index, { x: f.x, z: f.z, level: f.level, a: f.phase }, clamp));
+    const patches = sys.firenado && sys.firenado.groundFireState();
+    if (patches) for (const p of patches) groups.ground.push(fireRow(FIRE.ground, p.slot, { x: p.x, z: p.z, level: p.level }, clamp));
+    const burning = sys.buildingFire && sys.buildingFire.replicaState();
+    if (burning) for (const f of burning) groups.buildings.push(buildingRow(Math.max(0, f.index), f, clamp));
+    return orderFires(groups, LIMITS.maxFires);
+  }
+
+  /**
+   * The flood as at most one `flood` row, built only while a guest is in the
+   * room and only while the dam is failing or the water is out (read-only
+   * state from the flood system).
+   * @returns {number[][]}
+   */
+  function floodRows() {
+    const state = ctx.systems.flood && ctx.systems.flood.replicaState();
+    if (!state) return [];
+    const row = floodRow(state, (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound));
+    return row ? [row] : [];
+  }
+
+  /**
+   * The electric storm as at most one `storm` row, built only while a guest is
+   * in the room and only while the mode is on with a funnel down (read-only
+   * state from the electric storm system).
+   * @returns {number[][]}
+   */
+  function stormRows() {
+    const state = ctx.systems.electricStorm && ctx.systems.electricStorm.replicaState();
+    const row = stormRow(state, (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound));
+    return row ? [row] : [];
+  }
+
+  /**
+   * The Firenado as at most one `firenado` row, built only while a guest is in
+   * the room and only while the funnel burns (read-only state).
+   * @returns {number[][]}
+   */
+  function firenadoRows() {
+    const row = firenadoRow(ctx.systems.firenado ? ctx.systems.firenado.replicaState() : null);
+    return row ? [row] : [];
+  }
+
+  /**
+   * The earthquake family as `quake` rows (at most 8): the quake while it
+   * shakes, the chasms, the sinkholes and the lava fissures, built only while a
+   * guest is in the room (read-only state from each system).
+   * @returns {number[][]}
+   */
+  function quakeRows() {
+    const sys = ctx.systems;
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    /** @type {number[][]} */
+    const rows = [];
+    const quake = sys.earthquake && sys.earthquake.replicaState();
+    if (quake) rows.push(quakeRow(quake));
+    const chasms = sys.chasm && sys.chasm.replicaState();
+    if (chasms) chasms.forEach((c, i) => rows.push(chasmRow(i, c)));
+    const holes = sys.sinkhole && sys.sinkhole.replicaState();
+    if (holes) holes.forEach((h, i) => rows.push(sinkholeRow(i, h, clamp)));
+    const eruption = sys.fissures && sys.fissures.replicaState();
+    if (eruption) rows.push(eruptionRow(eruption));
+    return rows;
+  }
+
+  /**
+   * The mothership, Captain Spotless, the news helicopter, the GHOST jets and
+   * the cows as `flyers` rows (at most 14, most important first), built only
+   * while a guest is in the room. Each system hands over read-only state; the
+   * cows and the helicopter always exist, the rest only while they are out.
+   * @returns {number[][]}
+   */
+  function flyerRows() {
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    /** @type {number[][]} */
+    const out = [];
+    const sys = ctx.systems;
+    /** @param {number} type @param {number} index @param {{x: number, y: number, z: number}} s @param {{yaw: number, pitch: number, roll: number}} e @param {number} state @param {number} a */
+    const add = (type, index, s, e, state, a) => {
+      if (out.length < LIMITS.maxFlyers) out.push(flyerRow(type, index, { x: s.x, y: s.y, z: s.z, state, a }, e, clamp));
+    };
+    const mother = sys.mothership && sys.mothership.replicaState();
+    if (mother) add(FLYER.mothership, 0, mother, eulerYXZ(mother.quaternion), motherState(mother.phase), 0);
+    const cs = sys.cleaner && sys.cleaner.replicaState();
+    if (cs) add(FLYER.spotless, 0, { x: cs.x, y: 0, z: cs.z }, { yaw: cs.yaw, pitch: 0, roll: 0 }, 0, cs.u);
+    const chopper = sys.newsChopper && sys.newsChopper.replicaState();
+    if (chopper) add(FLYER.chopper, 0, chopper, eulerYXZ(chopper.quaternion), chopper.chasing ? 1 : 0, 0);
+    const jets = sys.airSupport && sys.airSupport.replicaState();
+    if (jets) for (const j of jets) add(FLYER.jet, j.index, j, eulerYXZ(j.quaternion), throttleState(j.throttle), j.vis);
+    const cows = sys.cows && sys.cows.replicaState();
+    if (cows) for (const c of cows) add(FLYER.cow, c.index, c, eulerYXZ(c.quaternion), c.lifted ? 1 : 0, headDown(c.headY));
+    return out;
+  }
+
+  /**
+   * Patient Zero's original and its clones as `replicator` and `clones` rows,
+   * built only while a guest is in the room and one of them is on the field.
+   * @returns {{replicator: number[][], clones: number[][]}}
+   */
+  function replicaRows() {
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    const st = ctx.systems.patientZero && ctx.systems.patientZero.replicaState && ctx.systems.patientZero.replicaState();
+    if (!st) return { replicator: [], clones: [] };
+    return {
+      replicator: st.original ? [replicatorRow(st.original, st.flare, st.warpOut, clamp)] : [],
+      clones: cloneRows(st.clones, st.warpOut, idOf, clamp, LIMITS.maxClones)
+    };
+  }
+
   /** @returns {import('./protocol.js').Snapshot} */
   function buildSnapshot() {
     const h = hero();
@@ -1177,8 +1646,8 @@ export function createNetSystem(ctx) {
       const seat = p.seat;
       rows.players.push([Number(p.id), r2(clamp(p.x)), r2(clamp(p.z)), r2(p.heading), p.state === 'up' ? 0 : p.state === 'down' ? 1 : 2, p.weapon, Math.round(p.energy), seat ? seat.vehicle : -1, seat ? seat.seat : -1]);
     }
-    ctx.tornadoes.active.forEach((/** @type {any} */ t, /** @type {number} */ i) => {
-      if (rows.tornadoes.length < cap) rows.tornadoes.push([i, r2(clamp(t.Vortex.center.x)), r2(clamp(t.Vortex.center.z)), r2(Sim.params.radius)]);
+    ctx.tornadoes.active.forEach((/** @type {any} */ t) => {
+      if (rows.tornadoes.length < cap) rows.tornadoes.push([t.Vortex.index, r2(clamp(t.Vortex.center.x)), r2(clamp(t.Vortex.center.z)), r2(Sim.params.radius)]);
     });
     ctx.systems.enemies.each((/** @type {any} */ e, /** @type {any} */ kind) => {
       if (kind.kind !== 'terminator' && kind.kind !== 'pursuer') return;
@@ -1220,11 +1689,33 @@ export function createNetSystem(ctx) {
       if (!v || v.lengthSq() < 0.04) continue;
       rows.vehicles.push([idOf(car), r2(clamp(car.mesh.position.x)), r2(clamp(car.mesh.position.z)), r2(car.mesh.rotation.y), r2(v.length())]);
     }
+    const live = fxLive();
+    const giants = live ? giantRows() : [];
+    const replica = live ? replicaRows() : { replicator: [], clones: [] };
+    const figures = live ? figureRows() : [];
+    const flyers = live ? flyerRows() : [];
+    const fires = live ? fireRows() : [];
+    const flood = live ? floodRows() : [];
+    const quake = live ? quakeRows() : [];
+    const storm = live ? stormRows() : [];
+    const firenado = live ? firenadoRows() : [];
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
       alt: altRows(h),
-      ack: gate.acks((id) => id !== '0' && !!players.get(id))
+      ack: gate.acks((id) => id !== '0' && !!players.get(id)),
+      ...(live ? { cars: carRows(driving ? driving.mesh : null) } : {}),
+      ...(giants.length ? { giants } : {}),
+      ...(replica.replicator.length ? { replicator: replica.replicator } : {}),
+      ...(replica.clones.length ? { clones: replica.clones } : {}),
+      ...(figures.length ? { figures } : {}),
+      ...(flyers.length ? { flyers } : {}),
+      ...(fires.length ? { fires } : {}),
+      ...(flood.length ? { flood } : {}),
+      ...(quake.length ? { quake } : {}),
+      ...(storm.length ? { storm } : {}),
+      ...(firenado.length ? { firenado } : {}),
+      ...(live ? worldRows(h) : {})
     };
   }
 
@@ -1280,6 +1771,8 @@ export function createNetSystem(ctx) {
     }
   }
 
+  const explosionSound = createSoundGate();
+
   /** @param {any} msg */
   function peerMessage(msg) {
     if ((msg.type === 'snapshot' || msg.type === 'event') && msg.v !== PROTOCOL_VERSION) {
@@ -1295,19 +1788,30 @@ export function createNetSystem(ctx) {
         }
       }
       if (dbg) {
+        dbgSnapshot(msg);
         let mine = -1;
         if (Array.isArray(msg.ack)) for (const r of msg.ack) if (String(r[0]) === S.myId) mine = r[1];
         dbg.snapshotArrived(performance.now(), mine);
       }
       if (buffer.push(msg, performance.now() / 1000).ok) {
+        S.hostCars = Array.isArray(msg.cars);
+        if (Array.isArray(msg.flyers)) S.hostFlyers = true;
+        S.aimRows = Array.isArray(msg.aim) ? msg.aim : null;
+        S.holeRow = Array.isArray(msg.hole) && Array.isArray(msg.hole[0]) ? msg.hole[0] : null;
+        S.holeFresh = true;
+        funnels.feed(msg.tw);
+        sky.feed(Array.isArray(msg.env) ? msg.env[0] : null);
         S.altTarget.clear();
         if (Array.isArray(msg.alt)) for (const r of msg.alt) S.altTarget.set(r[0], r[1]);
         reconcileOwn(msg);
+        // The host's discrete shots for the mirror; the guest's own shooter id is dropped there (drawn once, at the press).
+        mirror.feed(msg.fx, msg.t, S.myId ? Number(S.myId) : -1);
       }
       return;
     }
     if (msg.type !== 'event') return;
-    if (!deduper.first(msg)) return;
+    if (dbg) { dbg.eventBytes(JSON.stringify(msg).length); dbg.eventIn(String(msg.kind)); }
+    if (!deduper.first(msg)) { if (dbg) dbg.eventIgnored(`${msg.kind}(dup/invalid)`); return; }
     const d = msg.data || {};
     switch (msg.kind) {
       case 'welcome':
@@ -1316,8 +1820,11 @@ export function createNetSystem(ctx) {
         S.peerReadyShown = true;
         // The same town as the host's first: the reset it triggers puts the
         // panel and the camera back to defaults, which the peer view then locks.
+        sky.release();
         if (Number.isFinite(d.seed)) applySeed(d.seed >>> 0);
         S.pred = newPrediction();
+        mirror.reset();
+        funnels.release();
         enterPeerView();
         say('You are ROGER 2: W S run, A D turn, right-click raises the weapon (then the mouse looks). Hero asks the host to bring you in.');
         setStatus();
@@ -1342,8 +1849,26 @@ export function createNetSystem(ctx) {
         if (Number(d.id) === Number(S.myId)) say(d.on ? 'INVINCIBLE · nothing can hurt you' : 'Invincible off');
         break;
       case 'mission': S.peerMission = { id: String(d.id), value: Number(d.value), goal: Number(d.goal), left: Number(d.left) }; break;
-      case 'score': if (Number(d.id) === Number(S.myId)) say(`+${Number(d.points) || 0}`); break;
+      case 'score': {
+        // The guest's own points: the "+N" and the crosshair's hit marker (the red a target turns it). The
+        // event names only the player credited, so the partner's points are not shown (the host's own are not sent).
+        const m = scoreMarker(d, Number(S.myId));
+        if (m && m.own) {
+          say(`+${m.points}`);
+          if (S.cross) { S.cross.classList.add('on'); S.hitMark = HIT_MARK_SECONDS; }
+        }
+        break;
+      }
+      case 'explosion': {
+        // The host's blast, drawn here and nowhere else (cosmetic: no damage, no shake, no bus event).
+        const p = explosionParams(d);
+        if (!p) { if (dbg) dbg.eventIgnored('explosion(invalid)'); break; }
+        ctx.systems.explosions.cosmeticExplosion(p.x, p.y, p.z, p.strength, explosionSound.allow(performance.now()));
+        break;
+      }
       default:
+        // No handler: the event is dropped here.
+        if (dbg) dbg.eventIgnored(String(msg.kind));
     }
   }
 
@@ -1416,6 +1941,14 @@ export function createNetSystem(ctx) {
   function restorePeerView() {
     const { controls, camera, renderer } = Sim.three;
     if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
+    showTownCars();
+    showLocalSky();
+    clearFires();
+    clearFlood();
+    clearQuake();
+    clearStorm();
+    clearFirenado();
+    if (ctx.systems.meteors) ctx.systems.meteors.clearMirror();
     // Let go of the input pipeline, unless a local Hero run holds it (it cannot
     // while this is a peer, but leaving must never take Roger's keys away).
     if (!(ctx.Hero && ctx.Hero.active)) ctx.systems.playerInput.detachInput();
@@ -1471,32 +2004,449 @@ export function createNetSystem(ctx) {
    */
   function disposeProxy(obj) {
     if (obj.userData.owned) disposeRoger(obj, obj.userData.owned);
+    // The Yeti's fur strands are instanced meshes with a buffer of their own per clone.
+    if (obj.userData.giant) obj.traverse((/** @type {any} */ c) => { if (c.isInstancedMesh) c.dispose(); });
+    // HAVOC's heat and visor and a samurai's slash trail are made for each figure.
+    const fig = obj.userData.figure;
+    if (fig && fig.own) for (const m of fig.own) m.dispose();
+    // A GHOST jet's cloak materials are made for each jet.
+    const fly = obj.userData.flyer;
+    if (fly && fly.own) for (const m of fly.own) m.dispose();
   }
 
-  /** @param {string} kind @param {number} [id] Player id, for the players kind. @returns {THREE.Object3D} */
-  function makeProxy(kind, id = 0) {
+  /** @type {{template: any, joints: any}|null} the real Terminator, built once per session (its geometry and materials are shared by every proxy) */
+  let termKit = null;
+
+  /**
+   * One Terminator figure for a proxy: a clone of the host's own model
+   * (terminator/model.js through `ctx.systems.terminator.buildModel`), sharing
+   * the template's geometry and materials. Null when the system is absent.
+   * @returns {{root: THREE.Object3D, joints: any}|null}
+   */
+  function terminatorFigure() {
+    if (!termKit) {
+      const sys = ctx.systems.terminator;
+      if (!sys || !sys.buildModel) return null;
+      const unit = sys.buildModel();
+      for (const g of unit.geometries) keepGeo(g);
+      for (const m of unit.materials) keepMat(m);
+      termKit = { template: unit.root, joints: unit.joints };
+    }
+    const root = termKit.template.clone(true);
+    return { root, joints: mapJoints(termKit.template, root, termKit.joints) };
+  }
+
+  /** @type {Record<string, {template: THREE.Object3D, limbs: any}|null>} the real alien and the real saucer, each built once per session (shared geometry and materials) */
+  const aliensKit = { alien: null, saucer: null };
+
+  /**
+   * One alien or saucer figure for a proxy: a clone of the host's own model
+   * (`ctx.systems.aliens.buildGuestModel`), sharing the template's geometry
+   * and materials. Null when the system is absent.
+   * @param {'alien'|'saucer'} which
+   * @returns {{root: THREE.Object3D, limbs: any}|null}
+   */
+  function aliensFigure(which) {
+    let kit = aliensKit[which];
+    if (!kit) {
+      const sys = ctx.systems.aliens;
+      const unit = sys && sys.buildGuestModel ? sys.buildGuestModel(which) : null;
+      if (!unit) return null;
+      for (const g of unit.geometries) keepGeo(g);
+      for (const m of unit.materials) keepMat(m);
+      kit = aliensKit[which] = { template: unit.root, limbs: unit.limbs };
+    }
+    const root = kit.template.clone(true);
+    return { root, limbs: kit.limbs ? mapJoints(kit.template, root, kit.limbs) : null };
+  }
+
+  /** @type {Array<{template: THREE.Object3D, joints: any, mats: any, colours: any, stride: number, speed: number}|null>} the real T-Rex (0) and Yeti (1), each built once per session (shared geometry and materials) */
+  const giantKits = [null, null];
+
+  /**
+   * One cyber T-Rex or Yeti for a proxy: a clone of the host's own model
+   * (`ctx.systems.trex` or `yeti` `.buildGuestModel`), sharing the template's
+   * geometry and materials. Null when the system is absent.
+   * @param {number} id GIANT.trex or GIANT.yeti.
+   * @returns {{root: THREE.Object3D, joints: any, kit: any}|null}
+   */
+  function giantFigure(id) {
+    let kit = giantKits[id];
+    if (!kit) {
+      const sys = id === GIANT.yeti ? ctx.systems.yeti : ctx.systems.trex;
+      const unit = sys && sys.buildGuestModel ? sys.buildGuestModel() : null;
+      if (!unit) return null;
+      for (const g of unit.geometries) keepGeo(g);
+      for (const m of unit.materials) keepMat(m);
+      kit = giantKits[id] = { template: unit.root, joints: unit.joints, mats: unit.mats, colours: unit.colours, stride: unit.stride, speed: unit.speed };
+    }
+    const root = kit.template.clone(true);
+    return { root, joints: mapJoints(kit.template, root, kit.joints), kit };
+  }
+
+  /**
+   * Poses a giant proxy from an interpolated `giants` row.
+   * @param {THREE.Object3D} obj The proxy.
+   * @param {number[]} row
+   * @param {number} dt
+   * @param {number} t Snapshot clock, seconds.
+   * @returns {void}
+   */
+  function poseGiant(obj, row, dt, t) {
+    const gd = obj.userData.giant;
+    obj.position.set(row[1], 0, row[2]);
+    if (!gd) return;
+    const amount = stepRunCycle(gd.run, row[1], row[2], dt, gd.kit.stride, gd.kit.speed);
+    const fall = fallPose(row[0], row[4], row[5]);
+    obj.rotation.set(fall.rx, row[3], fall.rz);
+    obj.position.y = fall.y;
+    if (row[0] === GIANT.yeti) poseYeti(gd.joints, gd.kit.mats, gd.kit.colours, gd.run.phase, amount, row[4], row[5], row[6], t);
+    else poseTrex(gd.joints, gd.kit.mats, gd.kit.colours, gd.run.phase, amount, row[4], row[5], t);
+  }
+
+  /** @type {{unit: any, meshes: Record<string, THREE.InstancedMesh>, runs: Map<number, import('./rogerView.js').RunCycle>, scratch: ReturnType<typeof newReplicaScratch>, heat: number}|null} Patient Zero's real geometry and materials, the clones' six instanced meshes, built on first sight (released in `clearProxies`) */
+  let replicaKit = null;
+
+  /**
+   * The Replicator's kit, built on first use: the host's own geometry and glow
+   * materials (`ctx.systems.patientZero.buildGuestModel`) and one instanced
+   * mesh per part for the clones. Null when the system is absent or the
+   * session has no proxy root.
+   * @returns {NonNullable<typeof replicaKit>|null}
+   */
+  function replicator() {
+    if (replicaKit) return replicaKit;
+    const sys = ctx.systems.patientZero;
+    if (!sys || !sys.buildGuestModel || !S.proxyRoot) return null;
+    const unit = sys.buildGuestModel();
+    for (const g of unit.geometries) keepGeo(g);
+    for (const m of unit.materials) keepMat(m);
+    /** @type {Record<string, THREE.InstancedMesh>} */
+    const meshes = {};
+    for (const name of Object.keys(unit.partGeo)) {
+      const m = new THREE.InstancedMesh(unit.partGeo[name], unit.cloneMat, unit.consts.maxClones);
+      m.count = 0;
+      m.frustumCulled = false;
+      m.castShadow = true;
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      S.proxyRoot.add(m);
+      meshes[name] = m;
+    }
+    replicaKit = { unit, meshes, runs: new Map(), scratch: newReplicaScratch(), heat: 0 };
+    return replicaKit;
+  }
+
+  /**
+   * Draws the clones (one instanced mesh per part) from the interpolated rows
+   * and sets the glow of both materials. Visual only.
+   * @param {Map<number, number[]>} rows The `clones` rows.
+   * @param {Map<number, number[]>} originals The `replicator` rows.
+   * @param {number} dt
+   * @param {number} t Snapshot clock, seconds.
+   * @returns {void}
+   */
+  function drawClones(rows, originals, dt, t) {
+    if (!rows.size && !replicaKit) return;
+    const kit = replicator();
+    if (!kit) return;
+    const c = kit.unit.consts;
+    writeClones(kit.meshes, rows, kit.runs, dt, c.stride, c.maxClones, kit.scratch);
+    const o = originals.get(0);
+    kit.heat = easeHeat(kit.heat, standingCount(rows.values()), c.trigger, dt);
+    const g = glowLevels(o ? o[7] : 1, kit.heat, !!o && o[5] > 0, t, c.heatFlare);
+    kit.unit.cloneMat.userData.glow.value = g.cloneGlow;
+    kit.unit.cloneMat.userData.tint.value.setRGB(1, 1, 1).lerp(c.heatTint, g.cloneHeat);
+    kit.unit.originalMat.userData.glow.value = g.originalGlow;
+    kit.unit.originalMat.userData.tint.value.setRGB(1, 1, 1).lerp(c.heatTint, g.originalHeat);
+  }
+
+  /** @type {{hank: any, havoc: any, samurai: any}} Hank's template, HAVOC's kit and the samurai's kit, each built on first sight (geometry and materials released in `clearProxies`) */
+  const figureKits = { hank: null, havoc: null, samurai: null };
+
+  /**
+   * One Hank, HAVOC or samurai for a proxy, from the host's own builders
+   * (`actionHero`, `gunner`, `spaceship` `.buildGuestModel`). Null when the
+   * system is absent.
+   * @param {number} type FIGURE.*
+   * @param {number} variant The samurai's armour colour.
+   * @returns {{root: THREE.Object3D, data: any}|null}
+   */
+  function figureFor(type, variant) {
+    if (type === FIGURE.hank) {
+      let kit = figureKits.hank;
+      if (!kit) {
+        const sys = ctx.systems.actionHero;
+        const unit = sys && sys.buildGuestModel ? sys.buildGuestModel() : null;
+        if (!unit) return null;
+        for (const g of unit.geometries) keepGeo(g);
+        for (const m of unit.materials) keepMat(m);
+        kit = figureKits.hank = unit;
+      }
+      const root = kit.root.clone(true);
+      return { root, data: { joints: mapJoints(kit.root, root, kit.joints), kit, has: newHankPose(), want: newHankPose(), run: newRunCycle() } };
+    }
+    if (type === FIGURE.havoc) {
+      let kit = figureKits.havoc;
+      if (!kit) {
+        const sys = ctx.systems.gunner;
+        const unit = sys && sys.buildGuestModel ? sys.buildGuestModel() : null;
+        if (!unit) return null;
+        for (const g of unit.geometries) keepGeo(g);
+        for (const m of unit.materials) keepMat(m);
+        kit = figureKits.havoc = unit;
+      }
+      const look = kit.build();
+      return { root: look.root, data: { parts: look, own: look.own, run: newRunCycle() } };
+    }
+    let kit = figureKits.samurai;
+    if (!kit) {
+      const sys = ctx.systems.spaceship;
+      kit = sys && sys.buildGuestModel ? sys.buildGuestModel() : null;
+      if (!kit) return null;
+      figureKits.samurai = kit;
+    }
+    const rig = kit.build(variant);
+    return { root: rig.root, data: { parts: rig, consts: kit.consts, own: [rig.trailMat], run: newRunCycle() } };
+  }
+
+  /**
+   * Poses a Hank, HAVOC or samurai proxy from an interpolated `figures` row.
+   * @param {THREE.Object3D} obj The proxy.
+   * @param {number[]} row
+   * @param {number} dt
+   * @param {number} t Snapshot clock, seconds.
+   * @returns {void}
+   */
+  function poseFigure(obj, row, dt, t) {
+    obj.position.set(row[2], row[3], row[4]);
+    obj.rotation.set(0, row[5], 0);
+    const fd = obj.userData.figure;
+    if (!fd) return;
+    const type = row[1];
+    if (type === FIGURE.hank) {
+      const amount = stepRunCycle(fd.run, row[2], row[4], dt, fd.kit.stride, fd.kit.speed);
+      hankWant(row[6], row[7], row[8], fd.run.phase, amount, t, fd.want);
+      applyHank(fd.joints, fd.has, fd.want, dt);
+      fd.kit.magma.emissiveIntensity = hankGlow(row[6], row[7]);
+    } else if (type === FIGURE.havoc) {
+      const amount = stepRunCycle(fd.run, row[2], row[4], dt, 7 / GUNNER.walkSpeed, GUNNER.walkSpeed);
+      poseHavoc(fd.parts, row[6], row[7], row[8], fd.run.phase, amount, t, dt);
+    } else {
+      const c = fd.consts;
+      const amount = stepRunCycle(fd.run, row[2], row[4], dt, 1.5, c.runSpeed);
+      obj.rotation.x = poseSamurai(fd.parts, c, row[6], row[7], fd.run.phase, amount).tilt;
+    }
+  }
+
+  /** @type {{jet: any, chopper: any, mothership: any, cow: any, spotless: any}} the real jet, helicopter, mothership, cow and Spotless builders, each made on first sight (geometry and materials released in `clearProxies`; the single helicopter, ship and giant are kept and re-used) */
+  const flyerKits = { jet: null, chopper: null, mothership: null, cow: null, spotless: null };
+
+  /**
+   * One jet, helicopter, mothership, cow or Captain Spotless for a proxy, from
+   * the host's own builders (`airSupport`, `newsChopper`, `mothership`, `cows`,
+   * `cleaner` `.buildGuestModel`). Null when the system is absent.
+   * @param {number} type FLYER.*
+   * @param {number} index The actor's index within its type.
+   * @returns {{root: THREE.Object3D, data: any}|null}
+   */
+  function flyerFigure(type, index) {
+    const sys = ctx.systems;
+    /** @param {{geometries: THREE.BufferGeometry[], materials: THREE.Material[]}} unit */
+    const keep = (unit) => { for (const g of unit.geometries) keepGeo(g); for (const m of unit.materials) keepMat(m); };
+    if (type === FLYER.jet) {
+      let kit = flyerKits.jet;
+      if (!kit) {
+        kit = sys.airSupport && sys.airSupport.buildGuestModel ? sys.airSupport.buildGuestModel() : null;
+        if (!kit) return null;
+        keep(kit);
+        flyerKits.jet = kit;
+      }
+      const look = kit.build();
+      return { root: look.group, data: { type, look, reach: kit.reach, index, own: look.materials } };
+    }
+    if (type === FLYER.cow) {
+      let kit = flyerKits.cow;
+      if (!kit) {
+        kit = sys.cows && sys.cows.buildGuestModel ? sys.cows.buildGuestModel() : null;
+        if (!kit) return null;
+        keep(kit);
+        flyerKits.cow = kit;
+      }
+      const root = kit.build(index);
+      return { root, data: { type, head: root.userData.head } };
+    }
+    const name = type === FLYER.chopper ? 'chopper' : type === FLYER.mothership ? 'mothership' : 'spotless';
+    let unit = flyerKits[name];
+    if (!unit) {
+      const owner = type === FLYER.chopper ? sys.newsChopper : type === FLYER.mothership ? sys.mothership : sys.cleaner;
+      unit = owner && owner.buildGuestModel ? owner.buildGuestModel() : null;
+      if (!unit) return null;
+      keep(unit);
+      // The helicopter's livery is a texture; it is released with the materials.
+      if (unit.textures) for (const tx of unit.textures) keepMat(/** @type {any} */ (tx));
+      flyerKits[name] = unit;
+    }
+    return { root: unit.root, data: { type, unit } };
+  }
+
+  /**
+   * Poses a flyer proxy from an interpolated `flyers` row.
+   * @param {THREE.Object3D} obj The proxy.
+   * @param {number[]} row
+   * @param {number} t Snapshot clock, seconds.
+   * @returns {void}
+   */
+  function poseFlyerProxy(obj, row, t) {
+    poseFlyer(obj, row);
+    const fd = obj.userData.flyer;
+    if (!fd) return;
+    const type = row[1];
+    if (type === FLYER.jet) {
+      const L = fd.look;
+      const jl = jetLook(row[9], row[8], t, fd.index, 0.85 + 0.3 * (0.5 + 0.5 * Math.sin(t * 40 + fd.index)), fd.reach);
+      L.uniforms.uReveal.value = jl.reveal;
+      L.uniforms.uEdge.value = 1;
+      L.uniforms.uTime.value = t + fd.index * 3.1;
+      L.uniforms.uShell.value = 0.5;
+      for (const f of L.flames) { f.visible = jl.shown; f.scale.set(jl.flameWidth, jl.flameWidth, jl.flameLength); }
+      for (const l of L.lights) l.visible = jl.shown;
+      L.strobe.visible = jl.strobe;
+    } else if (type === FLYER.chopper) {
+      const u = fd.unit;
+      const cl = chopperLook(row[8], t, CHOPPER.storm);
+      u.rotor.rotation.y = cl.rotor;
+      u.tailRotor.rotation.x = cl.tail;
+      u.beacon.visible = cl.beacon;
+      u.beam.rotation.set(cl.beamTilt, 0, 0);
+      u.beam.material.opacity = cl.beamOpacity;
+    } else if (type === FLYER.cow) {
+      if (fd.head) fd.head.position.y = headHeight(row[9]);
+    } else if (type === FLYER.spotless) {
+      const u = fd.unit;
+      const sl = spotlessLook(row[9], u.stride);
+      u.legs[0].rotation.x = sl.left;
+      u.legs[1].rotation.x = sl.right;
+      u.waveMat.opacity = sl.wave;
+      u.wave.rotation.z = t * 1.5;
+    }
+  }
+
+  /** @type {Map<number, THREE.Object3D>} the real car, one template per body colour, built on first sight (shared geometry; each colour's paint is released in `clearProxies`) */
+  const carKits = new Map();
+
+  /**
+   * One car for a proxy: a clone of the host's own model
+   * (`ctx.systems.cars.buildGuestModel`) in a body colour. Null when absent.
+   * @param {number} colour Index of the body colour.
+   * @returns {THREE.Object3D|null}
+   */
+  function carFigure(colour) {
+    const sys = ctx.systems.cars;
+    if (!sys || !sys.buildGuestModel) return null;
+    const index = colourIndex(colour, sys.colourCount);
+    let template = carKits.get(index);
+    if (!template) {
+      const unit = sys.buildGuestModel(index);
+      for (const g of unit.geometries) keepGeo(g);
+      for (const m of unit.materials) keepMat(m);
+      template = unit.root;
+      carKits.set(index, template);
+    }
+    return template.clone(true);
+  }
+
+  /** @param {string} kind @param {number} [id] Player id, for the players kind. @param {number} [colour] Body colour, for the cars kind; the actor type for figures. @param {number} [variant] The samurai's armour colour. @returns {THREE.Object3D} */
+  function makeProxy(kind, id = 0, colour = 0, variant = 0) {
     if (kind === 'players') return makeRogerProxy(id);
     const g = new THREE.Group();
     const mat = (/** @type {number} */ c, o = 1) => /** @type {THREE.Material} */ (keepMat(new THREE.MeshStandardMaterial({ color: c, transparent: o < 1, opacity: o, roughness: 0.7 })));
     if (kind === 'terminators') {
-      const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(0.34, 1.4, 4, 8)), mat(0xc0392b));
-      body.position.y = 1.05;
-      g.add(body);
+      const fig = terminatorFigure();
+      if (fig) {
+        g.rotation.order = 'YXZ';
+        g.add(fig.root);
+        g.userData.joints = fig.joints;
+        g.userData.run = newRunCycle();
+      } else {
+        const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(0.34, 1.4, 4, 8)), mat(0xc0392b));
+        body.position.y = 1.05;
+        g.add(body);
+      }
     } else if (kind === 'aliens') {
-      const body = new THREE.Mesh(keepGeo(new THREE.SphereGeometry(0.6, 10, 8)), mat(0x7bff7b));
-      body.position.y = 0.7;
-      g.add(body);
+      const fig = aliensFigure('alien');
+      if (fig) {
+        g.add(fig.root);
+        g.userData.limbs = fig.limbs;
+        g.userData.run = newRunCycle();
+      } else {
+        const body = new THREE.Mesh(keepGeo(new THREE.SphereGeometry(0.6, 10, 8)), mat(0x7bff7b));
+        body.position.y = 0.7;
+        g.add(body);
+      }
     } else if (kind === 'ships') {
-      const disc = new THREE.Mesh(keepGeo(new THREE.CylinderGeometry(14, 14, 3, 20)), mat(0x9aa4b2));
-      g.add(disc);
+      const fig = aliensFigure('saucer');
+      if (fig) {
+        g.add(fig.root);
+        g.userData.yaw = 0;
+      } else {
+        const disc = new THREE.Mesh(keepGeo(new THREE.CylinderGeometry(14, 14, 3, 20)), mat(0x9aa4b2));
+        g.add(disc);
+      }
+    } else if (kind === 'cars') {
+      const car = carFigure(colour);
+      if (car) g.add(car);
+      else {
+        const box = new THREE.Mesh(keepGeo(new THREE.BoxGeometry(2, 1.3, 4.5)), mat(0x4a90e2));
+        box.position.y = 0.8;
+        g.add(box);
+      }
+    } else if (kind === 'replicator') {
+      const kit = replicator();
+      if (kit) {
+        const fig = kit.unit.makeFigure();
+        g.add(fig.root);
+        g.userData.replica = { fig, run: newRunCycle() };
+      } else {
+        const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(0.4, 1.6, 4, 8)), mat(0x3a8f4a));
+        body.position.y = 1.2;
+        g.add(body);
+      }
+    } else if (kind === 'giants') {
+      const fig = giantFigure(id);
+      if (fig) {
+        g.add(fig.root);
+        g.userData.giant = { joints: fig.joints, kit: fig.kit, run: newRunCycle() };
+      } else {
+        const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(2, 8, 4, 8)), mat(id === GIANT.yeti ? 0xdfeaf5 : 0x4f7a3a));
+        body.position.y = 5;
+        g.add(body);
+      }
+    } else if (kind === 'figures') {
+      const fig = figureFor(colour, variant);
+      if (fig) {
+        g.rotation.order = 'YXZ';
+        g.add(fig.root);
+        g.userData.figure = fig.data;
+      } else {
+        const body = new THREE.Mesh(keepGeo(new THREE.CapsuleGeometry(0.4, 1.6, 4, 8)), mat(colour === FIGURE.samurai ? 0x8e1b1b : colour === FIGURE.havoc ? 0x4a5240 : 0x8d8780));
+        body.position.y = 1.2;
+        g.add(body);
+      }
+    } else if (kind === 'flyers') {
+      // `colour` is the actor type, `variant` its index within the type.
+      const fig = flyerFigure(colour, variant);
+      if (fig) {
+        g.rotation.order = 'YXZ';
+        g.add(fig.root);
+        g.userData.flyer = fig.data;
+      } else {
+        const body = new THREE.Mesh(keepGeo(new THREE.BoxGeometry(4, 1.5, 8)), mat(0x9aa4b2));
+        g.add(body);
+      }
     } else if (kind === 'vehicles') {
       const box = new THREE.Mesh(keepGeo(new THREE.BoxGeometry(2, 1.3, 4.5)), mat(0x4a90e2));
       box.position.y = 0.8;
       g.add(box);
-    } else {
-      const cone = new THREE.Mesh(keepGeo(new THREE.CylinderGeometry(1, 0.15, 1, 20, 1, true)), mat(0x8c96a3, 0.45));
-      cone.position.y = 0.5;
-      g.add(cone);
     }
     return g;
   }
@@ -1511,15 +2461,8 @@ export function createNetSystem(ctx) {
   const viewParts = new Map();
   /** The guest's own shot feedback (flash, recoil, barrel spin), predicted, cosmetic (shotFeedback.js). */
   let feedback = newFeedback();
-  /** @type {ReturnType<typeof createBullets>|null} the guest's own round pool, for its tracers (made on the first shot) */
-  let rounds = null;
   /** @type {ReturnType<typeof createTrexFlames>|null} the guest's own Fire Gun flames (cosmetic: no burning, made on first use) */
   let flames = null;
-  /** Tracers alive at once in the guest's own pool (the minigun's 0.09 s shots at up to 220 m, 320 m/s: about 8). */
-  const GUEST_TRACERS = 32;
-  /** The wheel keys whose shot draws a tracer: the three guns, and the Black Hole Gun's bolt. */
-  const TRACER_KEYS = new Set(['rifle', 'minigun', 'railgun', 'blackhole']);
-  const noLanding = () => {};
   const viewAt = { x: 0, y: 0, z: 0 };
   const viewVec = new THREE.Vector3();
   /** @type {{view: THREE.Group, holder: THREE.Group}|null} the Katana's first-person blade */
@@ -1614,48 +2557,134 @@ export function createNetSystem(ctx) {
   }
 
   /**
-   * One tracer from just ahead of the guest's eye along its aim, in its own
-   * round pool (hero/bullets.js, no hit, no casing: cosmetic; the host
-   * resolves the shot). Predicted like the flash, so it shows even for a shot
-   * the host refuses.
+   * The guest's own shot, drawn at the press from just ahead of its eye along
+   * its aim, through the mirror (net/mirror.js): the minigun's round with its
+   * casing and sparks, the railgun's bolt, or the rifle's plasma beam. (The Black
+   * Hole Gun's shot is its flash and zap alone, as on the host.) Cosmetic and predicted like
+   * the flash, so it shows even for a shot the host refuses; the host resolves
+   * the shot and never sends it back (the mirror's queue drops it).
+   * @param {string} key the wheel key that fired
    * @param {THREE.Camera} cam the guest's camera, already looking
    * @param {{range: number}|null} w the weapon's table entry
    * @returns {void}
    */
-  function drawTracer(cam, w) {
+  function drawShot(key, cam, w) {
     if (!w) return;
-    rounds = rounds || createBullets(ctx, { max: GUEST_TRACERS, casings: 0 });
     cam.getWorldDirection(viewVec);
     muzzleVec.copy(cam.position).addScaledVector(viewVec, 0.8);
     muzzleVec.y -= 0.2;
     tracerEnd.copy(cam.position).addScaledVector(viewVec, w.range);
-    rounds.fire(muzzleVec, tracerEnd, null, null, null);
+    if (key === 'minigun') mirror.drawOwn('bullet', muzzleVec, tracerEnd);
+    else if (key === 'railgun') mirror.drawOwn('rail', muzzleVec, tracerEnd);
+    else if (key === 'rifle') mirror.drawOwn('plasma', muzzleVec, tracerEnd);
   }
 
   /**
-   * The Fire Gun's flame from the guest's muzzle: the same particles and
-   * roar as the host's, in the guest's own pool. Cosmetic: the burning is
-   * the host's `guestFlame`.
+   * The host's Black Hole on this screen: its `hole` row drives the render-only copy in
+   * `player/blackHole.js` (`mirror`), timed here (the collapse from the closing flag
+   * flipping). Off when the row is gone. No play: the hole's pull is the host's.
+   * @param {number} dt
+   * @returns {void}
+   */
+  function driveHole(dt) {
+    const bh = ctx.systems.blackHole;
+    if (!bh) return;
+    const c = S.holeClock;
+    const on = stepHoleClock(c, S.holeRow, S.holeFresh, dt);
+    S.holeFresh = false;
+    if (on) bh.mirror(c.x, c.z, c.age, c.closing); else bh.mirrorOff();
+  }
+
+  /** @type {{mx: number, my: number, mz: number, dx: number, dy: number, dz: number}} scratch: one flame's muzzle and direction */
+  const flameAt = { mx: 0, my: 0, mz: 0, dx: 0, dy: 0, dz: 0 };
+  /** The roar has been asked for this frame (one `fireGun` voice per screen: the own flame first, else the first partner's). */
+  let roared = false;
+
+  /**
+   * One Fire Gun flame from `muzzleVec` along `viewVec`, into the guest's one shared pool
+   * (its own predicted flame and the host's partner flames; the pool and its
+   * `particleRoom()` gate are `createTrexFlames`'). Cosmetic: the burning is the host's
+   * `guestFlame`. The pool is stepped once a frame by `stepFlames`.
+   * @param {number} dt real seconds
+   * @returns {void}
+   */
+  function emitFlame(dt) {
+    if (!flames) { flames = createTrexFlames(ctx, { size: FIRE_GUN.flameSize, alpha: FIRE_GUN.flameAlpha, name: 'guest_fire_gun_flames' }); flames.init(); }
+    flames.emit(muzzleVec, viewVec, Math.round(FIRE_GUN.rate * dt + Math.random()));
+    if (!roared) { roared = true; ctx.systems.creatureSounds.loop('fireGun', muzzleVec, 0.9); }
+  }
+
+  /**
+   * The guest's own flame, from its camera.
    * @param {THREE.Camera} cam the guest's camera, already looking
    * @param {number} dt real seconds
    * @returns {void}
    */
   function breatheFlame(cam, dt) {
-    if (!flames) { flames = createTrexFlames(ctx, { size: FIRE_GUN.flameSize, alpha: FIRE_GUN.flameAlpha, name: 'guest_fire_gun_flames' }); flames.init(); }
     cam.getWorldDirection(viewVec);
     muzzleVec.copy(cam.position).addScaledVector(viewVec, 0.8 + FIRE_GUN.ahead);
     muzzleVec.y -= 0.2;
-    flames.emit(muzzleVec, viewVec, Math.round(FIRE_GUN.rate * dt + Math.random()));
-    flames.update(dt);
-    ctx.systems.creatureSounds.loop('fireGun', muzzleVec, 0.9);
+    emitFlame(dt);
+  }
+
+  /**
+   * The other players' flames, from the newest snapshot's `aim` rows: each player whose Fire Gun
+   * bit is set (not the guest's own: `flameWanted`) breathes from their interpolated position at
+   * their real height, along the row's aim. State, not events: a clear bit or a vanished row
+   * emits nothing. Then the shared pool is stepped, once.
+   * @param {Map<number, number[]>|undefined} players the interpolated `players` rows
+   * @param {number} dt real seconds
+   * @returns {void}
+   */
+  function stepFlames(players, dt) {
+    const rows = S.aimRows;
+    if (rows && players) {
+      const own = S.myId ? Number(S.myId) : -1;
+      for (const r of rows) {
+        if (!flameWanted(r, own)) continue;
+        const p = players.get(r[0]);
+        if (!p || p[4] !== 0) continue;
+        flameMuzzle(flameAt, p[1], p[2], S.altNow.get(r[0]) || 0, r[1], r[2], EYE);
+        muzzleVec.set(flameAt.mx + flameAt.dx * FIRE_GUN.ahead, flameAt.my + flameAt.dy * FIRE_GUN.ahead, flameAt.mz + flameAt.dz * FIRE_GUN.ahead);
+        viewVec.set(flameAt.dx, flameAt.dy, flameAt.dz);
+        emitFlame(dt);
+      }
+    }
+    if (flames) flames.update(dt);
+  }
+
+  /**
+   * The jetpack flames and smoke on every figure whose `aim` row says its pack burns, the viewer's
+   * own and the partner's: the pack and the flames are `hero/jetpack.js` `showRemoteJet` (the host's own
+   * model, pooled smoke, drawing only), placed where the figure's proxy stands, at its eased height.
+   * State, not events: a clear bit or a vanished row draws nothing. Then the frame is closed (once).
+   * @param {Map<number, number[]>|undefined} players the interpolated `players` rows
+   * @param {number} dt real seconds
+   * @returns {void}
+   */
+  function stepJets(players, dt) {
+    const h = hero();
+    const rows = S.aimRows;
+    const proxies = S.proxies.get('players');
+    if (rows && players && proxies) {
+      for (const r of rows) {
+        if (!jetWanted(r)) continue;
+        const row = players.get(r[0]);
+        const obj = proxies.get(r[0]);
+        if (!row || !obj || row[4] !== 0) continue;
+        const alt = S.altNow.get(r[0]) || 0;
+        const prev = jetAlt.get(r[0]);
+        jetAlt.set(r[0], alt);
+        h.showRemoteJet(r[0], obj.position.x, alt, obj.position.z, obj.rotation.y, climbFrom(prev === undefined ? alt : prev, alt, dt, JETPACK.climbSpeed), dt);
+      }
+    }
+    h.stepRemoteJets(dt);
   }
 
   /** Takes every viewmodel out of the scene (their geometry is released with `S.geos`). @returns {void} */
   function clearViewmodels() {
     if (flames) flames.release();
     flames = null;
-    if (rounds) rounds.dispose();
-    rounds = null;
     for (const g of viewGroups.values()) g.removeFromParent();
     viewGroups.clear();
     viewParts.clear();
@@ -1670,10 +2699,19 @@ export function createNetSystem(ctx) {
     if (S.proxyRoot) Sim.three.scene.remove(S.proxyRoot);
     S.proxyRoot = null;
     S.proxies.clear();
+    if (replicaKit) for (const m of Object.values(replicaKit.meshes)) m.dispose();
+    replicaKit = null;
     for (const g of S.geos) g.dispose();
     for (const m of S.mats) m.dispose();
     S.geos = [];
     S.mats = [];
+    termKit = null;
+    carKits.clear();
+    giantKits[0] = giantKits[1] = null;
+    if (figureKits.samurai) figureKits.samurai.release();
+    figureKits.hank = figureKits.havoc = figureKits.samurai = null;
+    aliensKit.alien = aliensKit.saucer = null;
+    flyerKits.jet = flyerKits.chopper = flyerKits.mothership = flyerKits.cow = flyerKits.spotless = null;
   }
 
   /**
@@ -1817,6 +2855,194 @@ export function createNetSystem(ctx) {
     }
   }
 
+  /** @type {Map<number, number[]>} no rows, for a kind that is not drawn */
+  const NO_ROWS = new Map();
+
+  /**
+   * While the host's cars arrive as `cars` rows, the guest's own town cars
+   * (parked, and its idle street traffic, which has its own randomness) would
+   * stand under them: they are hidden, and put back by `showTownCars` on
+   * leaving. An older host sends no `cars`, and the guest's cars stay.
+   * @returns {void}
+   */
+  function hideTownCars() {
+    if (!S.hostCars) return;
+    for (const car of ctx.Environment.cars) {
+      const m = car.mesh;
+      if (m && m.visible) { m.visible = false; S.hiddenCars.push(m); }
+    }
+  }
+
+  /** The guest's own town cars, back (leaving the host's view). @returns {void} */
+  function showTownCars() {
+    for (const m of S.hiddenCars) m.visible = true;
+    S.hiddenCars.length = 0;
+  }
+
+  /**
+   * While the host's cows, helicopter, jets, mothership and Captain Spotless
+   * arrive as `flyers` rows, the guest's own (a herd grazing, a helicopter
+   * circling, jets arriving on their own clock) would stand under them: they
+   * are held back, a few times a second so a system that shows its own
+   * again (a reset) does not slip through, and put back by `showLocalSky` on
+   * leaving. An older host sends no `flyers`, and the guest's own stay.
+   * @param {number} dt
+   * @returns {void}
+   */
+  function hideLocalSky(dt) {
+    if (!S.hostFlyers) return;
+    S.skyHideAcc += dt;
+    if (S.skyHideAcc < 0.5) return;
+    S.skyHideAcc = 0;
+    const s = ctx.systems;
+    for (const owner of [s.cows, s.newsChopper, s.airSupport, s.mothership, s.cleaner]) {
+      if (!owner || !owner.localRoots) continue;
+      for (const m of owner.localRoots()) if (m.visible) { m.visible = false; S.hiddenSky.push(m); }
+    }
+  }
+
+  let firesDrawn = false;
+
+  /**
+   * The host's fires (the `fires` rows, every type) into the four fire
+   * systems' render-only entries; each takes its own type and sets what it
+   * draws, nothing burns, spreads or scores here. Called every frame while
+   * viewing the host, with an empty map when the host sends none.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function drawFires(rows) {
+    const s = ctx.systems;
+    if (rows.size) firesDrawn = true;
+    else if (!firesDrawn) return;
+    if (s.buildingFire) s.buildingFire.mirror(rows);
+    if (s.firenado) s.firenado.mirrorGroundFire(rows);
+    if (s.fuelFire) s.fuelFire.mirror(rows);
+    if (s.gasMains) s.gasMains.mirror(rows);
+  }
+
+  /** The host's fires gone (leaving the host's view): every fire system back to its start. @returns {void} */
+  function clearFires() {
+    if (!firesDrawn) return;
+    firesDrawn = false;
+    const s = ctx.systems;
+    if (s.buildingFire) s.buildingFire.resetBuildingFire();
+    if (s.firenado) s.firenado.mirrorGroundFire(NO_ROWS);
+    if (s.fuelFire) s.fuelFire.resetFuelFire();
+    if (s.gasMains) s.gasMains.resetGasMains();
+  }
+
+  let floodDrawn = false;
+
+  /**
+   * The host's flood (the `flood` row) into the flood system's render-only
+   * entry; it draws the water, wave, spray and breach, nothing floods or
+   * breaks here. Called every frame while viewing the host, with an empty map
+   * when the host sends none.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function drawFlood(rows) {
+    if (rows.size) floodDrawn = true;
+    else if (!floodDrawn) return;
+    if (ctx.systems.flood) ctx.systems.flood.mirror(rows);
+  }
+
+  let stormDrawn = false;
+
+  /**
+   * The host's electric storm (the `storm` row) into the electric storm's
+   * render-only entry: the column's arcs, shells, orbs, light and EMP ring on
+   * this screen's own funnel. Called every frame while viewing the host, with
+   * an empty map when the host sends none. Nothing is faulted, shocked,
+   * ignited, electrocuted or scored here.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function drawStorm(rows) {
+    if (rows.size) stormDrawn = true;
+    else if (!stormDrawn) return;
+    if (ctx.systems.electricStorm) ctx.systems.electricStorm.mirror(rows.get(0));
+  }
+
+  /** The host's storm gone (leaving the host's view): arcs, glow, light and ring cleared. @returns {void} */
+  function clearStorm() {
+    if (!stormDrawn) return;
+    stormDrawn = false;
+    if (ctx.systems.electricStorm) ctx.systems.electricStorm.mirror(undefined);
+  }
+
+  let firenadoDrawn = false;
+
+  /**
+   * The host's Firenado (the `firenado` row) into the firenado system's
+   * render-only entry: the flame column, embers, glow, light and roar on this
+   * screen's own funnel. Called every frame while viewing the host, with an
+   * empty map when the host sends none. Nothing is ignited, burnt or scored.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function drawFirenado(rows) {
+    if (rows.size) firenadoDrawn = true;
+    else if (!firenadoDrawn) return;
+    if (ctx.systems.firenado) ctx.systems.firenado.mirror(rows.get(0));
+  }
+
+  /** The host's fire gone (leaving the host's view): flames, glow, light and roar cleared. @returns {void} */
+  function clearFirenado() {
+    if (!firenadoDrawn) return;
+    firenadoDrawn = false;
+    if (ctx.systems.firenado) {
+      ctx.systems.firenado.mirror(undefined);
+      ctx.systems.firenado.resetFirenado();
+    }
+  }
+
+  let quakeDrawn = false;
+
+  /**
+   * The host's earthquake family (the `quake` rows) into each system's
+   * render-only entry: dust and rumble, the crack, the hole, the lava. Called
+   * every frame while viewing the host, with an empty map when the host sends
+   * none. Nothing shakes, falls in, is undermined or scored here.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function drawQuake(rows) {
+    if (rows.size) quakeDrawn = true;
+    else if (!quakeDrawn) return;
+    const sys = ctx.systems;
+    if (sys.earthquake) sys.earthquake.mirror(rows.get(quakeId(QUAKE.quake, 0)));
+    if (sys.chasm) sys.chasm.mirror(rows);
+    if (sys.sinkhole) sys.sinkhole.mirror(rows);
+    if (sys.fissures) sys.fissures.mirror(rows.get(quakeId(QUAKE.eruption, 0)));
+  }
+
+  /** The host's quake, chasms, holes and lava gone (leaving the host's view): all reset to this town's own. @returns {void} */
+  function clearQuake() {
+    if (!quakeDrawn) return;
+    quakeDrawn = false;
+    const sys = ctx.systems;
+    if (sys.earthquake) sys.earthquake.resetEarthquake();
+    if (sys.chasm) sys.chasm.resetChasms();
+    if (sys.sinkhole) sys.sinkhole.resetSinkholes();
+    if (sys.fissures) sys.fissures.resetFissures();
+  }
+
+  /** The host's flood gone (leaving the host's view): the dam rebuilt, water and spray cleared. @returns {void} */
+  function clearFlood() {
+    if (!floodDrawn) return;
+    floodDrawn = false;
+    if (ctx.systems.flood) ctx.systems.flood.mirror(NO_ROWS);
+  }
+
+  /** The guest's own cows, helicopter, jets, mothership and Spotless, back (leaving the host's view). @returns {void} */
+  function showLocalSky() {
+    for (const m of S.hiddenSky) m.visible = true;
+    S.hiddenSky.length = 0;
+    S.skyHideAcc = 1;
+  }
+
   /** @param {number} dt */
   function updatePeer(dt) {
     if (!S.peerReadyShown || !S.proxyRoot || !S.client) return;
@@ -1850,6 +3076,11 @@ export function createNetSystem(ctx) {
     const s = buffer.sample(performance.now() / 1000);
     if (!s) return;
     S.peerScore = s.score;
+    // The host's shots, on the snapshot clock (the round pool steps here, for the guest's own shot too).
+    mirror.update(s.t, dt);
+    driveHole(dt);
+    funnels.drive(s.kinds.tornadoes, dt);
+    roared = false;
     // Own avatar from the prediction while it runs (else from the host's row).
     const pv = S.pred.active && S.buttons.aim ? viewPoint(S.pred) : null;
     // Heights ease towards the newest snapshot's (the jetpack), and settle to the ground.
@@ -1859,7 +3090,21 @@ export function createNetSystem(ctx) {
       if (next < 0.01 && !S.altTarget.has(id)) S.altNow.delete(id); else S.altNow.set(id, next);
     }
     for (const [id, to] of S.altTarget) if (!S.altNow.has(id)) S.altNow.set(id, to);
-    for (const [kind, rows] of Object.entries(s.kinds)) {
+    hideTownCars();
+    hideLocalSky(dt);
+    for (const [kind, sampled] of Object.entries(s.kinds)) {
+      // The tornado is not a proxy: the guest's own funnels draw it (funnels.drive above).
+      if (kind === 'tornadoes') continue;
+      // The fires are not proxies either: the fire systems draw them with their own pools.
+      if (kind === 'fires') { drawFires(sampled); continue; }
+      if (kind === 'flood') { drawFlood(sampled); continue; }
+      if (kind === 'quake') { drawQuake(sampled); continue; }
+      if (kind === 'storm') { drawStorm(sampled); continue; }
+      if (kind === 'firenado') { drawFirenado(sampled); continue; }
+      // The moving-cars rows are the older host's: once `cars` arrives they are not drawn.
+      const rows = kind === 'vehicles' && S.hostCars ? NO_ROWS : sampled;
+      // The clones are one set of instanced meshes, not proxies.
+      if (kind === 'clones') { drawClones(sampled, s.kinds.replicator || NO_ROWS, dt, s.t); continue; }
       let map = S.proxies.get(kind);
       if (!map) { map = new Map(); S.proxies.set(kind, map); }
       for (const [id, obj] of [...map]) {
@@ -1868,13 +3113,29 @@ export function createNetSystem(ctx) {
       for (const [id, row] of rows) {
         const mine = kind === 'players' && String(id) === S.myId;
         let obj = map.get(id);
-        if (!obj) { obj = makeProxy(kind, id); map.set(id, obj); S.proxyRoot.add(obj); }
-        if (kind === 'tornadoes') {
-          obj.position.set(row[1], 0, row[2]);
-          obj.scale.set(row[3], 140, row[3]);
+        if (!obj) { obj = makeProxy(kind, id, kind === 'cars' ? row[7] : kind === 'figures' || kind === 'flyers' ? row[1] : 0, kind === 'figures' ? row[8] : kind === 'flyers' ? id - flyerId(row[1], 0) : 0); map.set(id, obj); S.proxyRoot.add(obj); }
+        if (kind === 'cars') {
+          poseCar(obj, row);
+        } else if (kind === 'giants') {
+          poseGiant(obj, row, dt, s.t);
+        } else if (kind === 'figures') {
+          poseFigure(obj, row, dt, s.t);
+        } else if (kind === 'flyers') {
+          poseFlyerProxy(obj, row, s.t);
+        } else if (kind === 'replicator') {
+          const rd = obj.userData.replica;
+          if (rd) {
+            const c = /** @type {NonNullable<typeof replicaKit>} */ (replicaKit).unit.consts;
+            const pace = stepRunCycle(rd.run, row[1], row[2], dt, c.stride, 4);
+            poseOriginal(rd.fig, row, pace, rd.run.phase, s.t, dt, c, /** @type {NonNullable<typeof replicaKit>} */ (replicaKit).scratch);
+          } else obj.position.set(row[1], 0, row[2]);
         } else if (kind === 'aliens' || kind === 'ships') {
           obj.position.set(row[1], row[2], row[3]);
           obj.rotation.y = row[4];
+          const al = obj.userData.limbs;
+          if (al) poseAlienWalk(al, obj.userData.run.phase, stepRunCycle(obj.userData.run, row[1], row[3], dt, ALIEN_STRIDE, ALIENS.walkSpeed));
+          // The row carries no saucer heading (always 0): it turns slowly, as the host's hovers.
+          if (kind === 'ships' && obj.userData.yaw !== undefined) obj.rotation.y = obj.userData.yaw = spinSaucer(obj.userData.yaw, dt);
         } else {
           const px = mine && pv ? pv.x : row[1], pz = mine && pv ? pv.z : row[2];
           obj.position.set(px, kind === 'players' ? (S.altNow.get(id) || 0) : 0, pz);
@@ -1885,7 +3146,11 @@ export function createNetSystem(ctx) {
             // The weapon in hand from the row's weapon column (5); hidden down or seated (vehicle column 7).
             obj.userData.held.show(heldKey(row[5], row[4] === 0, row[7] >= 0));
           }
-          if (kind === 'terminators') obj.rotation.x = row[4] === 0 ? 0 : -Math.PI / 2 + 0.1;
+          if (kind === 'terminators') {
+            obj.rotation.x = lieAngle(row[4]);
+            const tj = obj.userData.joints;
+            if (tj) poseWalk(tj, obj.userData.run.phase, row[4] === 0 ? stepRunCycle(obj.userData.run, px, pz, dt, T800.stride / T800.scale, T800.speed) : 0);
+          }
         }
         if (mine) S.peerRow = row;
         else if (kind === 'players') partnerRows.set(id, row);
@@ -1912,15 +3177,15 @@ export function createNetSystem(ctx) {
       const step = stepFeedback(feedback, { fire: S.buttons.fire || S.fireLatch.pending, aim: S.buttons.aim, up: me[4] === 0, weapon: S.weapon }, dt);
       feedback = step.fb;
       if (step.shot) playShotCue(step.shot);
-      if (step.shot && TRACER_KEYS.has(step.shot)) drawTracer(cam, weaponAt(S.weapon));
-      if (rounds) rounds.update(dt, 1, noLanding);
+      if (step.shot && (MIRROR_KEYS.has(step.shot) || TRACER_KEYS.has(step.shot))) drawShot(step.shot, cam, weaponAt(S.weapon));
       if (step.flame) breatheFlame(cam, dt);
-      else if (flames) flames.update(dt);
       placeViewmodel(cam, shownKey(S.buttons.aim, me[4] === 0, S.weapon), k0.up || k0.down || k0.left || k0.right, dt);
       const mine = S.proxies.get('players');
       const own = mine && mine.get(Number(S.myId));
       if (own) own.visible = !camPose.firstPerson;
     }
+    stepFlames(s.kinds.players, dt);
+    stepJets(s.kinds.players, dt);
     drawHud();
   }
 
@@ -2069,8 +3334,37 @@ export function createNetSystem(ctx) {
     // Replicate the host's headline events (cosmetic ones stay local).
     ctx.events.on('announce', ({ title, sub }) => sendEvent('announce', { title: String(title).slice(0, 80), sub: String(sub).slice(0, 120) }));
     ctx.events.on('notice', ({ text }) => sendEvent('notice', { text: String(text).slice(0, 120) }));
+    ctx.events.on('weaponFx', onWeaponFx);
     ctx.events.on('explosion', ({ x, z, size }) => sendEvent('explosion', { x: Math.round(x), z: Math.round(z), size: Math.round(size * 100) / 100 }));
     setStatus();
+  }
+
+  /**
+   * Diagnostic only: the overlay's lines about the guest's world (tornado
+   * proxies, the guest-only pools, the shared particle room) and, last, the
+   * combat ring. Built once a second.
+   * @returns {string[]}
+   */
+  function dbgWorldLines() {
+    /** @type {string[]} */
+    const lines = [];
+    if (S.role === 'peer') {
+      const cam = Sim.three.camera.position;
+      const inScene = !!S.proxyRoot && S.proxyRoot.parent === Sim.three.scene;
+      lines.push(`proxyRoot ${S.proxyRoot ? (inScene ? 'in scene' : 'NOT in scene') : 'missing'}; the tornado is drawn by the guest's own funnels:`);
+      funnels.shown().forEach((f, id) => {
+        if (!f.on) return;
+        const v = ctx.tornadoes.instances[id] && ctx.tornadoes.instances[id].Vortex;
+        lines.push(`  funnel #${id}: x ${fixed1(f.x)} z ${fixed1(f.z)} radius ${fixed1(f.radius)} birth ${f.birth.toFixed(2)} size ${f.sizeMul.toFixed(2)} fade ${f.fade.toFixed(2)} distance to camera ${fixed1(Math.hypot(f.x - cam.x, f.z - cam.z))} m visible ${v && v.group ? v.group.visible : 'n/a'}`);
+      });
+      lines.push(`guest pools: flames ${flames ? 'exist' : 'none'}, mirror fx waiting ${mirror.waiting()} (the flames pool exposes no live count)`);
+    }
+    const caps = ctx.systems.caps;
+    if (caps) lines.push(`shared particles: in use ${caps.particlesInUse()}, room ${caps.particleRoom()}`);
+    const ring = dbg ? dbg.combatLines() : [];
+    lines.push(`combat ring (last ${ring.length}):`);
+    for (const l of ring) lines.push(`  ${l}`);
+    return lines;
   }
 
   /**
@@ -2082,7 +3376,21 @@ export function createNetSystem(ctx) {
   function debugTick(rawDt) {
     if (!dbg) return;
     const now = performance.now();
-    if (S.role === 'host') dbg.hostFrameAt(now);
+    if (S.role === 'host') {
+      dbg.hostFrameAt(now);
+      dbg.fx(fxRing.emitted(), fxRing.sent(), fxRing.dropped(), fxRing.pending());
+      // Hole opens and tornado births, seen by their state (no hook in those systems).
+      const open = !!(ctx.systems.blackHole && ctx.systems.blackHole.isOpen());
+      if (open && !S.dbgHole.open) {
+        dbg.host(1);
+        // Opened by a guest shot a moment ago (guestFire noted it), else by Roger.
+        if (now - S.dbgHole.at > 1000) S.dbgHole.shooter = '0';
+      }
+      S.dbgHole.open = open;
+      const born = ctx.tornadoes ? ctx.tornadoes.active.length : 0;
+      if (S.dbgTornadoes >= 0 && born > S.dbgTornadoes) dbg.host(2);
+      S.dbgTornadoes = born;
+    }
     S.dbgPingAcc += rawDt;
     if (S.dbgPingAcc >= 1 && S.client && S.client.state().status === 'in-room') {
       S.dbgPingAcc = 0;
@@ -2092,8 +3400,20 @@ export function createNetSystem(ctx) {
     S.dbgAcc += rawDt;
     if (S.dbgAcc >= 1) {
       S.dbgAcc = 0;
-      if (S.dbgEl) S.dbgEl.textContent = `NETDEBUG ${S.role || ''} (5 s window)\n${dbg.report(now).join('\n')}${S.role === 'peer' ? `\nprediction: ${S.pred.active ? 'on' : 'off'} pending ${S.pred.pending.length} blends ${S.predStats.blends} snaps ${S.predStats.snaps} error last ${S.predStats.last.toFixed(2)} worst ${S.predStats.worst.toFixed(2)} m` : ''}`;
+      dbg.roll(now);
+      if (S.dbgEl) S.dbgEl.textContent = `NETDEBUG ${S.role || ''} (5 s window)\n${dbg.report(now).concat(dbgWorldLines()).join('\n')}${S.role === 'peer' ? `\nprediction: ${S.pred.active ? 'on' : 'off'} pending ${S.pred.pending.length} blends ${S.predStats.blends} snaps ${S.predStats.snaps} error last ${S.predStats.last.toFixed(2)} worst ${S.predStats.worst.toFixed(2)} m` : ''}`;
     }
+  }
+
+  /**
+   * The guest's sky, from the newest `env` row; called by the frame before
+   * the day and night and atmosphere updates so it lags no frame. A no-op
+   * on the host and outside a session.
+   * @param {number} rawDt real seconds
+   * @returns {void}
+   */
+  function applySky(rawDt) {
+    if (S.client && S.role === 'peer' && S.peerReadyShown) sky.apply(rawDt);
   }
 
   /** @param {number} rawDt */
@@ -2102,9 +3422,14 @@ export function createNetSystem(ctx) {
       S.toastTimer -= rawDt;
       if (S.toastTimer <= 0 && S.toast) S.toast.classList.remove('visible');
     }
+    if (S.hitMark > 0) {
+      S.hitMark -= rawDt;
+      if (S.hitMark <= 0 && S.cross) S.cross.classList.remove('on');
+    }
     if (!S.client) return;
     if (dbg) debugTick(rawDt);
     const dt = Sim.state.paused ? 0 : rawDt;
+    if (S.role === 'host') mirror.update(null, rawDt);
     if (S.role === 'host' && S.client.state().status === 'in-room') {
       updateGuests(dt);
       // Shared mission state, when it changes (host-authoritative).
@@ -2117,8 +3442,12 @@ export function createNetSystem(ctx) {
       S.snapAcc += rawDt;
       if (S.snapAcc >= SNAP_INTERVAL && players.list().length > 1) {
         S.snapAcc = 0;
-        if (dbg) dbg.snapshotSent(performance.now());
-        S.client.send(buildSnapshot());
+        const snap = buildSnapshot();
+        if (dbg) {
+          dbg.snapshotSent(performance.now());
+          dbgSnapshot(snap);
+        }
+        S.client.send(snap);
       }
     } else if (S.role === 'peer') updatePeer(rawDt);
   }
@@ -2145,8 +3474,13 @@ export function createNetSystem(ctx) {
   }
 
   return {
-    initNet, updateNet, resetNet, disposeNet,
+    initNet, updateNet, applySky, resetNet, disposeNet,
     isPeerView: () => S.role === 'peer' && S.peerReadyShown,
+    /** @returns {boolean} the guest is drawing the host's cows, helicopter, jets, mothership and Spotless (its own stand still). */
+    isSkyMirrored: () => S.role === 'peer' && S.peerReadyShown && S.hostFlyers,
+    fxLive,
+    /** @returns {number} `fx` rows waiting for the next snapshot (HAVOC's rounds give way when many wait). */
+    fxPending: () => fxRing.pending(),
     pickTarget, catchPlayer, interceptRogerDeath, coopActive,
     notifyDamage, hitGuestsArea, splashGuests, hurtRay, hurtSector, hurtArea,
     /** For tests and the HUD. */

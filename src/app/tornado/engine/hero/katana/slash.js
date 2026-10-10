@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { HERO } from '../config.js';
 import { createKatanaTargets } from './targets.js';
+import { createWeaponFx } from '../weaponFx.js';
 
 /**
  * ===========================================================================
@@ -155,6 +156,8 @@ function canonicalSwipe(kind, out) {
  */
 export function createKatanaSlash(ctx, env) {
   const targets = createKatanaTargets(ctx);
+  /** Announces each landed cut to the co-op guest (hero/weaponFx.js). */
+  const weaponFx = createWeaponFx(ctx);
   /** @type {CutPlane} */
   const cut = { point: new THREE.Vector3(), normal: new THREE.Vector3(0, 0, 1), kind: 'vertical' };
   /** The reach query, one object reused for the lunge search and the strike. */
@@ -274,6 +277,7 @@ export function createKatanaSlash(ctx, env) {
       const feel = env.feel ? env.feel() : null;
       if (feel) feel.cut(result.cut, recut, landedAt, result.people);
     }
+    weaponFx.announce('cut', p, landedAt, result.cut + result.people + recut > 0 ? 'enemy' : '', 0);
   }
 
   /**

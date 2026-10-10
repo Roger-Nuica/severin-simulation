@@ -652,6 +652,37 @@ export function createSamuraiSquad(ctx, S, api) {
     return units.filter(onGround).map(u => u.rig.root.position);
   }
 
+  /**
+   * The co-op guest's samurai (net/system.js): a kit of their own (geometry
+   * and materials) and a function making one figure in an armour colour.
+   * Nothing is added to the scene and no state is touched; `release` frees
+   * the kit (and the sword arms the model keeps for every colour).
+   * @returns {{build: (variant: number) => import('./samuraiModel.js').SamuraiRig, release: () => void, consts: Object}}
+   */
+  function buildGuestModel() {
+    const own = buildSamuraiKit();
+    return {
+      build: (variant) => buildSamurai(own, variant),
+      release: () => disposeSamuraiKit(own),
+      consts: { windup: SAMURAI.windup, swing: SAMURAI.swing, recover: SAMURAI.recover, runSpeed: SAMURAI.runSpeed, deathSeconds: SAMURAI.deathSeconds }
+    };
+  }
+
+  /**
+   * What the guest needs to draw each samurai (`figures` rows, net/figurePose.js):
+   * those on the ramp, standing, cutting or falling. Read-only.
+   * @returns {{key: object, x: number, y: number, z: number, heading: number, phase: string, swing: number, timer: number, variant: number}[]}
+   */
+  function replicaState() {
+    const out = [];
+    for (const u of units) {
+      if (u.phase === 'caught' || u.phase === 'dead') continue;
+      const p = u.rig.root.position;
+      out.push({ key: u, x: p.x, y: p.y, z: p.z, heading: u.heading, phase: u.phase, swing: u.swing, timer: u.timer, variant: u.slot });
+    }
+    return out;
+  }
+
   /** @returns {void} */
   function disposeSquad() {
     clearSquad();
@@ -661,6 +692,6 @@ export function createSamuraiSquad(ctx, S, api) {
 
   return {
     initSquad, spawnUnit, rampSeconds, updateSquad, standing, beginGuard, hostilesInCoverage,
-    aimTargets, hitSamurai, hitSamuraiArea, clearSquad, squadPositions, disposeSquad
+    aimTargets, hitSamurai, hitSamuraiArea, clearSquad, squadPositions, disposeSquad, buildGuestModel, replicaState
   };
 }

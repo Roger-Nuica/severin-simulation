@@ -131,7 +131,9 @@ export const PZ = {
  *   initPatientZero: () => void,
  *   updatePatientZero: (dt: number) => void,
  *   resetPatientZero: () => void,
- *   disposePatientZero: () => void
+ *   disposePatientZero: () => void,
+ *   buildGuestModel: () => any,
+ *   replicaState: () => any
  * }}
  */
 export function createPatientZeroSystem(ctx) {
@@ -231,10 +233,14 @@ export function createPatientZeroSystem(ctx) {
 
   /**
    * The original's figure: the six parts as meshes on their pivots, the
-   * crown of shards turning over its head, blocks orbiting it.
-   * @returns {{root: THREE.Group, halo: THREE.Group, halo2: THREE.Group, parts: Record<string, THREE.Object3D>, orbit: THREE.InstancedMesh}}
+   * crown of shards turning over its head, blocks orbiting it. The co-op
+   * guest builds it from a kit of its own (`buildGuestModel`), without the
+   * orbiting blocks.
+   * @param {{geo: any, evolvedGeo: any, material: THREE.Material, crown: {shardGeo: THREE.BufferGeometry, shardMat: THREE.Material, blockGeo: THREE.BufferGeometry}}|null} [kit] Defaults to the system's own.
+   * @returns {{root: THREE.Group, halo: THREE.Group, halo2: THREE.Group, parts: Record<string, THREE.Object3D>, orbit: THREE.InstancedMesh|null}}
    */
-  function buildOriginal() {
+  function buildOriginal(kit = null) {
+    const K = kit || { geo, evolvedGeo, material: /** @type {THREE.Material} */ (originalMat), crown: /** @type {NonNullable<typeof crownKit>} */ (crownKit) };
     const root = new THREE.Group();
     root.name = 'patient_zero';
     const figure = new THREE.Group();
@@ -242,7 +248,7 @@ export function createPatientZeroSystem(ctx) {
     /** @type {Record<string, THREE.Object3D>} */
     const parts = { figure };
     for (const name of PARTS) {
-      const mesh = new THREE.Mesh(/** @type {any} */ (geo)[name], /** @type {THREE.Material} */ (originalMat));
+      const mesh = new THREE.Mesh(K.geo[name], K.material);
       mesh.castShadow = true;
       if (name === 'body') {
         figure.add(mesh);
@@ -257,7 +263,7 @@ export function createPatientZeroSystem(ctx) {
     }
     // The crown: seven shards of light turning over the head.
     const halo = new THREE.Group();
-    const { shardGeo, shardMat, blockGeo } = /** @type {NonNullable<typeof crownKit>} */ (crownKit);
+    const { shardGeo, shardMat, blockGeo } = K.crown;
     for (let i = 0; i < 7; i++) {
       const a = (i / 7) * Math.PI * 2;
       const shard = new THREE.Mesh(shardGeo, shardMat);
@@ -289,8 +295,8 @@ export function createPatientZeroSystem(ctx) {
       ['scytheR', 'scytheR', new THREE.Vector3(-0.15, 1.64, -0.18)]
     ]);
     for (const [name, source, at] of extras) {
-      const g = source.startsWith('scythe') ? /** @type {any} */ (evolvedGeo)[source] : /** @type {any} */ (geo)[source];
-      const mesh = new THREE.Mesh(g, /** @type {THREE.Material} */ (originalMat));
+      const g = source.startsWith('scythe') ? K.evolvedGeo[source] : K.geo[source];
+      const mesh = new THREE.Mesh(g, K.material);
       mesh.castShadow = true;
       const pivot = new THREE.Group();
       pivot.position.copy(at);
@@ -301,10 +307,14 @@ export function createPatientZeroSystem(ctx) {
     }
     parts.halo2 = halo2;
     // Blocks orbiting it, like a cloud of its own parts.
-    const orbit = new THREE.InstancedMesh(blockGeo, /** @type {THREE.Material} */ (originalMat), 28);
-    orbit.frustumCulled = false;
-    orbit.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    root.add(orbit);
+    /** @type {THREE.InstancedMesh|null} */
+    let orbit = null;
+    if (!kit) {
+      orbit = new THREE.InstancedMesh(blockGeo, K.material, 28);
+      orbit.frustumCulled = false;
+      orbit.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      root.add(orbit);
+    }
     root.add(figure);
     return { root, halo, halo2, parts, orbit };
   }
@@ -319,7 +329,7 @@ export function createPatientZeroSystem(ctx) {
     Sim.three.scene.add(built.root);
     const w = walker(Math.sin(angle) * PZ.spawnRing, Math.cos(angle) * PZ.spawnRing);
     original = Object.assign(w, {
-      hp: PZ.hp, root: built.root, halo: built.halo, halo2: built.halo2, parts: built.parts, orbit: built.orbit,
+      hp: PZ.hp, root: built.root, halo: built.halo, halo2: built.halo2, parts: built.parts, orbit: /** @type {THREE.InstancedMesh} */ (built.orbit),
       budTimer: PZ.cloneEvery + PZ.originalFormSeconds, budding: 0, life: 0, evolve: -1, evolved: false, warned: false, pull: 0
     });
     original.speed = PZ.speed;
@@ -1089,5 +1099,56 @@ export function createPatientZeroSystem(ctx) {
     button = null;
   }
 
-  return { spawn, cloneCount: () => clones.length, originalAlive: () => !!original, initPatientZero, updatePatientZero, resetPatientZero, disposePatientZero };
+  /**
+   * What the co-op guest needs to draw Patient Zero and its clones (net/system.js,
+   * net/replicatorPose.js), or null when neither is on the field. Read-only:
+   * no state is touched. `form` and `warpT` let the pure code work out how
+   * far a figure is built or come apart.
+   * @returns {{warpOut: number, flare: number, original: {x: number, z: number, heading: number, attack: number, evolve: number, form: number, warpT: number|null}|null, clones: Array<{key: object, x: number, z: number, heading: number, attack: number, form: number, warpT: number|null}>}|null}
+   */
+  function replicaState() {
+    if (!original && !clones.length) return null;
+    const o = original;
+    return {
+      warpOut: PZ.warpOut,
+      flare,
+      original: o ? {
+        x: o.pos.x, z: o.pos.z, heading: o.heading, attack: Math.max(o.attack, o.budding > 0 ? 0.8 : 0),
+        evolve: o.evolved ? 1 : o.evolve >= 0 ? o.evolve : 0, form: o.form, warpT: o.warp ? o.warp.t : null
+      } : null,
+      clones: clones.map((c) => ({ key: c, x: c.pos.x, z: c.pos.z, heading: c.heading, attack: c.attack, form: c.form, warpT: c.warp ? c.warp.t : null }))
+    };
+  }
+
+  /**
+   * The co-op guest's Replicator: the real geometry (a set of its own, so the
+   * host's is never shared across a session), the two glow materials, and a
+   * function making the original's figure (no orbiting blocks). Nothing is
+   * added to the scene and no state is touched.
+   * @returns {{makeFigure: () => {root: THREE.Group, parts: Record<string, THREE.Object3D>, halo: THREE.Group, halo2: THREE.Group}, partGeo: Record<string, THREE.BufferGeometry>, cloneMat: THREE.MeshStandardMaterial, originalMat: THREE.MeshStandardMaterial, geometries: THREE.BufferGeometry[], materials: THREE.Material[], consts: {scale: number, grow: number, heatFlare: number, heatTint: THREE.Color, trigger: number, maxClones: number, speed: number, evolvedSpeed: number, stride: number}}}
+   */
+  function buildGuestModel() {
+    const partGeo = buildReplicatorGeometry();
+    const evolved = buildEvolvedGeometry();
+    const shardGeo = new THREE.ConeGeometry(0.035, 0.32, 3);
+    const shardMat = new THREE.MeshBasicMaterial({ color: PZ.halo.clone().multiplyScalar(REPLICATOR.glowScale) });
+    const blockGeo = withGlow(new THREE.BoxGeometry(0.055, 0.055, 0.055), REPLICATOR.green.clone().multiplyScalar(0.5));
+    const cloneMaterial = glowMaterial(1);
+    const originalMaterial = glowMaterial(1.3);
+    const kit = { geo: partGeo, evolvedGeo: evolved, material: originalMaterial, crown: { shardGeo, shardMat, blockGeo } };
+    return {
+      makeFigure: () => {
+        const b = buildOriginal(kit);
+        b.parts.figure.scale.setScalar(originalScale);
+        return { root: b.root, parts: b.parts, halo: b.halo, halo2: b.halo2 };
+      },
+      partGeo, cloneMat: cloneMaterial, originalMat: originalMaterial,
+      geometries: [...Object.values(partGeo), evolved.scytheL, evolved.scytheR, shardGeo, blockGeo],
+      materials: [cloneMaterial, originalMaterial, shardMat],
+      // The host's stride is 2.2 radians per metre; a pace of 1 is 4 m/s.
+      consts: { scale: originalScale, grow: PZ.evolveGrow, heatFlare: PZ.heatFlare, heatTint: PZ.heatTint, trigger: ENCIRCLE.trigger, maxClones: PZ.maxClones, speed: PZ.speed, evolvedSpeed: PZ.evolvedSpeed, stride: 2.2 }
+    };
+  }
+
+  return { spawn, cloneCount: () => clones.length, originalAlive: () => !!original, initPatientZero, updatePatientZero, resetPatientZero, disposePatientZero, buildGuestModel, replicaState };
 }

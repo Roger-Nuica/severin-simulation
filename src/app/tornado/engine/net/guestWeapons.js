@@ -34,7 +34,7 @@ import { WEAPONS } from './protocol.js';
 export const GUEST_WEAPONS = /** @type {const} */ ({
   rifle: { mode: 'ray', cooldown: 0.45, range: 140, needsAim: true, type: 'plasma' },
   minigun: { mode: 'ray', cooldown: 0.09, range: 100, needsAim: true, type: 'bullet' },
-  railgun: { mode: 'ray', cooldown: 1.6, range: 220, needsAim: true, type: 'bolt' },
+  railgun: { mode: 'ray', cooldown: 0.2, range: 220, needsAim: true, type: 'bolt' },
   fire: { mode: 'flame', cooldown: 0, range: 0, needsAim: true, type: null },
   blackhole: { mode: 'hole', cooldown: 0.6, range: 200, needsAim: true, type: null },
   katana: { mode: 'blade', cooldown: 0.5, range: 3.6, needsAim: false, type: 'blade' }

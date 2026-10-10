@@ -60,7 +60,9 @@ const SOUND_SIZE = 5;
  *   initTrex: () => void,
  *   updateTrex: (dt: number) => void,
  *   resetTrex: () => void,
- *   disposeTrex: () => void
+ *   disposeTrex: () => void,
+ *   buildGuestModel: () => any,
+ *   replicaState: () => any
  * }}
  */
 export function createTrexSystem(ctx) {
@@ -593,5 +595,36 @@ export function createTrexSystem(ctx) {
     return rex && rex.phase !== 'falling' && rex.phase !== 'dead' ? rex : null;
   }
 
-  return { spawn, alive: () => !!duelist(), duelist, initTrex, updateTrex, resetTrex, disposeTrex };
+  /**
+   * The co-op guest's T-Rex (net/system.js): the real model, built for the
+   * guest to clone, with the joints and materials its pose moves. Nothing is
+   * added to the scene and no state is touched. The geometry stays the
+   * system's own (released with it).
+   * @returns {{root: THREE.Object3D, joints: Record<string, THREE.Object3D>, mats: {eyeMat: THREE.Material, ventMat: THREE.Material}, colours: {eye: THREE.Color, vent: THREE.Color}, stride: number, speed: number, geometries: THREE.BufferGeometry[], materials: THREE.Material[]}}
+   */
+  function buildGuestModel() {
+    const rig = model.build();
+    const { legL, legR, tail, neck, head, jaw, body } = rig;
+    return {
+      root: rig.root, joints: { legL, legR, tail, neck, head, jaw, body },
+      mats: { eyeMat: rig.eyeMat, ventMat: rig.ventMat }, colours: { eye: TREX.eye, vent: TREX.vent },
+      // The host's stride per metre (`walk`) and its walking speed.
+      stride: 0.4 * (15 / TREX.height), speed: TREX.walkSpeed,
+      geometries: [], materials: rig.materials
+    };
+  }
+
+  /**
+   * What the guest needs to draw it (a `giants` row, net/giantPose.js), or
+   * null when there is none. Read-only.
+   * @returns {{x: number, z: number, heading: number, phase: string, acting: boolean, a: number, b: number, fall: number}|null}
+   */
+  function replicaState() {
+    const r = rex;
+    if (!r) return null;
+    const p = r.rig.root.position;
+    return { x: p.x, z: p.z, heading: r.heading, phase: r.phase, acting: r.phase === 'breathing', a: r.pitch, b: 0, fall: Math.min(1, r.timer / TREX.fallSeconds) };
+  }
+
+  return { spawn, alive: () => !!duelist(), duelist, initTrex, updateTrex, resetTrex, disposeTrex, buildGuestModel, replicaState };
 }

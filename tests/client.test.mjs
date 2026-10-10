@@ -44,7 +44,7 @@ test('peer joins with normalised code, rejoins with token after a drop', async (
   await new Promise((r) => setTimeout(r, 20));
   assert.notEqual(ws(), first);
   ws().open();
-  assert.deepEqual(ws().sent[0], { type: 'rejoin', v: 3, code: 'ABCDEF', token: 'TKN' });
+  assert.deepEqual(ws().sent[0], { type: 'rejoin', v: 4, code: 'ABCDEF', token: 'TKN' });
 });
 
 test('peer grace expiry closes', async () => {

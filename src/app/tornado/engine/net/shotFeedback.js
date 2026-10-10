@@ -41,6 +41,16 @@ export const SHOT_LOOK = Object.freeze({
   blackhole: { life: 0.18, scale: 2.4, cue: 'zap' }
 });
 
+/**
+ * Which wheel keys the guest's own predicted shot draws through the mirror
+ * (a round with casings and sparks, a rail bolt, the plasma beam:
+ * `net/mirror.js`) and which draw the bare tracer (none now: the Black Hole
+ * Gun's shot is its flash and zap alone, as on the host, and its hole is the
+ * host's `hole` row drawn by `player/blackHole.js` `mirror`).
+ */
+export const MIRROR_KEYS = Object.freeze(new Set(['minigun', 'railgun', 'rifle']));
+export const TRACER_KEYS = Object.freeze(new Set());
+
 /** The Katana's cut on the guest's screen: how long the swing lasts (seconds), and how far the blade sweeps. */
 export const SWING = Object.freeze({ life: 0.3, pitch: 1.2, yaw: -0.9, sweep: -0.25 });
 

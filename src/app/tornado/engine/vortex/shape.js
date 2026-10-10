@@ -188,7 +188,7 @@ export function createVortexShape(ctx, S, api) {
     // tornado's turbulence is untouched.
     // A funnel still being born churns hard -- condensation boiling down out
     // of the cloud rather than a settled column -- and calms as it grows.
-    const wedgeChurn = 1 + S.Vortex.wedge * 0.7 + (1 - S.Vortex.birth) * 1.4;
+    const wedgeChurn = 1 + S.Vortex.wedge * 0.7 + (1 - (S.Vortex.remote ? S.Vortex.remote.birth : S.Vortex.birth)) * 1.4;
     const turbCoarse = (0.10 + p.intensity * 0.26) * wedgeChurn;
     const turbFine = (0.05 + p.intensity * 0.17) * wedgeChurn;
     // The finest octave: small, so it frays the edge without blurring the

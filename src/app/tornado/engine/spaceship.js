@@ -65,6 +65,8 @@ export { buildSaucer } from './spaceship/config.js';
  *   hitSamurai: (unit: Object, type: string) => boolean,
  *   hitSamuraiArea: (x: number, z: number, radius: number, type: string) => number,
  *   samuraiPositions: () => THREE.Vector3[],
+ *   buildGuestModel: () => any,
+ *   replicaState: () => any[],
  *   landedSpots: () => {x: number, z: number, radius: number}[],
  *   resetSpaceship: () => void,
  *   disposeSpaceship: () => void
@@ -382,6 +384,7 @@ export function createSpaceshipSystem(ctx) {
     callSamurai: api.callSamurai, fireRocket: api.fireRocket, targeting: api.targeting,
     samuraiTargets: api.aimTargets, hitSamurai: api.hitSamurai, hitSamuraiArea: api.hitSamuraiArea,
     samuraiPositions: api.squadPositions,
+    buildGuestModel: api.buildGuestModel, replicaState: api.replicaState,
     landedSpots, resetSpaceship, disposeSpaceship
   };
 }

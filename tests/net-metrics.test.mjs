@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  isNetDebug, newStats, createWindowRing, createSendLog, createCounters, createReasonCounts, formatStats, createNetMetrics
+  isNetDebug, newStats, createWindowRing, createSendLog, createCounters, createReasonCounts, formatStats, createNetMetrics,
+  createRateTable, createLineRing, formatRates, fixed1, COMBAT_LINES
 } from '../src/app/tornado/engine/net/metrics.js';
 
 test('the page flag is opt-in and understands off values', () => {
@@ -112,4 +113,79 @@ test('the peer stops pinging when the relay never answers', () => {
   assert.match(m.report(3000).join('\n'), /relay not answering/);
   const ok = createNetMetrics({ weapons: 6 });
   for (let i = 1; i <= 10; i++) { assert.equal(ok.nextPing(i * 1000), i); ok.pong(i, i * 1000 + 40); }
+});
+
+test('a rate table turns totals into per-second rates over each roll', () => {
+  const t = createRateTable(['bytes', 'rows']);
+  t.add('bytes', 500); t.add('bytes', 500); t.add('rows', 30); t.add('nope', 9);
+  assert.equal(t.rate('bytes'), 0, 'no window closed yet');
+  t.roll(1000);
+  t.add('bytes', 3000); t.add('rows', 45);
+  t.roll(3000);
+  assert.equal(t.rate('bytes'), 1500);
+  assert.equal(t.rate('rows'), 22.5);
+  assert.equal(t.rate('nope'), 0);
+  assert.equal(formatRates('x', ['bytes', 'rows'], t.rate, 0), 'x: bytes 1500 | rows 23');
+  t.clear();
+  assert.equal(t.rate('bytes'), 0);
+});
+
+test('a line ring keeps the newest lines, oldest first, and folds repeats', () => {
+  const r = createLineRing(3);
+  assert.deepEqual(r.lines(), []);
+  r.push('a'); r.push('b'); r.push('b again', 'b'); r.push('b once more', 'b');
+  assert.deepEqual(r.lines(), ['a', 'b once more x3']);
+  r.push('c'); r.push('d');
+  assert.deepEqual(r.lines(), ['b once more x3', 'c', 'd']);
+  r.push('e');
+  assert.deepEqual(r.lines(), ['c', 'd', 'e']);
+  r.clear();
+  assert.deepEqual(r.lines(), []);
+  assert.equal(COMBAT_LINES, 20);
+});
+
+test('fixed1 prints one decimal and a dash for a non-finite number', () => {
+  assert.equal(fixed1(3.14159), '3.1');
+  assert.equal(fixed1(NaN), '-');
+  assert.equal(fixed1(Infinity), '-');
+});
+
+test('net metrics: snapshot kinds, bytes, ignored events, host counts and the combat ring', () => {
+  const m = createNetMetrics({ weapons: 6, kinds: ['players', 'tornadoes'] });
+  m.roll(0);
+  m.snapshotBytes(1000); m.snapshotBytes(1000);
+  m.snapshotRows('players', 2); m.snapshotRows('players', 2); m.snapshotRows('tornadoes', 1); m.snapshotRows('unknown', 7);
+  m.eventBytes(120);
+  m.eventIn('explosion'); m.eventIgnored('explosion'); m.eventIn('notice'); m.eventIn('notice'); m.eventIgnored('notice(dup/invalid)');
+  m.eventDropped('mission');
+  m.host(0); m.host(0); m.host(1); m.host(2); m.host(9);
+  m.combat('shot 1 rifle', 'k'); m.combat('shot 1 rifle', 'k');
+  m.roll(2000);
+  const text = m.report(2000).join('\n');
+  assert.match(text, /snapshots 1\.0 \| snap bytes 1000\.0 \| events 0\.5 \| event bytes 60\.0 \| players 2\.0 \| tornadoes 0\.5/);
+  assert.match(text, /events received: explosion=1 notice=2/);
+  assert.match(text, /IGNORED[^\n]*: explosion=1 notice\(dup\/invalid\)=1/);
+  assert.match(text, /dropped by the host's emitter: mission=1/);
+  assert.match(text, /own weapon calls[^\n]* 2, hole opens 1, tornado births 1/);
+  assert.deepEqual(m.combatLines(), ['shot 1 rifle x2']);
+  m.reset();
+  const after = m.report(3000).join('\n');
+  assert.match(after, /events received: none/);
+  assert.match(after, /own weapon calls[^\n]* 0, hole opens 0, tornado births 0/);
+  assert.deepEqual(m.combatLines(), []);
+});
+
+test('net metrics without kinds still reports and ignores row counts', () => {
+  const m = createNetMetrics({ weapons: 6 });
+  m.snapshotRows('players', 3);
+  m.roll(0); m.roll(1000);
+  assert.match(m.report(1000).join('\n'), /per second: snapshots 0\.0 \| snap bytes 0\.0 \| events 0\.0 \| event bytes 0\.0/);
+});
+
+test('host fx totals show in the report and are forgotten on reset', () => {
+  const m = createNetMetrics({ weapons: 6 });
+  m.fx(18, 15, 1, 2);
+  assert.ok(m.report(0).some((l) => l === 'host fx rows: emitted 18, sent 15, dropped 1, waiting 2'));
+  m.reset();
+  assert.ok(m.report(0).some((l) => l === 'host fx rows: emitted 0, sent 0, dropped 0, waiting 0'));
 });

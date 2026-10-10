@@ -133,6 +133,50 @@ export function createMeteorImpact(ctx, S, api) {
   }
 
   /**
+   * Co-op guest: the end of the host's rock, drawn and nothing more -- a burst
+   * (with the pieces' smaller ones), the white-out, the ejecta and the scar. No
+   * damage, ignition, throw, shock, score or shake (R-053, R-055); the host's
+   * own impact did all of that. Shapes come from the rock's seeded generator.
+   * @param {Meteor} meteor
+   * @param {boolean} airburst it came apart aloft
+   * @returns {void}
+   */
+  function finishShown(meteor, airburst) {
+    const rand = meteor.rand || Math.random;
+    const burst = ctx.systems.explosions;
+    if (airburst) {
+      const at = meteor.mesh.position;
+      burst.cosmeticExplosion(at.x, at.y, at.z, METEOR.blastStrength, !!meteor.sound);
+      ctx.systems.lightning.flashScreen(at, METEOR.burstFlash);
+      api.showBanner('AIRBURST!', 'Nothing reached the ground');
+      return;
+    }
+    const x = meteor.to.x, z = meteor.to.z;
+    burst.cosmeticExplosion(x, 1.5, z, METEOR.blastStrength, !!meteor.sound);
+    ctx.systems.lightning.flashScreen(meteor.to.set(x, 1.5, z), 0.95);
+    meteor.to.y = 0;
+    for (const frag of meteor.fragments) {
+      burst.cosmeticExplosion(x + frag.driftX, 1.5, z + frag.driftZ, METEOR.blastStrength * 0.3, false);
+    }
+    const p = S.trail;
+    for (let i = 0; i < METEOR.ejectaCount; i++) {
+      const idx = p.next;
+      p.next = (p.next + 1) % METEOR.maxParticles;
+      const a = rand() * Math.PI * 2;
+      const speed = METEOR.ejectaSpeed[0] + rand() * (METEOR.ejectaSpeed[1] - METEOR.ejectaSpeed[0]);
+      p.positions[idx * 3] = x;
+      p.positions[idx * 3 + 1] = 1;
+      p.positions[idx * 3 + 2] = z;
+      p.velocities[idx * 3] = Math.cos(a) * speed * 0.6;
+      p.velocities[idx * 3 + 1] = speed;
+      p.velocities[idx * 3 + 2] = Math.sin(a) * speed * 0.6;
+      p.life[idx] = p.maxLife[idx] = METEOR.ejectaLife[0] + rand() * (METEOR.ejectaLife[1] - METEOR.ejectaLife[0]);
+      p.seed[idx] = 1;
+    }
+    addCrater(x, z, rand);
+  }
+
+  /**
    * The rock that never lands. It comes apart two hundred metres up, and what
    * reaches the town is only the pressure front.
    *
@@ -263,10 +307,11 @@ export function createMeteorImpact(ctx, S, api) {
    * thing in the barrage that grows without bound.
    * @param {number} x
    * @param {number} z
+   * @param {() => number} [rand] a seeded generator (the co-op guest's), else `Math.random`
    * @returns {void}
    */
-  function addCrater(x, z) {
-    const craterRadius = api.between(METEOR.craterRadius);
+  function addCrater(x, z, rand = Math.random) {
+    const craterRadius = METEOR.craterRadius[0] + rand() * (METEOR.craterRadius[1] - METEOR.craterRadius[0]);
     if (S.craters.length >= METEOR.craterMax) {
       const oldest = S.craters.shift();
       S.group.remove(oldest);
@@ -281,12 +326,12 @@ export function createMeteorImpact(ctx, S, api) {
     });
     const crater = new THREE.Mesh(new THREE.PlaneGeometry(craterRadius * 2, craterRadius * 2), mat);
     crater.rotation.x = -Math.PI / 2;
-    crater.rotation.z = Math.random() * Math.PI * 2;
+    crater.rotation.z = rand() * Math.PI * 2;
     crater.position.set(x, METEOR.craterY, z);
     crater.name = 'meteor_crater';
     S.group.add(crater);
     S.craters.push(crater);
   }
 
-  return { impact, detonateAirburst, updateBursts, addCrater };
+  return { impact, detonateAirburst, updateBursts, addCrater, finishShown };
 }

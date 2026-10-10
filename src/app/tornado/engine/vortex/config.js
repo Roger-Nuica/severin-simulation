@@ -246,3 +246,7 @@ export const WEDGE = {
 // other active one, so they read as separate storms from the outset.
 export const START_SEPARATION = 70;
 export const START_SEED_ATTEMPTS = 40;
+
+// Co-op guest: a remote funnel (vortex.js `remote`) at or past this size draws
+// the full "monster" particle budget (the host's merge or wedge sets it there).
+export const REMOTE_MONSTER_AT = 1.3;

@@ -91,7 +91,9 @@ const DUST = {
  *   resetEarthquake: () => void,
  *   disposeEarthquake: () => void,
  *   kickDust: (x: number, z: number, puffs?: number, scale?: number) => void,
- *   earthquakeStrength: () => number
+ *   earthquakeStrength: () => number,
+ *   mirror: (row: number[]|undefined) => void,
+ *   replicaState: () => ({strength: number, magnitude: number}|null)
  * }}
  */
 export function createEarthquakeSystem(ctx) {
@@ -107,8 +109,12 @@ export function createEarthquakeSystem(ctx) {
     // Counts down to a sinkhole opening; 0 means none is pending.
     sinkholeTimer: 0,
     // Counts down to the chasm opening; 0 means none is pending.
-    chasmTimer: 0
+    chasmTimer: 0,
+    magnitude: 0
   };
+  // Co-op guest: the host's quake is drawn from the `quake` row (mirror): dust, rumble and banner only, no damage, score or shake.
+  const replica = { on: false, strength: 0 };
+  const peerView = () => !!(ctx.systems.net && ctx.systems.net.isPeerView());
   /** @type {import('./particlePool.js').ParticlePool|null} */
   let dust = null;
   let dustAccumulator = 0;
@@ -157,10 +163,11 @@ export function createEarthquakeSystem(ctx) {
    * @returns {void}
    */
   function triggerEarthquake() {
-    if (!EARTHQUAKE.enabled || state.phase === 'shaking') return;
+    if (!EARTHQUAKE.enabled || state.phase === 'shaking' || peerView()) return;
     state.phase = 'shaking';
     state.age = 0;
     const magnitude = 6.5 + Math.random() * 2.3;
+    state.magnitude = magnitude;
     showBanner('EARTHQUAKE!', `Magnitude ${magnitude.toFixed(1)} · the ground is splitting`);
     // public/sounds/earthquake.wav, over the procedural rumble.
     ctx.systems.cues.playEarthquake();
@@ -188,6 +195,8 @@ export function createEarthquakeSystem(ctx) {
    * @returns {void}
    */
   function spawnDustPuff(x, z, scale = 1) {
+    // The guest's dust shares the particle budget (R-048); a puff is at most 10.
+    if (peerView() && ctx.systems.caps && ctx.systems.caps.particleRoom() < 10) return;
     const p = dust;
     const count = Math.round((5 + Math.floor(Math.random() * 6)) * scale);
     for (let n = 0; n < count; n++) {
@@ -293,16 +302,17 @@ export function createEarthquakeSystem(ctx) {
       }
     }
     const a = state.age;
-    state.strength = state.phase === 'shaking'
+    state.strength = replica.on ? 0 : state.phase === 'shaking'
       ? THREE.MathUtils.smoothstep(a, 0, EARTHQUAKE.rampIn)
         * (1 - THREE.MathUtils.smoothstep(a, EARTHQUAKE.duration - EARTHQUAKE.rampOut, EARTHQUAKE.duration))
       : 0;
 
     // No shake while it lasts, its own or the collapses' (gamefeel.js holdStill).
-    ctx.systems.gamefeel.holdStill('earthquake', state.strength > 0);
-    if (state.strength > 0) {
+    const shake = replica.on ? replica.strength : state.strength;
+    ctx.systems.gamefeel.holdStill('earthquake', shake > 0);
+    if (shake > 0) {
       const [minR, maxR] = EARTHQUAKE.townRadius;
-      dustAccumulator += DUST.rate * state.strength * dt;
+      dustAccumulator += DUST.rate * shake * dt;
       while (dustAccumulator >= 1) {
         dustAccumulator -= 1;
         const angle = Math.random() * Math.PI * 2;
@@ -311,14 +321,49 @@ export function createEarthquakeSystem(ctx) {
       }
     }
 
-    if (state.strength > 0 || dustAlive > 0) updateDust(dt);
+    if (shake > 0 || dustAlive > 0) updateDust(dt);
 
-    ctx.systems.earthquakeSound.updateEarthquakeSound(state.strength, dt);
+    ctx.systems.earthquakeSound.updateEarthquakeSound(shake, dt);
 
     if (state.bannerTimer > 0) {
       state.bannerTimer -= dt;
       if (state.bannerTimer <= 0 && banner) banner.classList.remove('visible');
     }
+  }
+
+  /**
+   * Co-op guest: the host's `quake` row for the earthquake (undefined when it
+   * is not shaking), called every frame. It only sets the strength that drives
+   * the dust and the rumble, and the banners on the edges; nothing shakes,
+   * damages or scores here.
+   * @param {number[]|undefined} row
+   * @returns {void}
+   */
+  function mirror(row) {
+    if (!row) {
+      if (replica.on) {
+        replica.on = false;
+        replica.strength = 0;
+        showBanner('Aftershocks fading', 'The ground has settled');
+      }
+      return;
+    }
+    if (!dust) return;
+    if (!replica.on) {
+      replica.on = true;
+      showBanner('EARTHQUAKE!', `Magnitude ${(row[3] / 10).toFixed(1)} · the ground is splitting`);
+      ctx.systems.cues.playEarthquake();
+    }
+    replica.strength = row[2];
+  }
+
+  /**
+   * The quake as plain numbers for a snapshot's `quake` row, read-only; null
+   * unless it is shaking.
+   * @returns {{strength: number, magnitude: number}|null}
+   */
+  function replicaState() {
+    return state.phase === 'shaking' ? { strength: state.strength, magnitude: state.magnitude } : null;
   }
 
   /**
@@ -332,6 +377,8 @@ export function createEarthquakeSystem(ctx) {
     state.bannerTimer = 0;
     state.sinkholeTimer = 0;
     state.chasmTimer = 0;
+    replica.on = false;
+    replica.strength = 0;
     dustAccumulator = 0;
     dustAlive = 0;
     if (dust) {
@@ -363,6 +410,6 @@ export function createEarthquakeSystem(ctx) {
 
   return {
     initEarthquake, updateEarthquake, triggerEarthquake, resetEarthquake, disposeEarthquake,
-    earthquakeStrength, kickDust
+    earthquakeStrength, kickDust, mirror, replicaState
   };
 }

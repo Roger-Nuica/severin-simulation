@@ -72,6 +72,8 @@ export function createPlayerRegistry() {
 
   const get = (/** @type {string} */ id) => players.get(id) || null;
   const list = () => [...players.values()];
+  /** How many players are in the room: no allocation, for per-shot gates. */
+  const count = () => players.size;
   const up = () => list().filter((p) => p.state === 'up');
 
   /**
@@ -260,5 +262,5 @@ export function createPlayerRegistry() {
 
   function clear() { players.clear(); seats.clear(); }
 
-  return { resetRun, add, remove, get, list, up, nearestEligible, down, update, gameOver, canDamagePlayer, enterSeat, leaveSeat, occupants, controls, clear };
+  return { resetRun, add, remove, get, list, count, up, nearestEligible, down, update, gameOver, canDamagePlayer, enterSeat, leaveSeat, occupants, controls, clear };
 }

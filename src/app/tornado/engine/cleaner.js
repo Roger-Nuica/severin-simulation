@@ -36,6 +36,9 @@ export const CS = {
   motesMax: 700
 };
 
+/** Radians of stride over the whole walk (his legs swing by `sin(u * CS_STRIDE)`). */
+const CS_STRIDE = 40;
+
 /**
  * @param {Object} ctx
  * @returns {{
@@ -44,7 +47,10 @@ export const CS = {
  *   initCleaner: () => void,
  *   updateCleaner: (dt: number) => void,
  *   resetCleaner: () => void,
- *   disposeCleaner: () => void
+ *   disposeCleaner: () => void,
+ *   buildGuestModel: () => any,
+ *   replicaState: () => any,
+ *   localRoots: () => THREE.Object3D[]
  * }}
  */
 export function createCleanerSystem(ctx) {
@@ -69,11 +75,15 @@ export function createCleanerSystem(ctx) {
   const materials = [];
   const scratch = new THREE.Vector3();
 
-  /** @returns {THREE.Group} */
-  function build() {
+  /**
+   * The giant of light, and the pivots of his two legs.
+   * @param {THREE.Material[]} sink Where the materials made are listed, to be released.
+   * @returns {{group: THREE.Group, legs: THREE.Object3D[]}}
+   */
+  function build(sink) {
     const light = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 2.2, 2.4) });
     const gold = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 1.9, 0.9) });
-    materials.push(light, gold);
+    sink.push(light, gold);
     const g = new THREE.Group();
     g.name = 'captain_spotless';
     const k = CS.height / 10;
@@ -101,15 +111,55 @@ export function createCleanerSystem(ctx) {
       const arm = add(new THREE.CapsuleGeometry(0.35, 2.4, 4, 8), light, rig, [side * 1.55, 6.2, 0]);
       arm.rotation.z = side * 0.25;
     }
-    legs = [-0.55, 0.55].map((x) => {
+    const pivots = [-0.55, 0.55].map((x) => {
       const pivot = new THREE.Group();
       pivot.position.set(x, 4.4, 0);
       rig.add(pivot);
       add(new THREE.CapsuleGeometry(0.45, 3.2, 4, 8), light, pivot, [0, -2.2, 0]);
       return pivot;
     });
-    return g;
+    return { group: g, legs: pivots };
   }
+
+  /**
+   * For the co-op guest (net/system.js, `flyers` rows): a second giant from the
+   * same builder, with his own wave ring, and the geometry and materials to
+   * release. Nothing is added to the scene and no state is touched.
+   * @returns {{root: THREE.Group, legs: THREE.Object3D[], wave: THREE.Mesh, waveMat: THREE.MeshBasicMaterial,
+   *   geometries: THREE.BufferGeometry[], materials: THREE.Material[], stride: number}}
+   */
+  function buildGuestModel() {
+    /** @type {THREE.Material[]} */
+    const own = [];
+    const built = build(own);
+    const waveMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(1.6, 1.6, 1.2), transparent: true, opacity: 0.45,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+    });
+    own.push(waveMat);
+    const wave = new THREE.Mesh(new THREE.RingGeometry(CS.radius * 0.6, CS.radius, 48, 1), waveMat);
+    wave.rotation.x = -Math.PI / 2;
+    wave.position.y = 0.3;
+    wave.name = 'spotless_wave';
+    built.group.add(wave);
+    /** @type {Set<THREE.BufferGeometry>} */
+    const geometries = new Set();
+    built.group.traverse((/** @type {any} */ o) => { if (o.geometry) geometries.add(o.geometry); });
+    return { root: built.group, legs: built.legs, wave, waveMat, geometries: [...geometries], materials: own, stride: CS_STRIDE };
+  }
+
+  /**
+   * What the guest needs to draw him (a `flyers` row, net/flyerPose.js), or
+   * null while he is not walking. Read-only.
+   * @returns {{x: number, z: number, yaw: number, u: number}|null}
+   */
+  function replicaState() {
+    if (!walk || !giant) return null;
+    return { x: giant.position.x, z: giant.position.z, yaw: giant.rotation.y, u: Math.min(1, walk.t) };
+  }
+
+  /** His own scene objects, for the guest to hold back while the host's are drawn. @returns {THREE.Object3D[]} */
+  const localRoots = () => (giant && wave ? [giant, wave] : []);
 
   /**
    * @param {THREE.Vector3} at
@@ -216,7 +266,9 @@ export function createCleanerSystem(ctx) {
 
   /** @returns {void} */
   function initCleaner() {
-    giant = build();
+    const built = build(materials);
+    giant = built.group;
+    legs = built.legs;
     giant.visible = false;
     Sim.three.scene.add(giant);
     const waveMat = new THREE.MeshBasicMaterial({
@@ -259,8 +311,8 @@ export function createCleanerSystem(ctx) {
     walk.t += dt / CS.seconds;
     const u = Math.min(1, walk.t);
     giant.position.lerpVectors(walk.from, walk.to, u);
-    const before = Math.min(1, walk.t - dt / CS.seconds) * 40;
-    const stride = u * 40;
+    const before = Math.min(1, walk.t - dt / CS.seconds) * CS_STRIDE;
+    const stride = u * CS_STRIDE;
     // His sounds (sound/creatures.js): a held shimmer of light round him, and
     // a soft, huge footfall each half stride.
     const sounds = ctx.systems.creatureSounds;
@@ -319,5 +371,5 @@ export function createCleanerSystem(ctx) {
     glare = null;
   }
 
-  return { start, active: () => !!walk, initCleaner, updateCleaner, resetCleaner, disposeCleaner };
+  return { start, active: () => !!walk, initCleaner, updateCleaner, resetCleaner, disposeCleaner, buildGuestModel, replicaState, localRoots };
 }

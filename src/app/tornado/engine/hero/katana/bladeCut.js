@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { KATANA_BLADE as CFG, KATANA_BLADE_UI } from './config.js';
 import { createKatanaTargets, inReach } from './targets.js';
 import { classifySwipe } from './slash.js';
+import { createWeaponFx } from '../weaponFx.js';
 
 /**
  * ===========================================================================
@@ -87,6 +88,8 @@ const PIECE_HEIGHT = 0;
 export function createKatanaBladeCut(ctx, env) {
   const { Sim } = /** @type {any} */ (ctx);
   const targets = createKatanaTargets(ctx);
+  /** Announces each Blade Mode cut to the co-op guest (hero/weaponFx.js). */
+  const weaponFx = createWeaponFx(ctx);
   /** @type {import('./slash.js').CutPlane} */
   const plane = { point: new THREE.Vector3(), normal: new THREE.Vector3(0, 0, 1), kind: 'vertical' };
   /** @type {View} */
@@ -252,12 +255,16 @@ export function createKatanaBladeCut(ctx, env) {
     const pieces = env.pieces();
     const recut = pieces ? cutPieces(pieces) : 0;
     const result = targets.strikeAlong(reach, touches, CFG.bodyRadius, pieces ? pieces.takeOver : undefined, plane);
-    if (result.cut + result.people + recut === 0) return 'miss';
+    if (result.cut + result.people + recut === 0) {
+      weaponFx.announce('cut', roger, roger, '', 1);
+      return 'miss';
+    }
     if (sys.katanaSound) sys.katanaSound.playSlice();
     // A killing breaks Smooth Criminal's spell, as the other weapons' do.
     ctx.events.emit('rogerKill');
     const feel = env.feel();
     if (feel) feel.cut(result.cut, recut, roger, result.people);
+    weaponFx.announce('cut', roger, roger, 'enemy', 1);
     return 'cut';
   }
 

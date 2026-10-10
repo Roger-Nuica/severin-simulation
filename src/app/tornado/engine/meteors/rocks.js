@@ -45,26 +45,41 @@ export function createMeteorRocks(ctx, S, api) {
    * the dam (the flood starts only from its own button, or Doomsday).
    * @param {number} index which rock of this group
    * @param {number} count how many are in it
+   * @param {{from: {x: number, y: number, z: number}, to: {x: number, y: number, z: number}, radius: number, airburst: boolean, rand: () => number}} [view]
+   *   co-op guest: the host's rock as announced (net/meteorFx.js), with a seeded
+   *   generator for the shapes; the host passes none and keeps `Math.random`
    * @returns {Meteor}
    */
-  function createMeteor(index, count) {
+  function createMeteor(index, count, view) {
+    const rnd = view ? view.rand : Math.random;
+    /** @param {number[]} range @returns {number} */
+    const btw = (range) => range[0] + rnd() * (range[1] - range[0]);
     // One rock of every group comes apart in the air instead of landing.
-    const airburst = count > METEOR.airburstIndex && index === METEOR.airburstIndex;
-    const impactAngle = Math.random() * Math.PI * 2;
-    const impactR = api.between(METEOR.impactRadius);
-    const to = new THREE.Vector3(Math.cos(impactAngle) * impactR, 0, Math.sin(impactAngle) * impactR);
-    // Comes in on its own bearing, at a slant rather than straight down --
-    // except for an airburst, which comes in steeply so that the altitude it
-    // detonates at is over the town rather than short of it.
-    const entryAngle = Math.random() * Math.PI * 2;
-    const reach = airburst ? METEOR.burstEntryDistance : METEOR.entryDistance;
-    const from = new THREE.Vector3(
-      to.x + Math.cos(entryAngle) * reach,
-      METEOR.entryHeight,
-      to.z + Math.sin(entryAngle) * reach
-    );
+    const airburst = view ? view.airburst : count > METEOR.airburstIndex && index === METEOR.airburstIndex;
+    /** @type {THREE.Vector3} */
+    let to;
+    /** @type {THREE.Vector3} */
+    let from;
+    if (view) {
+      to = new THREE.Vector3(view.to.x, view.to.y, view.to.z);
+      from = new THREE.Vector3(view.from.x, view.from.y, view.from.z);
+    } else {
+      const impactAngle = Math.random() * Math.PI * 2;
+      const impactR = api.between(METEOR.impactRadius);
+      to = new THREE.Vector3(Math.cos(impactAngle) * impactR, 0, Math.sin(impactAngle) * impactR);
+      // Comes in on its own bearing, at a slant rather than straight down --
+      // except for an airburst, which comes in steeply so that the altitude it
+      // detonates at is over the town rather than short of it.
+      const entryAngle = Math.random() * Math.PI * 2;
+      const reach = airburst ? METEOR.burstEntryDistance : METEOR.entryDistance;
+      from = new THREE.Vector3(
+        to.x + Math.cos(entryAngle) * reach,
+        METEOR.entryHeight,
+        to.z + Math.sin(entryAngle) * reach
+      );
+    }
 
-    const radius = api.between(METEOR.radius);
+    const radius = view ? view.radius : api.between(METEOR.radius);
     const rock = new THREE.Group();
     rock.visible = false;
     S.group.add(rock);
@@ -105,23 +120,23 @@ export function createMeteorRocks(ctx, S, api) {
     // Pieces that break off partway down. Children of the same group, so they
     // ride the fall line and only their own lateral offset is integrated.
     const fragments = [];
-    const pieces = Math.round(api.between(METEOR.fragments));
+    const pieces = Math.round(btw(METEOR.fragments));
     for (let f = 0; f < pieces; f++) {
-      const fr = radius * api.between(METEOR.fragmentRadius);
+      const fr = radius * btw(METEOR.fragmentRadius);
       const fragMat = createRockMaterial(fr);
       materials.push(fragMat);
       const frag = new THREE.Mesh(createRockGeometry(fr), fragMat);
-      const angle = Math.random() * Math.PI * 2;
+      const angle = rnd() * Math.PI * 2;
       frag.visible = false;
       rock.add(frag);
       fragments.push({
         mesh: frag,
         radius: fr,
         // Where it ends up relative to the parent, by the time it lands.
-        driftX: Math.cos(angle) * METEOR.fragmentSpread * (0.4 + Math.random() * 0.6),
-        driftZ: Math.sin(angle) * METEOR.fragmentSpread * (0.4 + Math.random() * 0.6),
+        driftX: Math.cos(angle) * METEOR.fragmentSpread * (0.4 + rnd() * 0.6),
+        driftZ: Math.sin(angle) * METEOR.fragmentSpread * (0.4 + rnd() * 0.6),
         spin: new THREE.Vector3(
-          (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8
+          (rnd() - 0.5) * 8, (rnd() - 0.5) * 8, (rnd() - 0.5) * 8
         )
       });
     }
@@ -134,7 +149,7 @@ export function createMeteorRocks(ctx, S, api) {
       burstAt: airburst
         ? 1 - METEOR.burstHeight / Math.max(1, METEOR.entryHeight)
         : 2,
-      delay: index * METEOR.stagger + Math.random() * METEOR.staggerJitter,
+      delay: view ? 0 : index * METEOR.stagger + Math.random() * METEOR.staggerJitter,
       t: 0, state: 'waiting'
     };
   }
@@ -164,6 +179,8 @@ export function createMeteorRocks(ctx, S, api) {
    */
   function callVolley(count) {
     if (!S.group) return;
+    // Co-op guest: the host's rocks are drawn from its `fx` rows (mirrorRock); none starts here.
+    if (ctx.systems.net && ctx.systems.net.isPeerView()) return;
     for (let i = 0; i < count; i++) S.meteors.push(createMeteor(i, count));
     api.showBanner('METEOR STRIKE!', `${count} impacts inbound`);
   }

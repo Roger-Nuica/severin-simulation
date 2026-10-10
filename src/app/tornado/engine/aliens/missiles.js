@@ -1,5 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
+import { createWeaponFx } from '../hero/weaponFx.js';
+import { missileSeconds, missileExtra, missileEase } from '../net/enemyFx.js';
 
 /**
  * ===========================================================================
@@ -108,7 +110,12 @@ export function createAlienMissiles(ctx, S, api) {
   let geometries = [];
   /** @type {THREE.Material[]} */
   let materials = [];
-  /** @type {{group: THREE.Group, alive: boolean, f: Flight, puffT: number, puffs: Float32Array, head: number}[]} */
+  /**
+   * `fly` is a co-op guest's drawing of a host missile (net/enemyFx.js): an eased straight path
+   * from `x0..` to `x1..` over `dur` seconds, no homing; `on` is false for the host's own.
+   * @type {{group: THREE.Group, alive: boolean, f: Flight, puffT: number, puffs: Float32Array, head: number,
+   *   fly: {on: boolean, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, t: number, dur: number, sound: boolean}}[]}
+   */
   let pool = [];
   /** @type {THREE.InstancedMesh|null} */
   let smoke = null;
@@ -122,6 +129,9 @@ export function createAlienMissiles(ctx, S, api) {
   const s3 = new THREE.Vector3();
   const zero = new THREE.Matrix4().makeScale(0, 0, 0);
   const target = { x: 0, y: 0, z: 0 };
+  /** Announces each launch to the co-op guest (hero/weaponFx.js); nothing happens outside a room with a guest. */
+  const weaponFx = createWeaponFx(ctx);
+  const fxEnd = { x: 0, y: 0, z: 0 };
 
   /** @returns {void} */
   function initMissiles() {
@@ -149,7 +159,8 @@ export function createAlienMissiles(ctx, S, api) {
       group.add(finA, finB);
       group.visible = false;
       Sim.three.scene.add(group);
-      pool.push({ group, alive: false, f: { x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 1, speed: 0, age: 0 }, puffT: 0, puffs: new Float32Array(MISSILE.trail * 4), head: 0 });
+      pool.push({ group, alive: false, f: { x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 1, speed: 0, age: 0 }, puffT: 0, puffs: new Float32Array(MISSILE.trail * 4), head: 0,
+        fly: { on: false, x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0, t: 0, dur: 1, sound: false } });
     }
     const n = MISSILE.max * MISSILE.trail;
     smoke = new THREE.InstancedMesh(puff, grey, n);
@@ -185,7 +196,110 @@ export function createAlienMissiles(ctx, S, api) {
     m.puffs.fill(0);
     m.group.visible = true;
     ctx.systems.jetSound?.playRocketLaunch(level(from));
+    // Last: the co-op guest sees it fly too (net/enemyFx.js `missile`); one read outside a room.
+    const net = ctx.systems.net;
+    if (net && net.fxLive()) announceLaunch(from, heading);
     return true;
+  }
+
+  /**
+   * The host's launch as a row: where it left, where it is expected to arrive (Roger's chest now,
+   * or straight on and down when no one is there) and how long that should take.
+   * @param {THREE.Vector3} from @param {THREE.Vector3} heading unit
+   * @returns {void}
+   */
+  function announceLaunch(from, heading) {
+    const hero = api.heroTarget(from.x, from.z);
+    if (hero) {
+      fxEnd.x = hero.x;
+      fxEnd.y = heroY(hero);
+      fxEnd.z = hero.z;
+    } else {
+      fxEnd.x = from.x + heading.x * 40;
+      fxEnd.y = 0;
+      fxEnd.z = from.z + heading.z * 40;
+    }
+    const d = Math.hypot(fxEnd.x - from.x, fxEnd.y - from.y, fxEnd.z - from.z);
+    weaponFx.announce('missile', from, fxEnd, '', missileExtra(missileSeconds(d)));
+  }
+
+  /**
+   * A missile the co-op host announced, drawn on this screen: the same model and trail, flown on an
+   * eased straight path from where it left to where the host expected it to arrive, and a cosmetic
+   * burst there. It homes on nothing here and hurts nobody (R-053). It takes one of the pool's
+   * slots (no new cap, R-048); with none free it is not drawn.
+   * @param {{x: number, y: number, z: number}} from @param {{x: number, y: number, z: number}} to
+   * @param {number} seconds the flight
+   * @param {boolean} sound the launch and the burst may be heard (the mirror's rate cap)
+   * @returns {boolean} whether there was a slot
+   */
+  function showMissile(from, to, seconds, sound) {
+    const m = pool.find(x => !x.alive);
+    if (!m) return false;
+    const w = m.fly;
+    w.on = true;
+    w.x0 = from.x; w.y0 = from.y; w.z0 = from.z;
+    w.x1 = to.x; w.y1 = to.y; w.z1 = to.z;
+    w.t = 0;
+    w.dur = Math.max(0.1, seconds);
+    w.sound = sound;
+    dir.set(w.x1 - w.x0, w.y1 - w.y0, w.z1 - w.z0);
+    if (dir.lengthSq() < 1e-6) dir.set(0, -0.35, 1);
+    dir.normalize();
+    m.alive = true;
+    Object.assign(m.f, { x: from.x, y: from.y, z: from.z, dx: dir.x, dy: dir.y, dz: dir.z, speed: MISSILE.speed0, age: 0 });
+    m.puffT = 0;
+    m.puffs.fill(0);
+    m.group.position.set(from.x, from.y, from.z);
+    m.group.quaternion.setFromUnitVectors(Z, dir);
+    m.group.visible = true;
+    if (sound) ctx.systems.jetSound?.playRocketLaunch(level(from));
+    return true;
+  }
+
+  /**
+   * One step of a drawn missile: along its eased path, its trail, and the burst at the end.
+   * @param {Object} m
+   * @param {number} dt
+   * @returns {void}
+   */
+  function stepShown(m, dt) {
+    const w = m.fly;
+    const f = m.f;
+    w.t += dt;
+    const u = Math.min(1, w.t / w.dur);
+    const s = missileEase(u);
+    f.x = w.x0 + (w.x1 - w.x0) * s;
+    f.y = w.y0 + (w.y1 - w.y0) * s;
+    f.z = w.z0 + (w.z1 - w.z0) * s;
+    m.group.position.set(f.x, f.y, f.z);
+    trailPuff(m, f, dt);
+    if (u < 1) return;
+    w.on = false;
+    m.alive = false;
+    m.group.visible = false;
+    at.set(f.x, Math.max(1, f.y), f.z);
+    ctx.systems.explosions.cosmeticExplosion(at.x, at.y, at.z, 1.6, w.sound);
+    if (w.sound) ctx.systems.jetSound?.playBlast(level(at));
+  }
+
+  /**
+   * The smoke puff a missile leaves every `MISSILE.trailEvery` seconds (the host's and a drawn one's).
+   * @param {Object} m
+   * @param {Flight} f
+   * @param {number} dt
+   * @returns {void}
+   */
+  function trailPuff(m, f, dt) {
+    m.puffT -= dt;
+    if (m.puffT > 0) return;
+    m.puffT = MISSILE.trailEvery;
+    const k = m.head * 4;
+    m.puffs[k] = f.x - f.dx * 2.2;
+    m.puffs[k + 1] = f.y - f.dy * 2.2;
+    m.puffs[k + 2] = f.z - f.dz * 2.2;
+    m.puffs[k + 3] = MISSILE.trailLife;
+    m.head = (m.head + 1) % MISSILE.trail;
   }
 
   /**
@@ -264,7 +378,9 @@ export function createAlienMissiles(ctx, S, api) {
     if (!smoke || !flame) return;
     let i = 0;
     for (const m of pool) {
-      if (m.alive) {
+      if (m.alive && m.fly.on) {
+        stepShown(m, dt);
+      } else if (m.alive) {
         const f = m.f;
         const hero = api.heroTarget(f.x, f.z);
         if (hero) {
@@ -288,16 +404,7 @@ export function createAlienMissiles(ctx, S, api) {
         m.group.position.set(f.x, f.y, f.z);
         q.setFromUnitVectors(Z, dir.set(f.dx, f.dy, f.dz));
         m.group.quaternion.copy(q);
-        m.puffT -= dt;
-        if (m.puffT <= 0) {
-          m.puffT = MISSILE.trailEvery;
-          const k = m.head * 4;
-          m.puffs[k] = f.x - f.dx * 2.2;
-          m.puffs[k + 1] = f.y - f.dy * 2.2;
-          m.puffs[k + 2] = f.z - f.dz * 2.2;
-          m.puffs[k + 3] = MISSILE.trailLife;
-          m.head = (m.head + 1) % MISSILE.trail;
-        }
+        trailPuff(m, f, dt);
         const reached = hero && Math.hypot(hero.x - f.x, heroY(hero) - f.y, hero.z - f.z) < MISSILE.hitRadius;
         if (reached || f.y < 0.3 || f.age > MISSILE.life || hitsBuilding(f)) burst(m, !!reached);
       }
@@ -344,6 +451,7 @@ export function createAlienMissiles(ctx, S, api) {
   function resetMissiles() {
     for (const m of pool) {
       m.alive = false;
+      m.fly.on = false;
       m.group.visible = false;
       m.puffs.fill(0);
     }
@@ -370,5 +478,5 @@ export function createAlienMissiles(ctx, S, api) {
     materials = [];
   }
 
-  return { MISSILE, initMissiles, launchMissile, updateMissiles, missilesOut, resetMissiles, disposeMissiles };
+  return { MISSILE, initMissiles, launchMissile, showMissile, updateMissiles, missilesOut, resetMissiles, disposeMissiles };
 }

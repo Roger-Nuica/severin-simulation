@@ -38,7 +38,10 @@ export const COWS = {
  *   initCows: () => void,
  *   updateCows: (dt: number) => void,
  *   resetCows: () => void,
- *   disposeCows: () => void
+ *   disposeCows: () => void,
+ *   buildGuestModel: () => any,
+ *   replicaState: () => any[],
+ *   localRoots: () => THREE.Object3D[]
  * }}
  */
 export function createCowSystem(ctx) {
@@ -295,5 +298,36 @@ export function createCowSystem(ctx) {
     mats.length = 0;
   }
 
-  return { cows: () => herd, initCows, updateCows, resetCows, disposeCows };
+  /**
+   * For the co-op guest (net/system.js, `flyers` rows): the cow builder over
+   * this system's own shared geometry and materials (the guest releases
+   * nothing of them). Null before the herd is built. Nothing is added to the
+   * scene and nothing goes on `Sim.objects` (R-048).
+   * @returns {{build: (index: number) => THREE.Group, geometries: THREE.BufferGeometry[], materials: THREE.Material[]}|null}
+   */
+  function buildGuestModel() {
+    if (!geo.body || !mats.length) return null;
+    return { build: (i) => buildCow(i), geometries: [], materials: [] };
+  }
+
+  /**
+   * What the guest needs to draw each cow (`flyers` rows, net/flyerPose.js).
+   * Read-only.
+   * @returns {{index: number, x: number, y: number, z: number, quaternion: THREE.Quaternion, lifted: boolean, headY: number}[]}
+   */
+  function replicaState() {
+    const out = [];
+    herd.forEach((cow, index) => {
+      if (!cow.mesh.parent) return;
+      const p = cow.mesh.position;
+      const head = cow.mesh.userData.head;
+      out.push({ index, x: p.x, y: p.y, z: p.z, quaternion: cow.mesh.quaternion, lifted: cow.captureState !== 'grounded', headY: head ? head.position.y : 1.35 });
+    });
+    return out;
+  }
+
+  /** The herd's own scene objects, for the guest to hold back while the host's are drawn. @returns {THREE.Object3D[]} */
+  const localRoots = () => herd.map((cow) => cow.mesh);
+
+  return { cows: () => herd, initCows, updateCows, resetCows, disposeCows, buildGuestModel, replicaState, localRoots };
 }

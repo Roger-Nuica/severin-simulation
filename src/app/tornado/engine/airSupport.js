@@ -89,7 +89,8 @@ const GLOW = 420;
 /**
  * @param {Object} ctx
  * @returns {{initAirSupport: () => void, updateAirSupport: (dt: number) => void, resetAirSupport: () => void,
- *   disposeAirSupport: () => void, up: () => boolean, kills: () => number, summon: () => void, debug: () => Object}}
+ *   disposeAirSupport: () => void, up: () => boolean, kills: () => number, summon: () => void, debug: () => Object,
+ *   buildGuestModel: () => any, replicaState: () => any[], localRoots: () => THREE.Object3D[]}}
  */
 export function createAirSupportSystem(ctx) {
   const { Sim } = ctx;
@@ -1159,8 +1160,50 @@ export function createAirSupportSystem(ctx) {
     smoke = glow = null;
   }
 
+  /**
+   * For the co-op guest (net/system.js, `flyers` rows): the fighter's own
+   * builder with its own geometry and glow materials, so the guest's jets
+   * cloak each on their own. Nothing is added to the scene, no state touched.
+   * @returns {{build: (index: number) => ReturnType<typeof buildFighter>, geometries: THREE.BufferGeometry[], materials: THREE.Material[], reach: number}}
+   */
+  function buildGuestModel() {
+    const own = buildFighterGeometry();
+    const materials = /** @type {THREE.Material[]} */ ([]);
+    const glow = (/** @type {THREE.Color} */ c, opacity = 1) => {
+      const m = new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
+      materials.push(m);
+      return m;
+    };
+    const set = {
+      flame: glow(new THREE.Color(1.6, 0.62, 0.22), 0.75),
+      core: glow(new THREE.Color(1.4, 1.6, 2.4), 0.9),
+      red: glow(new THREE.Color(4, 0.2, 0.15)),
+      green: glow(new THREE.Color(0.2, 4, 0.5)),
+      strobe: glow(new THREE.Color(5, 5, 5))
+    };
+    return { build: () => buildFighter(own, set), geometries: [own.body, own.canopy, own.flame, own.core, own.light, own.collar], materials, reach: REACH };
+  }
+
+  /**
+   * What the guest needs to draw each jet in the air (`flyers` rows,
+   * net/flyerPose.js). Read-only; none before the flight arrives.
+   * @returns {{index: number, x: number, y: number, z: number, quaternion: THREE.Quaternion, vis: number, throttle: number}[]}
+   */
+  function replicaState() {
+    const out = [];
+    for (const jet of jets) {
+      if (jet.mode === 'off') continue;
+      const p = jet.look.group.position;
+      out.push({ index: jet.index, x: p.x, y: p.y, z: p.z, quaternion: jet.look.group.quaternion, vis: jet.vis, throttle: jet.throttle });
+    }
+    return out;
+  }
+
+  /** The jets' own scene objects, for the guest to hold back while the host's are drawn. @returns {THREE.Object3D[]} */
+  const localRoots = () => jets.map((j) => j.look.group);
+
   return {
-    initAirSupport, updateAirSupport, resetAirSupport, disposeAirSupport,
+    initAirSupport, updateAirSupport, resetAirSupport, disposeAirSupport, buildGuestModel, replicaState, localRoots,
     up: () => arrived, kills: () => killCount,
     /** What each jet is doing (for testing from the console). */
     debug: () => ({

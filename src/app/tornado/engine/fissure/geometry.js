@@ -152,7 +152,7 @@ export function createFissureGeometry(ctx, S, api) {
     /** @type {Vent} */
     const vent = {
       mesh, fissure, along, x, z, radius,
-      active: false, quenched: false, rise: 0, level: 0, seed: Math.random(), lava,
+      active: false, quenched: false, rise: 0, level: 0, seed: S.rand(), lava,
       spot: { x, z, radius, level: 0, vent: null, caldera: null }
     };
     // The entry it publishes to hotSpots() points back at it, so quench() can
@@ -171,13 +171,13 @@ export function createFissureGeometry(ctx, S, api) {
   function createFissure(cx, cz, heading, severity, rift = false) {
     const length = rift
       ? lerpRange(RIFT.armLength, severity)
-      : lerpRange(FISSURE.length, severity) * (0.7 + Math.random() * 0.45);
+      : lerpRange(FISSURE.length, severity) * (0.7 + S.rand() * 0.45);
     const width = rift
       ? lerpRange(RIFT.width, severity)
-      : lerpRange(FISSURE.width, severity) * (0.8 + Math.random() * 0.35);
+      : lerpRange(FISSURE.width, severity) * (0.8 + S.rand() * 0.35);
     const points = rift
-      ? walkFissure(cx, cz, heading, length, RIFT.maxTurn, RIFT.straighten)
-      : walkFissure(cx, cz, heading, length);
+      ? walkFissure(cx, cz, heading, length, RIFT.maxTurn, RIFT.straighten, S.rand)
+      : walkFissure(cx, cz, heading, length, FISSURE.maxTurn, FISSURE.straighten, S.rand);
     const cumulative = cumulativeLengths(points);
     const reveal = { value: 0 };
     const lava = { value: 0 };
@@ -187,10 +187,10 @@ export function createFissureGeometry(ctx, S, api) {
     return {
       points, cumulative, total: cumulative[cumulative.length - 1], width, rift,
       growthProgress: 0,
-      growSeconds: between(rift ? RIFT.growSeconds : FISSURE.growSeconds),
+      growSeconds: between(rift ? RIFT.growSeconds : FISSURE.growSeconds, S.rand),
       // The rift's two arms start together and immediately: they are one tear
       // opening, not two cracks that happen to line up.
-      delay: rift ? 0 : Math.random() * FISSURE.stagger,
+      delay: rift ? 0 : S.rand() * FISSURE.stagger,
       opened: false, reveal, lava, mesh
     };
   }

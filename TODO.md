@@ -47,14 +47,31 @@ send a file and it will be hooked up):
     foreground, `?netdebug` on both, the relay run with `RELAY_DEBUG=1` on
     Render (note its region and any slow first join); paste both overlays and
     the `[relay-debug]` lines.
-  - **Approvals:** lowering `INTERP_DELAY` (0.14 s, proposed about 0.10 s only
-    if the measured snapshot gap stays short), and the new rule R-060.
-  - **Decision:** the guest's railgun cooldown is 1.6 s (`net/guestWeapons.js`)
-    but the host's own is 0.2 s (`heroWeapons.js`); say which should stand.
+  - **Approval:** lowering `INTERP_DELAY` (0.14 s, proposed about 0.10 s only
+    if the measured snapshot gap stays short).
   - **Subtask 12 gate:** guest right-click shows the weapon for each of the six
     wheel entries, every guest weapon's effect, damage and score reach the
     host, each sees the other's held weapon, no stray meshes or DOM after
     rejoin, Restart, Leave or Reset, frame rate near 56 fps.
+
+- Co-op guest visibility (plan `PLAN_coop-guest-visibility.md`), nothing below has been run in two real
+  browsers; lint, test and build were not run for the docs pass:
+  - **Pending manual stops (not ticked):** Subtask 7 (Black Hole: open, 20 s,
+    collapse, a queued shot, lens, no camera move) and Subtask 8 (tornado:
+    comes down, grows, moves, leans, ropes out; the single-player regression:
+    a normal run, Hero Mode, Black Hole, Restart).
+  - **Two-browser checklist** (plan, "Manual two-browser checklist", items 1 to 14;
+    `?netdebug` on both, same build on host, guest and relay): each weapon from
+    host and guest seen once on both screens; Black Hole by either; the tornado
+    and the sky; explosions and lightning; the jetpack at height; single-player
+    regression with `?bench=1&scenario=hero&render=0&seconds=40` before and
+    after; rejoin, Restart, Leave and Reset leave nothing behind. Items 11 to 14
+    (combat and powers) wait for Subtasks C2 to C7 and 17.
+  - **Byte read-out with `?netdebug`:** 60 s with the host firing each weapon
+    and starting a tornado, bytes a second per kind, no `fx` overflow, no
+    events dropped by the relay. The byte figures in `PROJECT_HISTORY.md` are
+    estimates until then.
+  - **Owner decisions** are all answered (2026-10-10, recorded in the plan); the docs follow the code. Still to do in code: C2 to C7 and Subtask 17.
 
 ## Feature backlog
 

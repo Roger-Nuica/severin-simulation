@@ -1,6 +1,7 @@
 // @ts-check
 import * as THREE from 'three';
 import { bannerHost } from '../utils/banners.js';
+import { QUAKE, MAX_SINKHOLES, quakeId, sameSite } from './net/quakeFx.js';
 
 /**
  * ===========================================================================
@@ -62,6 +63,7 @@ const SINKHOLE = {
  * @property {number} x
  * @property {number} z
  * @property {number} radius
+ * @property {number} rimHeight
  * @property {number} grown 0..1
  * @property {Set<Object>} taken things already swallowed
  */
@@ -74,12 +76,16 @@ const SINKHOLE = {
  *   updateSinkholes: (dt: number) => void,
  *   swallowedCount: () => number,
  *   holeCount: () => number,
+ *   mirror: (rows: Map<number, number[]>) => void,
+ *   replicaState: () => ({x: number, z: number, radius: number, grown: number, rimHeight: number}[]|null),
  *   resetSinkholes: () => void,
  *   disposeSinkholes: () => void
  * }}
  */
 export function createSinkholeSystem(ctx) {
   const { Sim } = ctx;
+  // Co-op guest: the host's holes are drawn from the `quake` rows (mirror); nothing is undermined or swallowed here.
+  const peerView = () => !!(ctx.systems.net && ctx.systems.net.isPeerView());
 
   /** @type {Hole[]} */
   const holes = [];
@@ -149,7 +155,7 @@ export function createSinkholeSystem(ctx) {
    * @returns {boolean}
    */
   function openSinkhole(x, z) {
-    if (!group) return false;
+    if (!group || peerView()) return false;
     const site = (x === undefined || z === undefined) ? pickSite() : { x, z };
     const radius = between(SINKHOLE.radius);
 
@@ -159,7 +165,26 @@ export function createSinkholeSystem(ctx) {
       if (Math.hypot(hole.x - site.x, hole.z - site.z) < hole.radius + radius) return false;
     }
     if (holes.length >= SINKHOLE.maxKept) disposeHole(holes.shift());
+    buildHole(site.x, site.z, radius, between(SINKHOLE.rimHeight));
 
+    ctx.systems.gamefeel.event('collapse', new THREE.Vector3(site.x, 0, site.z));
+    ctx.systems.damage.addDamageScore(SINKHOLE.score);
+    ctx.systems.earthquake.kickDust(site.x, site.z, 8, 2.6);
+    showBanner('SINKHOLE', 'The ground is going');
+    return true;
+  }
+
+  /**
+   * The meshes of a hole at a site, grown to nothing, added to the list.
+   * Shared by the host's opening and the guest's mirror: pictures only.
+   * @param {number} x
+   * @param {number} z
+   * @param {number} radius
+   * @param {number} rimHeight
+   * @returns {Hole}
+   */
+  function buildHole(x, z, radius, rimHeight) {
+    const site = { x, z };
     const root = new THREE.Group();
     root.position.set(site.x, 0, site.z);
     root.name = 'sinkhole';
@@ -188,7 +213,6 @@ export function createSinkholeSystem(ctx) {
 
     // The rim: a ring of broken ground around the lip, slightly proud of the
     // road so the edge is not a clean cut.
-    const rimHeight = between(SINKHOLE.rimHeight);
     const rim = new THREE.Mesh(
       new THREE.CylinderGeometry(1.14, 1.0, rimHeight, SINKHOLE.segments, 1, true),
       new THREE.MeshStandardMaterial({
@@ -199,15 +223,25 @@ export function createSinkholeSystem(ctx) {
     root.add(rim);
 
     /** @type {Hole} */
-    const hole = { root, floor, rim, x: site.x, z: site.z, radius, grown: 0, taken: new Set() };
+    const hole = { root, floor, rim, x: site.x, z: site.z, radius, rimHeight, grown: 0, taken: new Set() };
     root.scale.setScalar(0.001);
     holes.push(hole);
+    return hole;
+  }
 
-    ctx.systems.gamefeel.event('collapse', new THREE.Vector3(site.x, 0, site.z));
-    ctx.systems.damage.addDamageScore(SINKHOLE.score);
-    ctx.systems.earthquake.kickDust(site.x, site.z, 8, 2.6);
-    showBanner('SINKHOLE', 'The ground is going');
-    return true;
+  /**
+   * Sets a hole's size for how far it has grown.
+   * @param {Hole} hole
+   * @returns {number} the radius now
+   */
+  function poseHole(hole) {
+    const r = hole.radius * THREE.MathUtils.smoothstep(hole.grown, 0, 1);
+    hole.root.scale.set(Math.max(0.001, r), 1, Math.max(0.001, r));
+    // Kept round rather than scaled with the rest: a rim that grows in
+    // height as the hole widens reads as the ground rising, not falling.
+    hole.rim.scale.y = 1 / Math.max(0.001, r);
+    hole.floor.scale.setScalar(1);
+    return r;
   }
 
   /**
@@ -255,18 +289,14 @@ export function createSinkholeSystem(ctx) {
     for (const hole of holes) {
       if (hole.grown < 1) {
         hole.grown = Math.min(1, hole.grown + dt / SINKHOLE.growSeconds);
-        const r = hole.radius * THREE.MathUtils.smoothstep(hole.grown, 0, 1);
-        hole.root.scale.set(Math.max(0.001, r), 1, Math.max(0.001, r));
-        // Kept round rather than scaled with the rest: a rim that grows in
-        // height as the hole widens reads as the ground rising, not falling.
-        hole.rim.scale.y = 1 / Math.max(0.001, r);
-        hole.floor.scale.setScalar(1);
+        const r = poseHole(hole);
 
         // An evacuation point standing over it is not an evacuation point
         // any more.
         const evacuation = ctx.systems.evacuation;
-        if (evacuation && evacuation.closePointAt) evacuation.closePointAt(hole.x, hole.z, r);
+        if (evacuation && evacuation.closePointAt && !peerView()) evacuation.closePointAt(hole.x, hole.z, r);
       }
+      if (peerView()) continue;
       const live = hole.radius * THREE.MathUtils.smoothstep(hole.grown, 0, 1);
       if (live < 1) continue;
 
@@ -329,7 +359,51 @@ export function createSinkholeSystem(ctx) {
 
   /** @returns {number} */
   function holeCount() {
-    return holes.length;
+    return peerView() ? 0 : holes.length;
+  }
+
+  /**
+   * Co-op guest: the host's `quake` rows for the holes, called every frame
+   * with the whole map (empty when the host has none). A hole is drawn where
+   * and as big as the host's, growing on the guest's own clock, set to the
+   * host's when it drifts. Nothing is undermined, swallowed or scored.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function mirror(rows) {
+    if (!group) return;
+    for (let i = holes.length - 1; i >= 0; i--) {
+      let found = false;
+      for (let slot = 0; slot < MAX_SINKHOLES && !found; slot++) {
+        const r = rows.get(quakeId(QUAKE.sinkhole, slot));
+        found = !!r && sameSite(holes[i], r[2], r[3]);
+      }
+      if (!found) { disposeHole(holes[i]); holes.splice(i, 1); }
+    }
+    for (let slot = 0; slot < MAX_SINKHOLES; slot++) {
+      const r = rows.get(quakeId(QUAKE.sinkhole, slot));
+      if (!r) continue;
+      let hole = holes.find(h => sameSite(h, r[2], r[3]));
+      if (!hole) {
+        hole = buildHole(r[2], r[3], r[4], r[6]);
+        hole.grown = r[5];
+        poseHole(hole);
+        if (ctx.systems.earthquake) ctx.systems.earthquake.kickDust(hole.x, hole.z, 8, 2.6);
+        showBanner('SINKHOLE', 'The ground is going');
+      } else if (Math.abs(hole.grown - r[5]) > 0.1) {
+        hole.grown = r[5];
+        poseHole(hole);
+      }
+    }
+  }
+
+  /**
+   * The holes as plain numbers for the snapshot's `quake` rows, read-only;
+   * null when there are none.
+   * @returns {{x: number, z: number, radius: number, grown: number, rimHeight: number}[]|null}
+   */
+  function replicaState() {
+    return holes.length ? holes.map(h => ({ x: h.x, z: h.z, radius: h.radius, grown: h.grown, rimHeight: h.rimHeight })) : null;
   }
 
   /** @returns {void} */
@@ -353,7 +427,7 @@ export function createSinkholeSystem(ctx) {
   }
 
   return {
-    initSinkholes, openSinkhole, updateSinkholes, swallowedCount, holeCount,
+    initSinkholes, openSinkhole, updateSinkholes, swallowedCount, holeCount, mirror, replicaState,
     resetSinkholes, disposeSinkholes
   };
 }

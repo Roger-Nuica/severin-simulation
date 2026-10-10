@@ -36,6 +36,7 @@ import { applyDamage, createHealthState, glowLevel, isHittable, isInstantKill as
  * @property {boolean} applied True when health actually changed.
  * @property {boolean} killed True when the hit ended the player (Roger: `killRoger` was called).
  * @property {number} health Health of the target after the call.
+ * @property {string} [reason] Why nothing changed (a diagnostic code only; nothing branches on it): `hero-off`, `roger-down`, `spawn-shield`, `invincible`, `guest-unknown`, `guest-out`, `revive-shield`, `guest-invincible`, `hit-window`.
  */
 
 /**
@@ -157,6 +158,20 @@ export function createHealthSystem(ctx) {
     return pierce ? !h.rogerSpawnShielded() : !h.rogerShielded();
   };
 
+  /**
+   * Why Roger cannot be hurt now, for the co-op diagnostic only (called after
+   * `rogerVulnerable` said no; it decides nothing).
+   * @param {boolean} pierce
+   * @returns {string} A reason code.
+   */
+  const rogerRefusal = (pierce) => {
+    const h = hero();
+    if (!ctx.Hero || !ctx.Hero.active || !h) return 'hero-off';
+    const phase = h.rogerPhase();
+    if (phase === 'dying' || phase === 'won') return 'roger-down';
+    return pierce || h.rogerSpawnShielded() ? 'spawn-shield' : 'invincible';
+  };
+
   /** @returns {any} The co-op system, looked up lazily (null when absent). */
   const net = () => ctx.systems.net;
 
@@ -212,14 +227,14 @@ export function createHealthSystem(ctx) {
   const damagePlayer = (request) => {
     const event = toEvent(request);
     const isRoger = event.targetId === '0';
-    if (isRoger && !rogerVulnerable(!!request.pierce)) return { ...NOTHING, health: health('0') };
+    if (isRoger && !rogerVulnerable(!!request.pierce)) return { ...NOTHING, health: health('0'), reason: rogerRefusal(!!request.pierce) };
     const entry0 = coopEntry(event.targetId);
-    if (isRoger ? isOut('0') : !isHittable(entry0)) return { ...NOTHING, health: health(event.targetId) };
+    if (isRoger ? isOut('0') : !isHittable(entry0)) return { ...NOTHING, health: health(event.targetId), reason: isRoger ? 'roger-down' : !entry0 ? 'guest-unknown' : entry0.state !== 'up' ? 'guest-out' : 'revive-shield' };
     // A guest's own Invincible (V), like Roger's: only a piercing hit gets through.
-    if (!isRoger && entry0 && /** @type {{invincible?: boolean}} */ (entry0).invincible && !request.pierce) return { ...NOTHING, health: health(event.targetId) };
+    if (!isRoger && entry0 && /** @type {{invincible?: boolean}} */ (entry0).invincible && !request.pierce) return { ...NOTHING, health: health(event.targetId), reason: 'guest-invincible' };
     const before = stateOf(event.targetId);
     const after = applyDamage(before, event, HEALTH);
-    if (after === before) return { applied: false, killed: false, health: before.value };
+    if (after === before) return { applied: false, killed: false, health: before.value, reason: 'hit-window' };
     players.set(event.targetId, after);
     const killed = isInstant(event, HEALTH) || after.value <= 0;
     if (killed && isRoger) {

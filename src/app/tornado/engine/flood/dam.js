@@ -45,11 +45,11 @@ export function createFloodDam(ctx, S, api) {
   }
 
   /**
-   * The moment it goes: the gate bursts into blocks of concrete thrown
-   * downstream, a wall of spray goes up, and the water is through.
+   * The breach itself, drawn: the gate gone, its blocks thrown downstream and
+   * a wall of spray (shared by the host's burst and the guest's mirror).
    * @returns {void}
    */
-  function burstGate() {
+  function spawnBreach() {
     S.gate.visible = false;
     const face = FLOOD.damX + FLOOD.damThickness / 2;
     for (let i = 0; i < FLOOD.chunkCount; i++) {
@@ -75,6 +75,16 @@ export function createFloodDam(ctx, S, api) {
       });
     }
     for (let i = 0; i < 160; i++) spawnJet(1, true);
+  }
+
+  /**
+   * The moment it goes: the gate bursts into blocks of concrete thrown
+   * downstream, a wall of spray goes up, and the water is through.
+   * @returns {void}
+   */
+  function burstGate() {
+    spawnBreach();
+    const face = FLOOD.damX + FLOOD.damThickness / 2;
 
     const at = new THREE.Vector3(FLOOD.damX, 12, 0);
     api.showBanner('DAM BREACH!', 'A wall of water is coming');
@@ -88,6 +98,26 @@ export function createFloodDam(ctx, S, api) {
 
     S.state.phase = 'breaking';
     S.state.timer = 0;
+  }
+
+  /**
+   * Co-op guest: the gate going, drawn and heard only (the host's
+   * `burstGate` minus the camera shake, the score and the large explosion).
+   * The sounds are the host's, scaled by how far the listener is.
+   * @param {number} scale 0..1 loudness (net/floodFx.js soundScale)
+   * @returns {void}
+   */
+  function mirrorBurst(scale) {
+    spawnBreach();
+    api.showBanner('DAM BREACH!', 'A wall of water is coming');
+    if (scale > 0.01) {
+      ctx.systems.earthquakeSound.playRupture(scale);
+      if (ctx.systems.floodSound) ctx.systems.floodSound.playCrash(scale);
+    }
+    const caps = ctx.systems.caps;
+    if (ctx.systems.earthquake && (!caps || caps.particleRoom() > 0)) {
+      ctx.systems.earthquake.kickDust(FLOOD.damX + FLOOD.damThickness / 2 + 6, 0, 8, 3);
+    }
   }
 
   /**
@@ -180,5 +210,5 @@ export function createFloodDam(ctx, S, api) {
     return !S.state.broken;
   }
 
-  return { rebuildGate, burstGate, spawnJet, updateChunks, damWall, westLimit, damSolids, isDamIntact };
+  return { rebuildGate, burstGate, mirrorBurst, spawnJet, updateChunks, damWall, westLimit, damSolids, isDamIntact };
 }

@@ -1,6 +1,8 @@
 // @ts-check
 import * as THREE from 'three';
 import { ALIENS, RAY_COLOURS, SHOTS, UP } from './config.js';
+import { createWeaponFx } from '../hero/weaponFx.js';
+import { raySub, rayLook, trackerTo, trackerExtra } from '../net/enemyFx.js';
 
 /**
  * ===========================================================================
@@ -92,6 +94,15 @@ export function createAlienWeapons(ctx, S, api) {
   const { Sim } = ctx;
   /** @type {THREE.BufferGeometry[]} */
   let geos = [];
+  /** The shared tube, disc and reticle geometries (made in `initWeapons`). @type {{tube: THREE.BufferGeometry, disc: THREE.BufferGeometry, reticle: THREE.BufferGeometry}|null} */
+  let shapes = null;
+  /** Announces the shots and laser bursts to the co-op guest (hero/weaponFx.js); nothing happens outside a room with a guest. */
+  const weaponFx = createWeaponFx(ctx);
+  const fxTo = { x: 0, y: 0, z: 0 };
+  /** The tracking lasers a co-op guest sees (net/mirror.js), made on the first one and kept for the session. */
+  const MIRROR_TRACKERS = { green: 1, red: 3 };
+  /** @type {{green: Object[], red: Object[]}} */
+  const mirrored = { green: [], red: [] };
 
   /**
    * @param {string} fragmentShader
@@ -130,6 +141,38 @@ export function createAlienWeapons(ctx, S, api) {
   }
 
   /**
+   * One tracking laser: a beam, its patch on the ground and its aiming reticle, in one colour.
+   * @param {'green'|'red'} colour
+   * @returns {Object}
+   */
+  function makeTracker(colour) {
+    const { tube, disc, reticle } = /** @type {NonNullable<typeof shapes>} */ (shapes);
+    const scene = Sim.three.scene;
+    const c = RAY_COLOURS[colour];
+    const group = new THREE.Group();
+    group.name = 'alien_laser';
+    const core = mesh(tube, softMaterial(SOFT_FRAGMENT, c.core, 1.1, LASER_FADE));
+    const glow = mesh(tube, softMaterial(SOFT_FRAGMENT, c.glow, 2.4, LASER_FADE));
+    // The outer halo: wide and faint, with bright bands running down it.
+    const halo = mesh(tube, softMaterial(SOFT_FRAGMENT, c.glow, 4, LASER_FADE));
+    core.visible = glow.visible = halo.visible = true;
+    group.add(core, glow, halo);
+    group.visible = false;
+    const foot = mesh(disc, softMaterial(DISC_FRAGMENT, c.splash, 2.2));
+    const aim = mesh(reticle, new THREE.MeshBasicMaterial({
+      color: c.flare, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false
+    }));
+    scene.add(group, foot, aim);
+    // `source` keys the health damage table; `struck` is the once-per-burst re-arm flag.
+    // `mlive` and the `m*` fields are a co-op guest's drawing of a host burst (never used by the host's own).
+    return {
+      group, core, glow, halo, foot, aim, colour, active: false, timer: 0, cooldown: 2, fx: 0, fz: 0,
+      source: colour === 'green' ? 'ufoTracker' : 'hunterTracker', struck: false,
+      mlive: false, mt: 0, mx: 0, mz: 0, mdx: 0, mdz: 0, mcrawl: 0, mfrom: new THREE.Vector3()
+    };
+  }
+
+  /**
    * The pool of shots and the trackers, made once (aliens.js initAliens).
    * @returns {void}
    */
@@ -145,6 +188,7 @@ export function createAlienWeapons(ctx, S, api) {
     const reticle = new THREE.RingGeometry(0.9, 1, 48);
     reticle.rotateX(-Math.PI / 2);
     geos = [tube, ball, ring, disc, reticle];
+    shapes = { tube, disc, reticle };
 
     const g = RAY_COLOURS.green;
     for (let i = 0; i < ALIENS.rayMax; i++) {
@@ -171,35 +215,9 @@ export function createAlienWeapons(ctx, S, api) {
       });
     }
 
-    /**
-     * @param {'green'|'red'} colour
-     * @returns {Object}
-     */
-    const tracker = (colour) => {
-      const c = RAY_COLOURS[colour];
-      const group = new THREE.Group();
-      group.name = 'alien_laser';
-      const core = mesh(tube, softMaterial(SOFT_FRAGMENT, c.core, 1.1, LASER_FADE));
-      const glow = mesh(tube, softMaterial(SOFT_FRAGMENT, c.glow, 2.4, LASER_FADE));
-      // The outer halo: wide and faint, with bright bands running down it.
-      const halo = mesh(tube, softMaterial(SOFT_FRAGMENT, c.glow, 4, LASER_FADE));
-      core.visible = glow.visible = halo.visible = true;
-      group.add(core, glow, halo);
-      group.visible = false;
-      const foot = mesh(disc, softMaterial(DISC_FRAGMENT, c.splash, 2.2));
-      const aim = mesh(reticle, new THREE.MeshBasicMaterial({
-        color: c.flare, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false
-      }));
-      scene.add(group, foot, aim);
-      // `source` keys the health damage table; `struck` is the once-per-burst re-arm flag.
-      return {
-        group, core, glow, halo, foot, aim, colour, active: false, timer: 0, cooldown: 2, fx: 0, fz: 0,
-        source: colour === 'green' ? 'ufoTracker' : 'hunterTracker', struck: false
-      };
-    };
-    S.shipTracker = tracker('green');
+    S.shipTracker = makeTracker('green');
     S.hunterTrackers = [];
-    for (let i = 0; i < ALIENS.hunterCount + ALIENS.extraHunters; i++) S.hunterTrackers.push(tracker('red'));
+    for (let i = 0; i < ALIENS.hunterCount + ALIENS.extraHunters; i++) S.hunterTrackers.push(makeTracker('red'));
   }
 
   /**
@@ -230,8 +248,9 @@ export function createAlienWeapons(ctx, S, api) {
    * @param {THREE.Vector3} from
    * @param {THREE.Vector3} to
    * @param {'green'|'red'} [colour]
-   * @param {{style?: 'crew'|'ship', hit?: Object|null, sizzle?: boolean}} [options]
-   *   sizzle: it lands on Roger (a hit sound even when he is shielded)
+   * @param {{style?: 'crew'|'ship', hit?: Object|null, sizzle?: boolean, silent?: boolean}} [options]
+   *   sizzle: it lands on Roger (a hit sound even when he is shielded);
+   *   silent: no lance sound (the co-op guest's drawing, which rate-caps its own cues)
    * @returns {void}
    */
   function fireRay(from, to, colour = 'green', options = {}) {
@@ -287,11 +306,31 @@ export function createAlienWeapons(ctx, S, api) {
       ray.bolt.scale.set(1, length, 1);
       ray.travelled = length;
       land(ray);
-      ctx.systems.creatureSounds.play('shipBolt', from, { size: 6 });
+      if (!options.silent) ctx.systems.creatureSounds.play('shipBolt', from, { size: 6 });
     } else {
       ray.trail.visible = true;
       ray.trail.material.uniforms.uTail.value = 0;
     }
+    // Last: the co-op guest sees the shot too (net/enemyFx.js `ray`); one read outside a room.
+    const net = ctx.systems.net;
+    if (net && net.fxLive()) weaponFx.announce('ray', from, to, '', raySub(style, colour));
+  }
+
+  /**
+   * A shot the co-op host announced, drawn on this screen: the same bolt or lance, with no hit
+   * to deliver and no one to hurt (R-053). The sound is the host's pair (`alienZap` for a bolt,
+   * `shipBolt` for a lance), played only when `sound` says the mirror's rate cap allows it.
+   * @param {THREE.Vector3} from @param {THREE.Vector3} to
+   * @param {number} sub a net/enemyFx.js ray sub-type (0..2)
+   * @param {boolean} sound
+   * @returns {void}
+   */
+  function showRay(from, to, sub, sound) {
+    const look = rayLook(sub);
+    fireRay(from, to, look.colour, { style: look.style, silent: true });
+    if (!sound) return;
+    if (look.style === 'ship') ctx.systems.creatureSounds.play('shipBolt', from, { size: 6 });
+    else ctx.systems.creatureSounds.play('alienZap', from, { size: 3 });
   }
 
   /**
@@ -425,56 +464,15 @@ export function createAlienWeapons(ctx, S, api) {
   }
 
   /**
-   * A ship's tracking laser on Roger: it comes down off to one side of him
-   * and crawls after him, slower than he runs, for ALIENS.laserSeconds. For
-   * the first ALIENS.laserWarm it is only a thin aiming line and a reticle
-   * closing on the ground; then it burns.
-   * @param {Object} tr one of the trackers made in initWeapons
+   * Draws a tracking laser at its timer and foot: the aiming line then the beam, the patch on the ground
+   * and the dust. Visual only (`updateTracker` decides the burst and the hit; a co-op guest drives it
+   * from the host's announcement).
+   * @param {Object} tr
    * @param {THREE.Vector3} from where it leaves the ship
-   * @param {boolean} armed whether this ship may start a new burst now
    * @param {number} dt
    * @returns {void}
    */
-  function updateTracker(tr, from, armed, dt) {
-    const hero = api.heroTarget(from.x, from.z);
-    if (!tr.active) {
-      tr.cooldown -= dt;
-      const inRange = hero && Math.hypot(hero.x - from.x, hero.z - from.z) < ALIENS.laserRange;
-      if (!armed || !inRange || tr.cooldown > 0) {
-        tr.group.visible = tr.foot.visible = tr.aim.visible = false;
-        return;
-      }
-      tr.active = true;
-      tr.timer = 0;
-      tr.struck = false; // re-armed: each burst may hurt Roger once
-      const a = Math.random() * Math.PI * 2;
-      tr.fx = hero.x + Math.cos(a) * ALIENS.laserStart;
-      tr.fz = hero.z + Math.sin(a) * ALIENS.laserStart;
-      ctx.systems.heroSound.playShipLaser(ALIENS.laserSeconds, ALIENS.laserWarm, tr.colour);
-    }
-    tr.timer += dt;
-    const burning = tr.timer >= ALIENS.laserWarm;
-    if (hero) {
-      const dx = hero.x - tr.fx;
-      const dz = hero.z - tr.fz;
-      const d = Math.hypot(dx, dz);
-      const step = Math.min(d, ALIENS.laserSpeed * dt);
-      if (d > 0.01) {
-        tr.fx += (dx / d) * step;
-        tr.fz += (dz / d) * step;
-      }
-      // Discrete hit, once per 3.2 s burst: `struck` is cleared only when the
-      // next burst starts, so the beam never ticks per frame. A hit the spawn
-      // shield or hit window refuses does not use up the burst. The aiming
-      // line never hurts.
-      if (burning && !tr.struck && d - step < ALIENS.laserKill) {
-        const res = ctx.systems.health.damagePlayer({
-          source: tr.source, type: 'ray', title: 'VAPORISED', sub: 'An alien ship\'s laser caught Roger', targetId: hero.id ?? '0',
-          position: { x: from.x, y: from.y, z: from.z }
-        });
-        if (res.applied) tr.struck = true;
-      }
-    }
+  function paintTracker(tr, from, dt) {
     const to = S.scratch.set(tr.fx, 0.1, tr.fz);
     const dir = S.trackerDir.subVectors(to, from);
     const length = dir.length();
@@ -533,10 +531,127 @@ export function createAlienWeapons(ctx, S, api) {
       if (Math.random() < dt * 10 && ctx.systems.earthquake) ctx.systems.earthquake.kickDust(tr.fx, tr.fz, 1, 0.8);
     }
     tr.group.visible = true;
+  }
+
+  /**
+   * A ship's tracking laser on Roger: it comes down off to one side of him
+   * and crawls after him, slower than he runs, for ALIENS.laserSeconds. For
+   * the first ALIENS.laserWarm it is only a thin aiming line and a reticle
+   * closing on the ground; then it burns.
+   * @param {Object} tr one of the trackers made in initWeapons
+   * @param {THREE.Vector3} from where it leaves the ship
+   * @param {boolean} armed whether this ship may start a new burst now
+   * @param {number} dt
+   * @returns {void}
+   */
+  function updateTracker(tr, from, armed, dt) {
+    const hero = api.heroTarget(from.x, from.z);
+    if (!tr.active) {
+      tr.cooldown -= dt;
+      const inRange = hero && Math.hypot(hero.x - from.x, hero.z - from.z) < ALIENS.laserRange;
+      if (!armed || !inRange || tr.cooldown > 0) {
+        tr.group.visible = tr.foot.visible = tr.aim.visible = false;
+        return;
+      }
+      tr.active = true;
+      tr.timer = 0;
+      tr.struck = false; // re-armed: each burst may hurt Roger once
+      const a = Math.random() * Math.PI * 2;
+      tr.fx = hero.x + Math.cos(a) * ALIENS.laserStart;
+      tr.fz = hero.z + Math.sin(a) * ALIENS.laserStart;
+      ctx.systems.heroSound.playShipLaser(ALIENS.laserSeconds, ALIENS.laserWarm, tr.colour);
+      // Last of the start: the co-op guest sees the burst too (net/enemyFx.js `ray`, a tracker).
+      const net = ctx.systems.net;
+      if (net && net.fxLive()) {
+        const crawl = Math.min(Math.hypot(hero.x - tr.fx, hero.z - tr.fz), ALIENS.laserSpeed * ALIENS.laserSeconds);
+        weaponFx.announce('ray', from, trackerTo(fxTo, tr.fx, tr.fz, hero.x, hero.z), '', trackerExtra(tr.colour === 'red', crawl));
+      }
+    }
+    tr.timer += dt;
+    const burning = tr.timer >= ALIENS.laserWarm;
+    if (hero) {
+      const dx = hero.x - tr.fx;
+      const dz = hero.z - tr.fz;
+      const d = Math.hypot(dx, dz);
+      const step = Math.min(d, ALIENS.laserSpeed * dt);
+      if (d > 0.01) {
+        tr.fx += (dx / d) * step;
+        tr.fz += (dz / d) * step;
+      }
+      // Discrete hit, once per 3.2 s burst: `struck` is cleared only when the
+      // next burst starts, so the beam never ticks per frame. A hit the spawn
+      // shield or hit window refuses does not use up the burst. The aiming
+      // line never hurts.
+      if (burning && !tr.struck && d - step < ALIENS.laserKill) {
+        const res = ctx.systems.health.damagePlayer({
+          source: tr.source, type: 'ray', title: 'VAPORISED', sub: 'An alien ship\'s laser caught Roger', targetId: hero.id ?? '0',
+          position: { x: from.x, y: from.y, z: from.z }
+        });
+        if (res.applied) tr.struck = true;
+      }
+    }
+    paintTracker(tr, from, dt);
     if (tr.timer >= ALIENS.laserSeconds || !hero) {
       tr.active = false;
       tr.cooldown = api.between(ALIENS.laserEvery);
       tr.group.visible = tr.foot.visible = tr.aim.visible = false;
+    }
+  }
+
+  /**
+   * A tracking laser burst the co-op host announced, drawn on this screen with the host's own
+   * look (`paintTracker`): the aiming line, the beam, the foot crawling on a straight line from its
+   * first place for the host's crawl. It follows nobody and hurts nobody (R-053). At most
+   * `MIRROR_TRACKERS` of a colour at once (made on first use, kept for the session); a burst with no
+   * free laser is not drawn.
+   * @param {THREE.Vector3} from where it leaves the ship
+   * @param {{x: number, z: number, dx: number, dz: number, crawl: number}} foot first place, unit heading, metres to crawl
+   * @param {boolean} hunter a hunter's red laser (the UFO's is green)
+   * @param {boolean} sound
+   * @returns {void}
+   */
+  function showTracker(from, foot, hunter, sound) {
+    if (!shapes) return;
+    const colour = hunter ? 'red' : 'green';
+    const list = mirrored[colour];
+    let tr = list.find((t) => !t.mlive);
+    if (!tr) {
+      if (list.length >= MIRROR_TRACKERS[colour]) return;
+      tr = makeTracker(colour);
+      list.push(tr);
+    }
+    tr.mlive = true;
+    tr.mt = 0;
+    tr.mx = foot.x;
+    tr.mz = foot.z;
+    tr.mdx = foot.dx;
+    tr.mdz = foot.dz;
+    tr.mcrawl = foot.crawl;
+    tr.mfrom.copy(from);
+    if (sound && ctx.systems.heroSound) ctx.systems.heroSound.playShipLaser(ALIENS.laserSeconds, ALIENS.laserWarm, colour);
+  }
+
+  /**
+   * Steps the lasers drawn for a guest: the foot crawls, the beam burns, then it ends.
+   * @param {number} dt
+   * @returns {void}
+   */
+  function stepMirrorTrackers(dt) {
+    for (const list of [mirrored.green, mirrored.red]) {
+      for (const tr of list) {
+        if (!tr.mlive) continue;
+        tr.mt += dt;
+        if (tr.mt >= ALIENS.laserSeconds) {
+          tr.mlive = false;
+          tr.group.visible = tr.foot.visible = tr.aim.visible = false;
+          continue;
+        }
+        const k = Math.min(tr.mcrawl, ALIENS.laserSpeed * tr.mt);
+        tr.timer = tr.mt;
+        tr.fx = tr.mx + tr.mdx * k;
+        tr.fz = tr.mz + tr.mdz * k;
+        paintTracker(tr, tr.mfrom, dt);
+      }
     }
   }
 
@@ -557,6 +672,10 @@ export function createAlienWeapons(ctx, S, api) {
    */
   function resetWeapons() {
     for (const ray of S.rays) hideShot(ray);
+    for (const tr of [...mirrored.green, ...mirrored.red]) {
+      tr.mlive = false;
+      tr.group.visible = tr.foot.visible = tr.aim.visible = false;
+    }
   }
 
   /** @returns {void} */
@@ -567,16 +686,18 @@ export function createAlienWeapons(ctx, S, api) {
       for (const m of [ray.core, ray.glow, ray.trail, ray.flare, ray.spark, ray.wave]) m.material.dispose();
     }
     S.rays.length = 0;
-    for (const tr of [S.shipTracker, ...S.hunterTrackers]) {
+    for (const tr of [S.shipTracker, ...S.hunterTrackers, ...mirrored.green, ...mirrored.red]) {
       if (!tr) continue;
       scene.remove(tr.group, tr.foot, tr.aim);
       for (const m of [tr.core, tr.glow, tr.halo, tr.foot, tr.aim]) m.material.dispose();
     }
     S.shipTracker = null;
     S.hunterTrackers = [];
+    mirrored.green.length = mirrored.red.length = 0;
     for (const geo of geos) geo.dispose();
     geos = [];
+    shapes = null;
   }
 
-  return { initWeapons, fireRay, shoot, raiseGun, updateRays, updateTracker, stopTracker, resetWeapons, disposeWeapons };
+  return { initWeapons, fireRay, showRay, showTracker, stepMirrorTrackers, shoot, raiseGun, updateRays, updateTracker, stopTracker, resetWeapons, disposeWeapons };
 }

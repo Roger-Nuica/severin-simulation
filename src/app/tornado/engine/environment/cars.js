@@ -558,7 +558,8 @@ export function createCarsSystem(ctx) {
    * @returns {SimObject}
    */
   function createCar(x, z, namePrefix = 'envCar', rand = Math.random) {
-    const colour = CAR_BODY_COLOURS[Math.floor(rand() * CAR_BODY_COLOURS.length)];
+    const colourIndex = Math.floor(rand() * CAR_BODY_COLOURS.length);
+    const colour = CAR_BODY_COLOURS[colourIndex];
 
     const root = new THREE.Group();
     root.name = namePrefix;
@@ -634,8 +635,31 @@ export function createCarsSystem(ctx) {
     };
     root.userData.simObject = obj;
     root.userData.parked = true;
+    // Which body colour, for the co-op guest's copy (net/carPose.js `cars` rows).
+    root.userData.carColour = colourIndex;
     return obj;
   }
 
-  return { createCar, updateCarVisuals, resetCarVisuals };
+  /**
+   * One car of a body colour for the co-op guest to clone (net/system.js): the
+   * real model, its shared assets left alone, no simulation object (nothing
+   * is registered). Only the colour's own paint is for the caller to release.
+   * @param {number} colour Index into the body colours (clamped).
+   * @returns {{root: THREE.Object3D, geometries: THREE.BufferGeometry[], materials: THREE.Material[]}}
+   */
+  function buildGuestModel(colour) {
+    const index = Math.min(CAR_BODY_COLOURS.length - 1, Math.max(0, Math.floor(colour) || 0));
+    const obj = createCar(0, 0, 'guestCar', () => (index + 0.5) / CAR_BODY_COLOURS.length);
+    const root = obj.mesh;
+    root.rotation.set(0, 0, 0);
+    const paint = new Set();
+    root.traverse((/** @type {any} */ child) => {
+      if (child.material && !child.material.userData?.shared) paint.add(child.material);
+    });
+    // Object3D.clone copies userData as JSON: drop the links to the simulation object and the wheels.
+    root.userData = {};
+    return { root, geometries: [], materials: [...paint] };
+  }
+
+  return { createCar, updateCarVisuals, resetCarVisuals, buildGuestModel, colourCount: CAR_BODY_COLOURS.length };
 }

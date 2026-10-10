@@ -43,3 +43,23 @@ export const stepAir = (st, input, dt, ground, rules) => {
   if (alt <= ground && vy <= 0) return { alt: ground, vy: 0, air: false };
   return { alt, vy, air };
 };
+
+/**
+ * Is a guest's jetpack lit this frame: it has an input (a guest that has sent
+ * none yet has none), may move on its feet, and holds the Space bit.
+ * @param {{abil: number}|null|undefined} input the guest's latest input, if any
+ * @param {boolean} canFly the guest is up and may move (not down, seated or locked)
+ * @param {number} bit the input `abil` bit for Space
+ * @returns {boolean}
+ */
+export const jetHeld = (input, canFly, bit) => !!input && !!canFly && (input.abil & bit) !== 0;
+
+/**
+ * Height of a guest's eye (where their shots start): eye height above the
+ * feet plus the feet's height above the ground. A missing or negative height
+ * counts as standing on the ground.
+ * @param {number|undefined} alt Feet height above the ground (m).
+ * @param {number} eye Eye height above the feet (m).
+ * @returns {number}
+ */
+export const eyeAt = (alt, eye) => eye + (alt > 0 ? alt : 0);

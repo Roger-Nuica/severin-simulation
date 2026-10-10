@@ -21,11 +21,13 @@
  * asking the host to bring it into Hero Mode). Version 3 gives the guest the
  * single-player controls: on foot the movement keys turn and run (the look is
  * only read while `aim` is held), `abil` gains bit 8 (V, Invincible), and the
- * host sends an `invincible` event. Host, relay and peer must run
- * the same build: a mismatch is rejected with the `version` error, which the
+ * host sends an `invincible` event. Version 4 (R-061) lets the guest see the
+ * host's world: the snapshot gains the additive optional fields `fx`, `tw`,
+ * `hole`, `aim` and `env`, and the input gains the optional `charge` and
+ * `ability` fields. Host, relay and peer must run the same build: a mismatch is rejected with the `version` error, which the
  * client turns into a "refresh the page" message.
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 export const LIMITS = {
   /** Largest raw frame the relay or a client will parse, in bytes. */
@@ -41,7 +43,31 @@ export const LIMITS = {
   /** Events per second the host may emit. */
   eventRate: 30,
   /** World half-extent a position may claim, metres (R-024 Roger ~288 m). */
-  worldBound: 400
+  worldBound: 400,
+  /** Rows per additive snapshot field (R-061; the 64 KiB frame stays far away). */
+  maxFx: 24,
+  maxTw: 8,
+  maxHole: 1,
+  maxGiants: 2,
+  /** Patient Zero's original (one) and its clones (PZ.maxClones, CAPS.perKind.patientZeroClone). */
+  maxReplicator: 1,
+  maxClones: 50,
+  /** Hank (1), HAVOC (GUNNER.max 3) and the samurai (SAMURAI.count 10). */
+  maxFigures: 14,
+  /** GHOST jets (AIR.jets 3), the news helicopter (1), the mothership (1), the cows (COWS.count 8), Captain Spotless (1). */
+  maxFlyers: 14,
+  /** Fires: gas mains (6), fuel stations, ground patches (18), then the fiercest building fires. */
+  maxFires: 64,
+  /** The flood: one row while the dam is failing or the water is out. */
+  maxFlood: 1,
+  /** The earthquake family: the quake (1), chasms (2), sinkholes (3), the eruption (1). */
+  maxQuake: 8,
+  /** The electric storm: one row while the mode is on and a funnel is down. */
+  maxStorm: 1,
+  /** The Firenado: one row while the funnel burns. */
+  maxFirenado: 1,
+  maxAim: 8,
+  maxEnv: 1
 };
 
 export const ROOM = {
@@ -61,6 +87,19 @@ export const SNAPSHOT_KINDS = ['players', 'tornadoes', 'terminators', 'aliens', 
 
 /** Major events the host may replicate (cosmetic destruction stays local). */
 export const EVENT_TYPES = ['welcome', 'announce', 'notice', 'explosion', 'playerDown', 'playerRevived', 'playerDamage', 'gameOver', 'score', 'mission', 'invincible'];
+
+/**
+ * Kinds of a discrete guest-visible effect (`fx` column 1 is the index here).
+ * Append only: an index is part of the wire contract. A row whose kind is not
+ * in this list (a newer host) is dropped by `sanitizeFx`, never an error.
+ */
+export const FX_KINDS = ['bullet', 'rail', 'plasma', 'mega', 'fire', 'holeShot', 'cut', 'blast', 'bolt', 'emp', 'ray', 'round', 'missile', 'warp', 'meteor'];
+
+/** Column order of an `fx` row: [id, kind, shooter, x, y, z, a, b, c, extra]. */
+export const FX_COLUMNS = ['id', 'kind', 'shooter', 'x', 'y', 'z', 'a', 'b', 'c', 'extra'];
+
+/** Row widths of the additive snapshot fields (`fx` is the widest). */
+export const EXTRA_ROW_WIDTH = { fx: 10, tw: 6, hole: 4, aim: 4, env: 7, cars: 8, giants: 7, replicator: 8, clones: 6, figures: 9, flyers: 10, fires: 8, flood: 6, quake: 8, storm: 5, firenado: 2 };
 
 const CODE_RE = new RegExp(`^[${ROOM.codeAlphabet}]{${ROOM.codeLength}}$`);
 
@@ -110,13 +149,17 @@ export function validateControl(msg) {
   }
 }
 
-const INPUT_KEYS = new Set(['type', 'v', 'seq', 'mx', 'mz', 'yaw', 'pitch', 'fire', 'aim', 'weapon', 'abil', 'use', 'hero']);
+const INPUT_KEYS = new Set(['type', 'v', 'seq', 'mx', 'mz', 'yaw', 'pitch', 'fire', 'aim', 'weapon', 'abil', 'use', 'hero', 'charge', 'ability']);
 
 /**
  * A peer's input: its intent only. Movement axes, look angles, buttons.
  * @typedef {{type:'input', v:number, seq:number, mx:number, mz:number,
  *   yaw:number, pitch:number, fire:boolean, aim:boolean, weapon:number,
- *   abil:number, use:boolean, hero:boolean}} PlayerInput
+ *   abil:number, use:boolean, hero:boolean, charge?:number, ability?:number}} PlayerInput
+ * Optional (version 4, absent from older inputs): `charge` is the rifle charge
+ * level 0-1 held by the guest; `ability` is a bit field 0-255 for the powers
+ * that do not fit `abil` (G grapple, C telekinesis; bits assigned by the
+ * subtask that uses them).
  * `hero` is a request level, not an order: true while the guest is asking to
  * join Hero Mode (the host acts on the rising edge only).
  * @param {any} msg
@@ -134,13 +177,16 @@ export function validateInput(msg) {
   if (!Number.isInteger(msg.weapon) || msg.weapon < 0 || msg.weapon >= WEAPONS.length) return { ok: false, error: 'weapon' };
   // Ability bits: 1 time slow, 2 teleport, 4 EMP, 8 Invincible (V).
   if (!Number.isInteger(msg.abil) || msg.abil < 0 || msg.abil > 31) return { ok: false, error: 'abil' };
-  return {
-    ok: true,
-    input: {
-      type: 'input', v: msg.v, seq: msg.seq, mx: msg.mx, mz: msg.mz, yaw: msg.yaw, pitch: msg.pitch,
-      fire: msg.fire, aim: msg.aim, weapon: msg.weapon, abil: msg.abil, use: msg.use, hero: msg.hero
-    }
+  if (msg.charge !== undefined && !inRange(msg.charge, 0, 1)) return { ok: false, error: 'charge' };
+  if (msg.ability !== undefined && (!Number.isInteger(msg.ability) || msg.ability < 0 || msg.ability > 255)) return { ok: false, error: 'ability' };
+  /** @type {PlayerInput} */
+  const input = {
+    type: 'input', v: msg.v, seq: msg.seq, mx: msg.mx, mz: msg.mz, yaw: msg.yaw, pitch: msg.pitch,
+    fire: msg.fire, aim: msg.aim, weapon: msg.weapon, abil: msg.abil, use: msg.use, hero: msg.hero
   };
+  if (msg.charge !== undefined) input.charge = msg.charge;
+  if (msg.ability !== undefined) input.ability = msg.ability;
+  return { ok: true, input };
 }
 
 /**
@@ -165,9 +211,30 @@ export function validateInput(msg) {
  *   ack          [playerId, lastAcceptedInputSeq]
  * The last input `seq` the host accepted from each guest (the host itself,
  * id 0, never sends inputs and has no row). Same additive rule as `hp`.
+ * Optional version 4 fields (R-061; same additive rule, absent means none):
+ *   fx           [id, kind, shooter, x, y, z, a, b, c, extra]  (kind = index in FX_KINDS)
+ *   tw           [id, birth, sizeMul, fade, leanX, leanZ]      (the tornado's position stays in `tornadoes`)
+ *   hole         [x, z, age, closing 0|1]
+ *   aim          [playerId, yaw, pitch, firingBits]  (bits: 1 Fire Gun firing, 2 minigun spinning, 4 jetpack burning)
+ *   env          [running 0|1, stormRamp, intensity, wind, radius, daylight, timeScale]
+ *   cars         [id, x, y, z, yaw, pitch, roll, colour]  (every car: the driven, thrown, moving, then parked; `vehicles` keeps its five columns for an older guest)
+ *   giants       [id, x, z, heading, state, a, b]  (the cyber T-Rex id 0 and Yeti id 1, while one is on the field; net/giantPose.js)
+ *   replicator   [id 0, x, z, heading, attack, evolve, grown, flare]  (Patient Zero's original, while it stands; evolve 0 none, 0..1 changing, 1 evolved; net/replicatorPose.js)
+ *   clones       [id, x, z, heading, attack, grown]  (its clones, up to 50; grown 0..1 is how far built or come apart)
+ *   figures      [id, type, x, y, z, heading, state, a, b]  (Hank Granite id 0, HAVOC and the samurai; type 0 Hank, 1 HAVOC, 2 samurai; net/figurePose.js)
+ *   flyers       [id, type, x, y, z, yaw, pitch, roll, state, a]  (type 0 GHOST jet, 1 news helicopter, 2 mothership, 3 cow, 4 Captain Spotless; net/flyerPose.js)
+ *   fires        [id, type, x, z, level, a, b, c]  (type 0 building fire, 1 ground fire, 2 fuel station, 3 gas main; net/fireFx.js)
+ *   quake        [id, type, a, b, c, d, e, f]  (type 0 earthquake, 1 chasm, 2 sinkhole, 3 lava fissures; only while one is on the field; net/quakeFx.js)
+ *   storm        [id 0, charge, ringX, ringZ, ringRadius]  (the Electric Tornado mode, only while a funnel is down; radius 0 = no ring; net/stormFx.js)
+ *   firenado     [id 0, strength]  (the Firenado, only while the funnel burns; strength 0..1 is the fire's envelope; net/firenadoFx.js)
+ *   flood        [id 0, phase, frontX, strain, fade, frozen]  (the dam break, only while it fails or the water is out; phase 1 strain, 2 breaking, 3 surge, 4 drain; net/floodFx.js)
+ * The `meteor` fx kind (net/meteorFx.js): one row per rock at launch, x y z = entry, a b c = landing, extra = radius in tenths (+200 for an airburst).
+ * Caps: fx 24, tw 8, hole 1, aim 8, env 1, cars 64, giants 2, replicator 1, clones 50, figures 14, flyers 14, fires 64, flood 1, quake 8, storm 1, firenado 1. Unknown fx kinds are dropped by
+ * `sanitizeFx`, not an error. Built and read by later subtasks; no row here
+ * widens an existing one.
  * @typedef {{type:'snapshot', v:number, room:string, tick:number, t:number,
  *   score:number, players:number[][], tornadoes:number[][], terminators:number[][],
- *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][], ack?:number[][], alt?:number[][]}} Snapshot
+ *   aliens:number[][], ships:number[][], vehicles:number[][], hp?:number[][], ack?:number[][], alt?:number[][], fx?:number[][], tw?:number[][], hole?:number[][], aim?:number[][], env?:number[][], cars?:number[][], giants?:number[][], replicator?:number[][], clones?:number[][], figures?:number[][], flyers?:number[][], fires?:number[][], flood?:number[][], quake?:number[][], firenado?:number[][], storm?:number[][]}} Snapshot
  */
 const ROW_WIDTH = { players: 9, tornadoes: 4, terminators: 5, aliens: 5, ships: 5, vehicles: 5 };
 
@@ -217,7 +284,114 @@ export function validateSnapshot(msg) {
       if (!Number.isInteger(row[0]) || !Number.isInteger(row[1]) || row[1] < 0 || row[1] > 0x7fffffff) return { ok: false, error: 'ack' };
     }
   }
+  const extra = validateExtraFields(msg, b);
+  if (extra) return { ok: false, error: extra };
   return { ok: true };
+}
+
+/**
+ * Checks the optional version 4 snapshot fields. Returns the error code or null.
+ * @param {any} msg
+ * @param {number} b world half-extent
+ * @returns {string|null}
+ */
+function validateExtraFields(msg, b) {
+  /** @type {Record<string, number>} */
+  const caps = { fx: LIMITS.maxFx, tw: LIMITS.maxTw, hole: LIMITS.maxHole, aim: LIMITS.maxAim, env: LIMITS.maxEnv, cars: LIMITS.maxPerKind, giants: LIMITS.maxGiants, replicator: LIMITS.maxReplicator, clones: LIMITS.maxClones, figures: LIMITS.maxFigures, flyers: LIMITS.maxFlyers, fires: LIMITS.maxFires, flood: LIMITS.maxFlood, quake: LIMITS.maxQuake, storm: LIMITS.maxStorm, firenado: LIMITS.maxFirenado };
+  for (const name of Object.keys(caps)) {
+    const rows = msg[name];
+    if (rows === undefined) continue;
+    if (!Array.isArray(rows) || rows.length > caps[name]) return name;
+    for (const r of rows) {
+      if (!Array.isArray(r) || r.length !== EXTRA_ROW_WIDTH[name] || !r.every(num)) return name;
+      if (!extraRowOk(name, r, b)) return name;
+    }
+  }
+  return null;
+}
+
+/**
+ * Range check of one already-finite additive row.
+ * @param {string} name
+ * @param {number[]} r
+ * @param {number} b world half-extent
+ * @returns {boolean}
+ */
+function extraRowOk(name, r, b) {
+  switch (name) {
+    case 'fx':
+      // Unknown kinds pass here (integer only) and are dropped by sanitizeFx.
+      return Number.isInteger(r[0]) && r[0] >= 0 && Number.isInteger(r[1]) && r[1] >= 0 && r[1] <= 255
+        && Number.isInteger(r[2]) && r[2] >= -1 && Math.abs(r[3]) <= b && Math.abs(r[4]) <= b && Math.abs(r[5]) <= b
+        && Math.abs(r[6]) <= 1e4 && Math.abs(r[7]) <= 1e4 && Math.abs(r[8]) <= 1e4 && Math.abs(r[9]) <= 1e4;
+    case 'tw':
+      return Number.isInteger(r[0]) && r[0] >= 0 && r[1] >= 0 && inRange(r[2], 0, 100) && inRange(r[3], 0, 1)
+        && Math.abs(r[4]) <= b && Math.abs(r[5]) <= b;
+    case 'hole':
+      return Math.abs(r[0]) <= b && Math.abs(r[1]) <= b && r[2] >= 0 && (r[3] === 0 || r[3] === 1);
+    case 'aim':
+      return Number.isInteger(r[0]) && r[0] >= 0 && inRange(r[1], -Math.PI * 4, Math.PI * 4) && inRange(r[2], -1.6, 1.6)
+        && Number.isInteger(r[3]) && r[3] >= 0 && r[3] <= 255;
+    case 'env':
+      return (r[0] === 0 || r[0] === 1) && inRange(r[1], 0, 1) && inRange(r[2], 0, 10) && inRange(r[3], 0, 1000)
+        && inRange(r[4], 0, 1000) && inRange(r[5], 0, 1) && inRange(r[6], 0, 10);
+    case 'cars':
+      return Number.isInteger(r[0]) && r[0] >= 0 && Math.abs(r[1]) <= b && Math.abs(r[3]) <= b && inRange(r[2], -50, 2000)
+        && inRange(r[4], -Math.PI * 4, Math.PI * 4) && inRange(r[5], -Math.PI * 4, Math.PI * 4) && inRange(r[6], -Math.PI * 4, Math.PI * 4)
+        && Number.isInteger(r[7]) && r[7] >= 0 && r[7] <= 255;
+    case 'giants':
+      return Number.isInteger(r[0]) && r[0] >= 0 && r[0] <= 1 && Math.abs(r[1]) <= b && Math.abs(r[2]) <= b
+        && inRange(r[3], -Math.PI * 4, Math.PI * 4) && Number.isInteger(r[4]) && r[4] >= 0 && r[4] <= 4
+        && inRange(r[5], -2, 2) && inRange(r[6], -2, 2);
+    case 'replicator':
+      return r[0] === 0 && Math.abs(r[1]) <= b && Math.abs(r[2]) <= b && inRange(r[3], -Math.PI * 4, Math.PI * 4)
+        && inRange(r[4], 0, 1) && inRange(r[5], 0, 1) && inRange(r[6], 0, 1) && inRange(r[7], 0, 5);
+    case 'clones':
+      return Number.isInteger(r[0]) && r[0] >= 0 && Math.abs(r[1]) <= b && Math.abs(r[2]) <= b
+        && inRange(r[3], -Math.PI * 4, Math.PI * 4) && inRange(r[4], 0, 1) && inRange(r[5], 0, 1);
+    case 'figures':
+      return Number.isInteger(r[0]) && r[0] >= 0 && Number.isInteger(r[1]) && r[1] >= 0 && r[1] <= 2
+        && Math.abs(r[2]) <= b && inRange(r[3], -50, 2000) && Math.abs(r[4]) <= b
+        && inRange(r[5], -Math.PI * 4, Math.PI * 4) && Number.isInteger(r[6]) && r[6] >= 0 && r[6] <= 5
+        && inRange(r[7], 0, 10) && inRange(r[8], 0, 3);
+    case 'flyers':
+      return Number.isInteger(r[0]) && r[0] >= 0 && Number.isInteger(r[1]) && r[1] >= 0 && r[1] <= 4
+        && Math.abs(r[2]) <= b && inRange(r[3], -50, 2000) && Math.abs(r[4]) <= b
+        && inRange(r[5], -Math.PI * 4, Math.PI * 4) && inRange(r[6], -Math.PI * 4, Math.PI * 4) && inRange(r[7], -Math.PI * 4, Math.PI * 4)
+        && Number.isInteger(r[8]) && r[8] >= 0 && r[8] <= 4 && inRange(r[9], 0, 1);
+    case 'fires':
+      return Number.isInteger(r[0]) && r[0] >= 0 && Number.isInteger(r[1]) && r[1] >= 0 && r[1] <= 3
+        && Math.abs(r[2]) <= b && Math.abs(r[3]) <= b && inRange(r[4], 0, 1)
+        && (r[1] === 3
+          ? Number.isInteger(r[5]) && Number.isInteger(r[6]) && Number.isInteger(r[7]) && inRange(r[5], 0, 2 ** 31 - 1) && inRange(r[6], 0, 2 ** 31 - 1) && inRange(r[7], 0, 2 ** 31 - 1)
+          : inRange(r[5], 0, 200) && inRange(r[6], 0, 200) && inRange(r[7], 0, 200));
+    case 'flood':
+      return r[0] === 0 && Number.isInteger(r[1]) && r[1] >= 1 && r[1] <= 4
+        && Math.abs(r[2]) <= b && inRange(r[3], 0, 1) && inRange(r[4], 0, 1) && (r[5] === 0 || r[5] === 1);
+    case 'storm':
+      return r[0] === 0 && inRange(r[1], 0, 1) && Math.abs(r[2]) <= b && Math.abs(r[3]) <= b && inRange(r[4], 0, 360);
+    case 'firenado':
+      return r[0] === 0 && inRange(r[1], 0, 1);
+    case 'quake': {
+      if (!Number.isInteger(r[0]) || r[0] < 0 || !Number.isInteger(r[1]) || r[1] < 0 || r[1] > 3) return false;
+      if (r[1] === 0) return inRange(r[2], 0, 1) && inRange(r[3], 0, 100);
+      if (r[1] === 1) return Number.isInteger(r[2]) && inRange(r[2], 1, 2 ** 31 - 1) && inRange(r[3], 0, 20);
+      if (r[1] === 2) return Math.abs(r[2]) <= b && Math.abs(r[3]) <= b && inRange(r[4], 0, 200) && inRange(r[5], 0, 1) && inRange(r[6], 0, 20);
+      return Number.isInteger(r[2]) && inRange(r[2], 1, 2 ** 31 - 1) && inRange(r[3], 0, 1) && inRange(r[4], 0, 1);
+    }
+    default: return false;
+  }
+}
+
+/**
+ * Keeps the `fx` rows whose kind this build knows; an unknown kind (a newer
+ * host) is dropped, never an error. Pure; returns a new array.
+ * @param {number[][]|undefined} rows
+ * @returns {number[][]}
+ */
+export function sanitizeFx(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((r) => Array.isArray(r) && r.length === EXTRA_ROW_WIDTH.fx && Number.isInteger(r[1]) && r[1] >= 0 && r[1] < FX_KINDS.length);
 }
 
 /**

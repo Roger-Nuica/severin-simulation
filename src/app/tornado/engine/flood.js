@@ -9,6 +9,7 @@ import { createFloodSpray } from './flood/spray.js';
 import { createRippleTexture, createCrestGeometry, createWaterMaterial } from './flood/shader.js';
 import { createFloodDam } from './flood/dam.js';
 import { buildBasin } from './flood/basin.js';
+import { PHASE_NAMES, soundScale, burstWanted, strainWanted } from './net/floodFx.js';
 
 // The water frozen by the Blizzard (setFrozen).
 const ICE_SHALLOW = new THREE.Color(0xe6f5ff);
@@ -83,6 +84,8 @@ const ICE_DEEP = new THREE.Color(0x9cc8e6);
  *   frontX: () => number,
  *   isSurging: () => boolean,
  *   isDamIntact: () => boolean,
+ *   replicaState: () => ({phase: string, frontX: number, timer: number, strainLength: number, fade: number, frozen: boolean}|null),
+ *   mirror: (rows: Map<number, number[]>) => void,
  *   damWall: () => {x: number, halfWidth: number},
  *   westLimit: () => number,
  *   damSolids: () => {x: number, z: number, hw: number, hd: number}[],
@@ -93,6 +96,9 @@ const ICE_DEEP = new THREE.Color(0x9cc8e6);
 export function createFloodSystem(ctx) {
   // Frozen over by the Blizzard (setFrozen).
   let frozen = false;
+  // Co-op guest: the host's flood is drawn from the `flood` row (mirror), never started, swept, scored or sounded as a hazard here.
+  const replica = { on: false, phase: /** @type {number|null} */ (null), strain: 0, frozen: false };
+  const peerView = () => !!(ctx.systems.net && ctx.systems.net.isPeerView());
   const { Sim } = ctx;
   // Everything this system's modules share (see the header): each of them
   // reads and writes it as S.
@@ -297,7 +303,7 @@ export function createFloodSystem(ctx) {
 
   /** @returns {boolean} */
   function isRunning() {
-    return S.state.phase !== 'idle';
+    return !replica.on && S.state.phase !== 'idle';
   }
 
   /**
@@ -306,6 +312,8 @@ export function createFloodSystem(ctx) {
    * @returns {void}
    */
   function breakDam() {
+    // Co-op guest: only the host breaks the dam; the guest sees it through mirror().
+    if (peerView()) return;
     if (S.state.phase !== 'idle') return;
     // A dam that went on an earlier press has been rebuilt by the time the
     // water has drained (see updateFlood), so this only guards a breach that
@@ -362,6 +370,7 @@ export function createFloodSystem(ctx) {
     }
     // Frozen by the Blizzard (engine/blizzard.js): the water stands still
     // where it is, the surge and the breaking wall with it, until it thaws.
+    if (replica.on) { updateReplica(dt); return; }
     if (frozen) return;
     if (S.state.phase === 'idle') {
       api.updateChunks(dt);
@@ -375,34 +384,15 @@ export function createFloodSystem(ctx) {
 
     if (S.state.phase === 'strain') {
       const t = Math.min(1, S.state.timer / S.state.strainLength);
-      // The cracks spread in, the wall shudders harder and harder, and water
-      // forces its way through them faster as they open.
-      S.cracks.material.opacity = THREE.MathUtils.smoothstep(t, 0, 0.75);
-      const shake = 0.05 + 0.3 * t * t;
-      S.gate.position.x = FLOOD.damX + (Math.random() - 0.5) * shake;
-      S.gate.position.z = (Math.random() - 0.5) * shake;
-      S.foam.accumulator += THREE.MathUtils.lerp(FLOOD.jetRate[0], FLOOD.jetRate[1], t) * dt;
-      while (S.foam.accumulator >= 1) {
-        S.foam.accumulator -= 1;
-        api.spawnJet(t);
-      }
-      // Concrete groaning and cracking, closer together as it goes.
-      if (Math.random() < dt * (1.5 + 6 * t)) ctx.systems.earthquakeSound.playRupture(0.3 + 0.7 * t);
-      if (Math.random() < dt * 4 * t && ctx.systems.earthquake) {
-        ctx.systems.earthquake.kickDust(FLOOD.damX + 4, (Math.random() - 0.5) * FLOOD.breachHalfWidth * 2, 1, 1.4);
-      }
+      strainVisuals(dt, t);
+      strainSounds(dt, t, 1, false);
       api.updateFoam(dt);
       if (t >= 1) api.burstGate();
       return;
     }
 
     if (S.state.phase === 'breaking') {
-      // The water pours through the hole the gate left.
-      S.foam.accumulator += FLOOD.jetRate[1] * 1.5 * dt;
-      while (S.foam.accumulator >= 1) {
-        S.foam.accumulator -= 1;
-        api.spawnJet(1);
-      }
+      breakingJets(dt);
       if (S.state.timer >= FLOOD.breakSeconds) {
         S.state.phase = 'surge';
         S.state.timer = 0;
@@ -416,7 +406,7 @@ export function createFloodSystem(ctx) {
       S.state.frontX += FLOOD.speed * dt;
       // The reservoir empties as the surge runs out of it.
       const run = THREE.MathUtils.clamp((S.state.frontX - FLOOD.damX) / (FLOOD.endX - FLOOD.damX), 0, 1);
-      S.reservoir.position.y = THREE.MathUtils.lerp(FLOOD.reservoirLevel, FLOOD.reservoirLow, Math.sqrt(run));
+      setReservoir(run);
       api.poseWater(1);
       api.sweepObjects(dt);
       api.hitBuildings();
@@ -459,6 +449,146 @@ export function createFloodSystem(ctx) {
   }
 
   /**
+   * The cracks spreading in, the wall shuddering harder and harder, and
+   * water forcing its way through faster as they open (shared with the guest).
+   * @param {number} dt
+   * @param {number} t 0..1 how far the gate has cracked
+   * @returns {void}
+   */
+  function strainVisuals(dt, t) {
+    S.cracks.material.opacity = THREE.MathUtils.smoothstep(t, 0, 0.75);
+    const shake = 0.05 + 0.3 * t * t;
+    S.gate.position.x = FLOOD.damX + (Math.random() - 0.5) * shake;
+    S.gate.position.z = (Math.random() - 0.5) * shake;
+    S.foam.accumulator += THREE.MathUtils.lerp(FLOOD.jetRate[0], FLOOD.jetRate[1], t) * dt;
+    while (S.foam.accumulator >= 1) {
+      S.foam.accumulator -= 1;
+      api.spawnJet(t);
+    }
+  }
+
+  /**
+   * Concrete groaning and cracking, closer together as it goes. The guest
+   * hears it at the host's level scaled by distance, and only raises dust
+   * with particle room.
+   * @param {number} dt
+   * @param {number} t 0..1
+   * @param {number} scale 0..1 loudness (1 on the host)
+   * @param {boolean} guest
+   * @returns {void}
+   */
+  function strainSounds(dt, t, scale, guest) {
+    if (Math.random() < dt * (1.5 + 6 * t) && scale > 0.01) ctx.systems.earthquakeSound.playRupture((0.3 + 0.7 * t) * scale);
+    if (Math.random() < dt * 4 * t && ctx.systems.earthquake) {
+      const x = FLOOD.damX + 4;
+      const z = (Math.random() - 0.5) * FLOOD.breachHalfWidth * 2;
+      if (!guest || !ctx.systems.caps || ctx.systems.caps.particleRoom() > 0) ctx.systems.earthquake.kickDust(x, z, 1, 1.4);
+    }
+  }
+
+  /**
+   * The water pouring through the hole the gate left (shared with the guest).
+   * @param {number} dt
+   * @returns {void}
+   */
+  function breakingJets(dt) {
+    S.foam.accumulator += FLOOD.jetRate[1] * 1.5 * dt;
+    while (S.foam.accumulator >= 1) {
+      S.foam.accumulator -= 1;
+      api.spawnJet(1);
+    }
+  }
+
+  /**
+   * The reservoir emptying as the surge runs out of it.
+   * @param {number} run 0..1 how far the front has crossed
+   * @returns {void}
+   */
+  function setReservoir(run) {
+    S.reservoir.position.y = THREE.MathUtils.lerp(FLOOD.reservoirLevel, FLOOD.reservoirLow, Math.sqrt(run));
+  }
+
+  /**
+   * Co-op guest: the host's `flood` row (the sampled kind), called every
+   * frame with an empty map when the host sends none. It only sets what is
+   * drawn (phase, front, fade, the gate); the breach and the banner fire on
+   * the phase edges. Nothing here sweeps, damages, scores or shakes.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function mirror(rows) {
+    const r = rows.get(0);
+    if (!r) { if (replica.on) endReplica(); return; }
+    if (!S.group) return;
+    const next = r[1];
+    const prev = replica.phase;
+    replica.on = true;
+    if (strainWanted(prev, next)) showBanner('THE DAM IS FAILING!', 'Cracks are spreading across the wall');
+    if (burstWanted(prev, next)) api.mirrorBurst(soundScale(damDistance()));
+    else if (prev === null && next >= 2) S.gate.visible = false;
+    replica.phase = next;
+    replica.strain = r[3];
+    replica.frozen = r[5] === 1;
+    S.state.phase = PHASE_NAMES[next];
+    S.state.broken = true;
+    S.state.frontX = r[2];
+    S.state.fade = r[4];
+  }
+
+  /** @returns {number} metres from the listener's camera to the dam's face */
+  function damDistance() {
+    const cam = Sim.three.camera.position;
+    return Math.hypot(cam.x - FLOOD.damX, cam.y - 12, cam.z);
+  }
+
+  /**
+   * Co-op guest: one frame of the host's flood, drawn with the host's own
+   * meshes, pools and sounds (the sweep, the buildings, the faults and the
+   * score stay with the host).
+   * @param {number} dt
+   * @returns {void}
+   */
+  function updateReplica(dt) {
+    if (replica.frozen) return;
+    S.state.waveTime += dt;
+    api.updateChunks(dt);
+    const phase = S.state.phase;
+    if (phase === 'strain') {
+      strainVisuals(dt, replica.strain);
+      strainSounds(dt, replica.strain, soundScale(damDistance()), true);
+      api.updateFoam(dt);
+      return;
+    }
+    if (phase === 'breaking') {
+      breakingJets(dt);
+      api.poseWater(1);
+      api.updateFoam(dt);
+      return;
+    }
+    setReservoir(THREE.MathUtils.clamp((S.state.frontX - FLOOD.damX) / (FLOOD.endX - FLOOD.damX), 0, 1));
+    api.poseWater(phase === 'surge' ? 1 : S.state.fade);
+    api.emitSpray(dt);
+    api.updateFoam(dt);
+    sound(dt);
+  }
+
+  /** @returns {void} the host's flood over (or the view left): the dam rebuilt, the water and spray gone */
+  function endReplica() {
+    resetFlood();
+  }
+
+  /**
+   * The flood as plain numbers for a snapshot's `flood` row, read-only; null
+   * when idle.
+   * @returns {{phase: string, frontX: number, timer: number, strainLength: number, fade: number, frozen: boolean}|null}
+   */
+  function replicaState() {
+    if (S.state.phase === 'idle') return null;
+    const { phase, frontX, timer, strainLength, fade } = S.state;
+    return { phase, frontX, timer, strainLength, fade, frozen };
+  }
+
+  /**
    * The rushing water's level: how much water there is, how near the
    * camera it is, and how near the wave itself.
    * @param {number} dt
@@ -495,7 +625,7 @@ export function createFloodSystem(ctx) {
 
   /** @returns {boolean} whether the front is currently crossing the map */
   function isSurging() {
-    return S.state.phase === 'surge';
+    return !replica.on && S.state.phase === 'surge';
   }
 
   /** @returns {number} how far across the map the front has reached */
@@ -508,6 +638,10 @@ export function createFloodSystem(ctx) {
    * @returns {void}
    */
   function resetFlood() {
+    replica.on = false;
+    replica.phase = null;
+    replica.strain = 0;
+    replica.frozen = false;
     S.state.phase = 'idle';
     S.state.timer = 0;
     S.state.fade = 1;
@@ -524,6 +658,8 @@ export function createFloodSystem(ctx) {
 
   /** @returns {void} */
   function disposeFlood() {
+    replica.on = false;
+    replica.phase = null;
     if (!S.group) return;
     S.group.traverse((/** @type {any} */ child) => {
       if (child.geometry) child.geometry.dispose();
@@ -583,7 +719,12 @@ export function createFloodSystem(ctx) {
     setFrozen, frozen: () => frozen,
     initFlood, updateFlood, breakDam, isRunning, resetFlood, disposeFlood, damWall: api.damWall, westLimit: api.westLimit, damSolids: api.damSolids,
     // Read by engine/collisions.js and the train, which need to know where
-    // the water is rather than merely that it is running.
-    inWater: api.inWater, atCrest: api.atCrest, spreadAt: api.spreadAt, surfaceAt: api.surfaceAt, frontX, isSurging, isDamIntact: api.isDamIntact
+    // the water is rather than merely that it is running. On a co-op guest
+    // the host's flood is only drawn: these report no water (R-053).
+    inWater: (/** @type {number} */ x, /** @type {number} */ z) => !replica.on && api.inWater(x, z),
+    atCrest: (/** @type {number} */ x, /** @type {number} */ z) => !replica.on && api.atCrest(x, z),
+    spreadAt: api.spreadAt,
+    surfaceAt: (/** @type {number} */ x, /** @type {number} */ z) => (replica.on ? 0 : api.surfaceAt(x, z)),
+    frontX, isSurging, isDamIntact: api.isDamIntact, replicaState, mirror
   };
 }

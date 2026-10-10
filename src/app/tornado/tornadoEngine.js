@@ -1000,7 +1000,8 @@ export function createSimulation(container) {
       // Before physics: a train derailed this frame is integrated from now.
       updateTrain(dt);
       // The street traffic too: a car the funnel takes is integrated from now.
-      ctx.systems.streetTraffic.updateStreetTraffic(dt);
+      // (Not while the co-op guest views the host's town: the host's cars are drawn from its snapshots.)
+      if (!(ctx.systems.net && ctx.systems.net.isPeerView())) ctx.systems.streetTraffic.updateStreetTraffic(dt);
       // Alongside the train and for the same reason: a span that drops this
       // frame, and any car that drops with it, is integrated from here on.
       updateViaduct(dt);
@@ -1089,8 +1090,11 @@ export function createSimulation(container) {
     ctx.systems.volcano.updateVolcano(Sim.state.paused ? 0 : dt);
     ctx.systems.waterspout.updateWaterspout(Sim.state.paused ? 0 : dt, rawDt);
     ctx.systems.actionHero.updateActionHero(Sim.state.paused ? 0 : dt, Sim.state.paused ? 0 : rawDt);
-    if (!Sim.state.paused) ctx.systems.cows.updateCows(dt);
-    ctx.systems.cleaner.updateCleaner(Sim.state.paused ? 0 : dt);
+    // The sky and the big actors (cows, Captain Spotless, the news helicopter, the GHOST jets, the mothership)
+    // are drawn on the co-op guest from the host's `flyers` rows (an older host sends none: then its own copies run), so its own copies stand still and hidden.
+    const guestView = !!(ctx.systems.net && ctx.systems.net.isSkyMirrored());
+    if (!Sim.state.paused && !guestView) ctx.systems.cows.updateCows(dt);
+    if (!guestView) ctx.systems.cleaner.updateCleaner(Sim.state.paused ? 0 : dt);
     if (!Sim.state.paused) updateElectricStorm(dt);
     // After the Electric Tornado, whose funnel tint it tops up.
     if (!Sim.state.paused) updateEmpCharge(dt);
@@ -1103,17 +1107,17 @@ export function createSimulation(container) {
     if (!Sim.state.paused) ctx.systems.gravityRift.updateGravityRift(dt);
     if (!Sim.state.paused) ctx.systems.solarStorm.updateSolarStorm(dt);
     if (!Sim.state.paused) ctx.systems.birds.updateBirds(dt);
-    if (!Sim.state.paused) ctx.systems.newsChopper.updateNewsChopper(dt);
+    if (!Sim.state.paused && !guestView) ctx.systems.newsChopper.updateNewsChopper(dt);
     if (!Sim.state.paused) updateStrikeTargeting(dt);
     if (!Sim.state.paused) updateChasms(dt);
     if (!Sim.state.paused) updateTerminator(dt);
     lap('aliens');
     if (!Sim.state.paused) updateAliens(dt);
-    if (!Sim.state.paused) ctx.systems.airSupport.updateAirSupport(dt);
+    if (!Sim.state.paused && !guestView) ctx.systems.airSupport.updateAirSupport(dt);
     ctx.systems.gunner.updateGunners(Sim.state.paused ? 0 : dt, Sim.state.paused ? 0 : rawDt);
     // Landing Support's samurai and their ship, on the world's time.
     if (!Sim.state.paused) spaceshipSystem.updateSupportWorld(dt);
-    if (!Sim.state.paused) updateMothership(dt);
+    if (!Sim.state.paused && !guestView) updateMothership(dt);
     lap('nuclear');
     if (!Sim.state.paused) updateNuclear(dt);
     if (!Sim.state.paused) updateSmoothCriminal(dt);
@@ -1147,6 +1151,8 @@ export function createSimulation(container) {
       ? Math.min(stormTarget, Sim.state.stormRamp + stormRampStep)
       : Math.max(stormTarget, Sim.state.stormRamp - stormRampStep);
 
+    // Co-op guest: the host's storm, wind and daylight, before they are read.
+    ctx.systems.net.applySky(rawDt);
     updateDayNight(dt);
     updateAtmosphere();
     updateBrightness(rawDt);

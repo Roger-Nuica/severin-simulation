@@ -40,7 +40,7 @@ export function createFissureParticles(ctx, S, api) {
         vent.active = vent.fissure ? vent.fissure.reveal.value >= vent.along : anyGrowing;
         vent.mesh.visible = vent.active;
         if (!vent.active) continue;
-        ctx.systems.powerLines.faultAt(vent.x, vent.z, vent.radius + FISSURE.poleFaultMargin);
+        if (!S.peerView()) ctx.systems.powerLines.faultAt(vent.x, vent.z, vent.radius + FISSURE.poleFaultMargin);
       }
       vent.rise = Math.min(1, vent.rise + dt / FISSURE.ventRise);
       vent.mesh.scale.y = vent.radius * FISSURE.ventHeight * THREE.MathUtils.smoothstep(vent.rise, 0, 1) + 0.001;
