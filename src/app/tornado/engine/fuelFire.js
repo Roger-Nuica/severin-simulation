@@ -8,6 +8,7 @@ import { FUEL } from './fuelFire/config.js';
 import { createCarChain } from './fuelFire/chain.js';
 import { createFuelEffects } from './fuelFire/effects.js';
 import { createFuelLeakSound } from './fuelFire/sound.js';
+import { FUEL_PHASE } from './net/fireFx.js';
 
 /**
  * ===========================================================================
@@ -77,6 +78,8 @@ import { createFuelLeakSound } from './fuelFire/sound.js';
  *   blowCarsNear: (x: number, z: number, depth: number) => number,
  *   contactAt: (x: number, z: number) => boolean,
  *   stations: () => Station[],
+ *   replicaState: () => {index: number, x: number, z: number, phase: number, level: number}[],
+ *   mirror: (rows: Map<number, number[]>) => void,
  *   initFuelFire: () => void,
  *   updateFuelFire: (dt: number, rawDt: number) => void,
  *   resetFuelFire: () => void,
@@ -99,6 +102,12 @@ export function createFuelFireSystem(ctx) {
   let banner = null;
   let bannerTimer = 0;
   const scratch = new THREE.Vector3();
+  // Co-op guest: the host's stations, drawn from `fires` rows (mirror), never leaked, burned or blown here.
+  /** @type {Map<number, {x: number, z: number, phase: number, level: number, owedSpray: number, owedFlame: number, owedSmoke: number, puddle: THREE.Mesh|null, stamp: number}>} */
+  const ghosts = new Map();
+  let ghostStamp = 0;
+  /** @returns {boolean} this is the co-op guest's view of the host's town */
+  const peerView = () => !!(ctx.systems.net && ctx.systems.net.isPeerView());
 
   /**
    * The stations in the town as it stands (it is rebuilt on Reset).
@@ -154,6 +163,7 @@ export function createFuelFireSystem(ctx) {
    * @returns {boolean} whether one started leaking
    */
   function leak(station) {
+    if (peerView()) return false;
     const s = station || pickStation();
     if (!s || s.phase !== 'intact') return false;
     s.phase = 'leaking';
@@ -191,6 +201,7 @@ export function createFuelFireSystem(ctx) {
    * @returns {void}
    */
   function burn(s, fuse = FUEL.burnSeconds) {
+    if (peerView()) return;
     if (s.phase === 'gone' || s.phase === 'burning') return;
     if (!s.puddle) s.puddle = effects.puddle(s.forecourt.x, s.forecourt.z);
     if (!s.hazard) s.hazard = ctx.systems.hazards.addHazard({ x: s.forecourt.x, z: s.forecourt.z, radius: FUEL.puddleRadius + 6, kind: 'fuelLeak' });
@@ -336,6 +347,109 @@ export function createFuelFireSystem(ctx) {
   }
 
   /**
+   * The host's stations as plain numbers (a snapshot's `fires` rows), read-only:
+   * the ones leaking, burning or smoking over their wreck.
+   * @returns {{index: number, x: number, z: number, phase: number, level: number}[]}
+   */
+  function replicaState() {
+    const out = [];
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      const at = { index: i, x: s.forecourt.x, z: s.forecourt.z };
+      if (s.phase === 'leaking') out.push({ ...at, phase: FUEL_PHASE.leaking, level: 1 - Math.max(0, s.timer) / FUEL.leakSeconds });
+      else if (s.phase === 'burning') out.push({ ...at, phase: FUEL_PHASE.burning, level: 1 });
+      else if (s.phase === 'gone' && s.smoke > 0) out.push({ ...at, phase: FUEL_PHASE.wreck, level: Math.max(0, s.smoke / FUEL.smokeSeconds) });
+    }
+    return out;
+  }
+
+  /**
+   * Co-op guest: takes the host's stations from the `fires` rows (the sampled
+   * kind, every type). A ghost station only sprays, flames, smokes, spreads its
+   * puddle and sounds the leak (stepGhosts): no hazard, blast, ring, fire on
+   * the kiosk or score. One missing from the rows is out.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function mirror(rows) {
+    ghostStamp++;
+    for (const [id, r] of rows) {
+      if (r[1] !== 2) continue;
+      let g = ghosts.get(id);
+      if (!g) {
+        g = { x: 0, z: 0, phase: 0, level: 0, owedSpray: 0, owedFlame: 0, owedSmoke: 0, puddle: null, stamp: 0 };
+        ghosts.set(id, g);
+      }
+      g.x = r[2];
+      g.z = r[3];
+      g.level = r[4];
+      g.phase = r[5];
+      g.stamp = ghostStamp;
+      if (!g.puddle) g.puddle = effects.puddle(g.x, g.z);
+      g.puddle.scale.setScalar(g.phase === FUEL_PHASE.leaking ? Math.max(0.01, FUEL.puddleRadius * Math.sqrt(g.level)) : FUEL.puddleRadius);
+    }
+    // A station that is no longer in the rows has been reset on the host: its puddle goes with it.
+    for (const [id, g] of ghosts) {
+      if (g.stamp === ghostStamp) continue;
+      if (g.puddle) { g.puddle.removeFromParent(); g.puddle.geometry.dispose(); }
+      ghosts.delete(id);
+    }
+  }
+
+  /**
+   * Co-op guest: the ghosts' spray, flames and smoke at the host's rates (the
+   * effects ask the particle budget themselves), and the loudest leak and
+   * alarm for the sound.
+   * @param {number} dt
+   * @param {number} cx camera x
+   * @param {number} cz camera z
+   * @param {{hiss: number, alarm: number, burning: boolean}} out
+   * @returns {void}
+   */
+  function stepGhosts(dt, cx, cz, out) {
+    for (const g of ghosts.values()) {
+      const near = 1 / (1 + Math.hypot(cx - g.x, cz - g.z) / 45);
+      let n;
+      if (g.phase === FUEL_PHASE.leaking) {
+        [n, g.owedSpray] = due(g.owedSpray, FUEL.sprayRate, dt);
+        const s = nearestStation(g.x, g.z);
+        for (let k = 0; k < n; k++) {
+          const pump = s ? s.pumps[k % 2] : scratch.set(g.x + (k % 2 ? 2.2 : -2.2), 1.3, g.z);
+          effects.spray(pump.x, pump.y, pump.z, 1);
+        }
+        out.hiss = Math.max(out.hiss, near);
+        out.alarm = Math.max(out.alarm, near);
+      } else if (g.phase === FUEL_PHASE.burning) {
+        [n, g.owedFlame] = due(g.owedFlame, FUEL.burnFlameRate, dt);
+        if (n) effects.flames(g.x, g.z, FUEL.puddleRadius, n);
+        [n, g.owedSmoke] = due(g.owedSmoke, FUEL.smokeRate * 0.5, dt);
+        if (n) effects.smoke(g.x, g.z, n);
+        out.hiss = Math.max(out.hiss, near * 0.5);
+        out.alarm = Math.max(out.alarm, near);
+        out.burning = true;
+      } else {
+        [n, g.owedSmoke] = due(g.owedSmoke, FUEL.smokeRate * (0.3 + 0.7 * g.level), dt);
+        if (n) effects.smoke(g.x, g.z, n);
+        if (g.level > 0.6) {
+          [n, g.owedFlame] = due(g.owedFlame, FUEL.wreckFlameRate, dt);
+          if (n) effects.flames(g.x, g.z, FUEL.puddleRadius * 0.7, n);
+        }
+      }
+    }
+  }
+
+  /**
+   * The guest's own copy of the station at a forecourt (its pump heads), if the two towns agree.
+   * @param {number} x
+   * @param {number} z
+   * @returns {Station|null}
+   */
+  function nearestStation(x, z) {
+    for (const s of list) if (Math.hypot(s.forecourt.x - x, s.forecourt.z - z) < 6) return s;
+    return null;
+  }
+
+  /**
    * @param {number} owed fractional particles carried over
    * @param {number} rate a second
    * @param {number} dt
@@ -374,10 +488,19 @@ export function createFuelFireSystem(ctx) {
     let alarm = 0;
     let anyBurning = false;
     const cam = Sim.three.camera.position;
+    // Co-op guest: the host's stations are ghosts (mirror), the guest's own stay intact.
+    const viewing = peerView();
     if (dt > 0) {
+      if (ghosts.size) {
+        const heard = { hiss: 0, alarm: 0, burning: false };
+        stepGhosts(dt, cam.x, cam.z, heard);
+        hiss = heard.hiss;
+        alarm = heard.alarm;
+        anyBurning = heard.burning;
+      }
       for (const s of list) {
         if (s.phase === 'intact') {
-          if (hitByFunnel(s)) leak(s);
+          if (!viewing && hitByFunnel(s)) leak(s);
           continue;
         }
         if (s.phase === 'gone') {
@@ -389,7 +512,7 @@ export function createFuelFireSystem(ctx) {
           if (n) effects.smoke(s.forecourt.x, s.forecourt.z, n);
           // The spilt fuel burns on for a while after the blast.
           if (s.smoke > FUEL.smokeSeconds * 0.6) {
-            [n, s.owedFlame] = due(s.owedFlame, 40, dt);
+            [n, s.owedFlame] = due(s.owedFlame, FUEL.wreckFlameRate, dt);
             if (n) effects.flames(s.forecourt.x, s.forecourt.z, FUEL.puddleRadius * 0.7, n);
           }
           continue;
@@ -400,7 +523,7 @@ export function createFuelFireSystem(ctx) {
         if (s.phase === 'leaking') {
           const spread = 1 - Math.max(0, s.timer) / FUEL.leakSeconds;
           if (s.puddle) s.puddle.scale.setScalar(Math.max(0.01, FUEL.puddleRadius * Math.sqrt(spread)));
-          [n, s.owedSpray] = due(s.owedSpray, 70, dt);
+          [n, s.owedSpray] = due(s.owedSpray, FUEL.sprayRate, dt);
           for (let k = 0; k < n; k++) {
             const pump = s.pumps[k % 2];
             effects.spray(pump.x, pump.y, pump.z, 1);
@@ -410,7 +533,7 @@ export function createFuelFireSystem(ctx) {
           if (s.timer <= 0) burn(s);
         } else {
           if (s.puddle && s.puddle.scale.x < FUEL.puddleRadius) s.puddle.scale.setScalar(FUEL.puddleRadius);
-          [n, s.owedFlame] = due(s.owedFlame, 110, dt);
+          [n, s.owedFlame] = due(s.owedFlame, FUEL.burnFlameRate, dt);
           if (n) effects.flames(s.forecourt.x, s.forecourt.z, FUEL.puddleRadius, n);
           [n, s.owedSmoke] = due(s.owedSmoke, FUEL.smokeRate * 0.5, dt);
           if (n) effects.smoke(s.forecourt.x, s.forecourt.z, n);
@@ -451,6 +574,7 @@ export function createFuelFireSystem(ctx) {
     for (const s of list) if (s.hazard) ctx.systems.hazards.removeHazard(s.hazard);
     chain.clear();
     effects.clear();
+    ghosts.clear();
     sound.silenceLeakSound();
     blastDepth = -1;
     bannerTimer = 0;
@@ -470,7 +594,7 @@ export function createFuelFireSystem(ctx) {
   }
 
   return {
-    leak, breach, igniteAt, blowCarsNear, contactAt, stations: () => list,
+    leak, breach, igniteAt, blowCarsNear, contactAt, stations: () => list, replicaState, mirror,
     initFuelFire, updateFuelFire, resetFuelFire, disposeFuelFire
   };
 }

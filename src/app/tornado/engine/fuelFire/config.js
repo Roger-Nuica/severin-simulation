@@ -39,6 +39,11 @@ export const FUEL = {
   smokeSeconds: 16,            // the wreck smokes this long after the blast
   smokeRate: 26,               // particles a second per smoking station
   smokeColumns: 3,
+  // Particles a second: fuel spraying from the pumps while it leaks, flames over the burning
+  // puddle, and the flames the spilt fuel keeps up for the first part of the wreck's smoke.
+  sprayRate: 70,
+  burnFlameRate: 110,
+  wreckFlameRate: 40,
   // Secondary explosions: cars near a blast go up after it, one after the
   // other, and each can set off the cars next to it -- a limited chain.
   carRadius: 26,               // from a station or a tanker

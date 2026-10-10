@@ -125,6 +125,8 @@ const SPARKS = {
  *   quench: () => void,
  *   damageMultiplier: () => number,
  *   groundContactAt: (x: number, z: number) => boolean,
+ *   groundFireState: () => {slot: number, x: number, z: number, level: number}[],
+ *   mirrorGroundFire: (rows: Map<number, number[]>) => void,
  *   burning: () => boolean,
  *   resetFirenado: () => void,
  *   disposeFirenado: () => void
@@ -648,5 +650,15 @@ export function createFirenadoSystem(ctx) {
    */
   const groundContactAt = (x, z) => groundFire.contactAt(x, z);
 
-  return { initFirenado, updateFirenado, ignite, quench, damageMultiplier, groundContactAt, burning, resetFirenado, disposeFirenado };
+  /** @returns {{slot: number, x: number, z: number, level: number}[]} the ground fire's patches, read-only (the co-op host's `fires` rows) */
+  const groundFireState = () => groundFire.replicaState();
+
+  /**
+   * Co-op guest: draws the host's ground fires from the `fires` rows.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  const mirrorGroundFire = (rows) => groundFire.mirror(rows);
+
+  return { initFirenado, updateFirenado, ignite, quench, damageMultiplier, groundContactAt, groundFireState, mirrorGroundFire, burning, resetFirenado, disposeFirenado };
 }

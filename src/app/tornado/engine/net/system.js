@@ -35,6 +35,7 @@ import { FIGURE, hankRow, havocRow, samuraiRow, newHankPose, hankWant, hankGlow,
 import { GUNNER } from '../gunner/config.js';
 import { cloneRows, replicatorRow, poseOriginal, writeClones, newReplicaScratch, easeHeat, standingCount, glowLevels } from './replicatorPose.js';
 import { eulerYXZ, carClass, pickCars, carRow, poseCar, colourIndex } from './carPose.js';
+import { FIRE, fireId, buildingRow, fireRow, maskOf, orderFires } from './fireFx.js';
 import { FLYER, flyerId, flyerRow, poseFlyer, motherState, throttleState, headDown, headHeight, jetLook, chopperLook, spotlessLook } from './flyerPose.js';
 import { CHOPPER } from '../environment/newsChopper.js';
 import { ALIENS } from '../aliens/config.js';
@@ -1500,6 +1501,28 @@ export function createNetSystem(ctx) {
   }
 
   /**
+   * The fires as `fires` rows (at most 64), built only while a guest is in the
+   * room: the gas mains' masks, the fuel stations, the Firenado's ground fire
+   * patches and the building fires, fiercest first. Each system hands over
+   * read-only state; nothing here touches a fire.
+   * @returns {number[][]}
+   */
+  function fireRows() {
+    const clamp = (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound);
+    const sys = ctx.systems;
+    const groups = { gas: /** @type {number[][]} */ ([]), fuel: /** @type {number[][]} */ ([]), ground: /** @type {number[][]} */ ([]), buildings: /** @type {number[][]} */ ([]) };
+    const mains = sys.gasMains && sys.gasMains.replicaState();
+    if (mains) for (const m of mains) groups.gas.push(fireRow(FIRE.gas, m.index, { x: 0, z: 0, level: 0, a: m.burn, b: m.vent, c: m.spent }, clamp));
+    const stations = sys.fuelFire && sys.fuelFire.replicaState();
+    if (stations) for (const f of stations) groups.fuel.push(fireRow(FIRE.fuel, f.index, { x: f.x, z: f.z, level: f.level, a: f.phase }, clamp));
+    const patches = sys.firenado && sys.firenado.groundFireState();
+    if (patches) for (const p of patches) groups.ground.push(fireRow(FIRE.ground, p.slot, { x: p.x, z: p.z, level: p.level }, clamp));
+    const burning = sys.buildingFire && sys.buildingFire.replicaState();
+    if (burning) for (const f of burning) groups.buildings.push(buildingRow(Math.max(0, f.index), f, clamp));
+    return orderFires(groups, LIMITS.maxFires);
+  }
+
+  /**
    * The mothership, Captain Spotless, the news helicopter, the GHOST jets and
    * the cows as `flyers` rows (at most 14, most important first), built only
    * while a guest is in the room. Each system hands over read-only state; the
@@ -1610,6 +1633,7 @@ export function createNetSystem(ctx) {
     const replica = live ? replicaRows() : { replicator: [], clones: [] };
     const figures = live ? figureRows() : [];
     const flyers = live ? flyerRows() : [];
+    const fires = live ? fireRows() : [];
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
@@ -1621,6 +1645,7 @@ export function createNetSystem(ctx) {
       ...(replica.clones.length ? { clones: replica.clones } : {}),
       ...(figures.length ? { figures } : {}),
       ...(flyers.length ? { flyers } : {}),
+      ...(fires.length ? { fires } : {}),
       ...(live ? worldRows(h) : {})
     };
   }
@@ -1849,6 +1874,7 @@ export function createNetSystem(ctx) {
     if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
     showTownCars();
     showLocalSky();
+    clearFires();
     // Let go of the input pipeline, unless a local Hero run holds it (it cannot
     // while this is a peer, but leaving must never take Roger's keys away).
     if (!(ctx.Hero && ctx.Hero.active)) ctx.systems.playerInput.detachInput();
@@ -2801,6 +2827,37 @@ export function createNetSystem(ctx) {
     }
   }
 
+  let firesDrawn = false;
+
+  /**
+   * The host's fires (the `fires` rows, every type) into the four fire
+   * systems' render-only entries; each takes its own type and sets what it
+   * draws, nothing burns, spreads or scores here. Called every frame while
+   * viewing the host, with an empty map when the host sends none.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function drawFires(rows) {
+    const s = ctx.systems;
+    if (rows.size) firesDrawn = true;
+    else if (!firesDrawn) return;
+    if (s.buildingFire) s.buildingFire.mirror(rows);
+    if (s.firenado) s.firenado.mirrorGroundFire(rows);
+    if (s.fuelFire) s.fuelFire.mirror(rows);
+    if (s.gasMains) s.gasMains.mirror(rows);
+  }
+
+  /** The host's fires gone (leaving the host's view): every fire system back to its start. @returns {void} */
+  function clearFires() {
+    if (!firesDrawn) return;
+    firesDrawn = false;
+    const s = ctx.systems;
+    if (s.buildingFire) s.buildingFire.resetBuildingFire();
+    if (s.firenado) s.firenado.mirrorGroundFire(NO_ROWS);
+    if (s.fuelFire) s.fuelFire.resetFuelFire();
+    if (s.gasMains) s.gasMains.resetGasMains();
+  }
+
   /** The guest's own cows, helicopter, jets, mothership and Spotless, back (leaving the host's view). @returns {void} */
   function showLocalSky() {
     for (const m of S.hiddenSky) m.visible = true;
@@ -2860,6 +2917,8 @@ export function createNetSystem(ctx) {
     for (const [kind, sampled] of Object.entries(s.kinds)) {
       // The tornado is not a proxy: the guest's own funnels draw it (funnels.drive above).
       if (kind === 'tornadoes') continue;
+      // The fires are not proxies either: the fire systems draw them with their own pools.
+      if (kind === 'fires') { drawFires(sampled); continue; }
       // The moving-cars rows are the older host's: once `cars` arrives they are not drawn.
       const rows = kind === 'vehicles' && S.hostCars ? NO_ROWS : sampled;
       // The clones are one set of instanced meshes, not proxies.

@@ -80,6 +80,8 @@ const GROUND_FIRE = {
  *   updateGroundFire: (dt: number, strength: number) => void,
  *   isBurning: () => boolean,
  *   contactAt: (x: number, z: number) => boolean,
+ *   replicaState: () => {slot: number, x: number, z: number, level: number}[],
+ *   mirror: (rows: Map<number, number[]>) => void,
  *   resetGroundFire: () => void,
  *   disposeGroundFire: () => void
  * }}
@@ -101,6 +103,9 @@ export function createGroundFireSystem(ctx) {
   let time = 0;
   let alive = 0;
   const scratch = new THREE.Color();
+  // Co-op guest: the host's patches are drawn from `fires` rows (mirror), never lit, aged or put out here.
+  let replicaOn = false;
+  let room = Infinity;
 
   /**
    * @param {number[]} range
@@ -195,18 +200,20 @@ export function createGroundFireSystem(ctx) {
         continue;
       }
       patch.age += dt;
-      const dx = patch.x - Vortex.center.x;
-      const dz = patch.z - Vortex.center.z;
-      const underFunnel = strength > 0 && dx * dx + dz * dz < radius * radius;
-      patch.linger = underFunnel ? GROUND_FIRE.linger : patch.linger - dt;
-      if (patch.linger <= 0) {
-        patch.active = false;
-        bed.colours[s * 4 + 3] = 0;
-        bed.sizes[s] = 0;
-        continue;
+      if (!replicaOn) {
+        const dx = patch.x - Vortex.center.x;
+        const dz = patch.z - Vortex.center.z;
+        const underFunnel = strength > 0 && dx * dx + dz * dz < radius * radius;
+        patch.linger = underFunnel ? GROUND_FIRE.linger : patch.linger - dt;
+        if (patch.linger <= 0) {
+          patch.active = false;
+          bed.colours[s * 4 + 3] = 0;
+          bed.sizes[s] = 0;
+          continue;
+        }
       }
       alive++;
-      patch.level = Math.min(1, patch.age / GROUND_FIRE.fadeIn) * Math.min(1, patch.linger / GROUND_FIRE.fadeOut);
+      if (!replicaOn) patch.level = Math.min(1, patch.age / GROUND_FIRE.fadeIn) * Math.min(1, patch.linger / GROUND_FIRE.fadeOut);
 
       const seedPhase = patch.seed * 40;
       const flicker = 0.72 + 0.14 * Math.sin(time * 19 + seedPhase) + 0.08 * Math.sin(time * 31 + seedPhase * 1.7)
@@ -225,7 +232,8 @@ export function createGroundFireSystem(ctx) {
       patch.accumulator += GROUND_FIRE.flameRate * patch.level * dt;
       while (patch.accumulator >= 1) {
         patch.accumulator -= 1;
-        spawnFlame(patch);
+        // The host's path has no budget check (its pool is its own); the guest asks first.
+        if (replicaOn) { if (room > 0) { room--; spawnFlame(patch); } } else spawnFlame(patch);
       }
     }
   }
@@ -287,7 +295,8 @@ export function createGroundFireSystem(ctx) {
     if (!flames) return;
     time += dt;
     const radius = groundRadius();
-    if (strength >= GROUND_FIRE.minStrength) {
+    if (replicaOn) room = ctx.systems.caps.particleRoom();
+    if (strength >= GROUND_FIRE.minStrength && !replicaOn) {
       spawnTimer -= dt;
       if (spawnTimer <= 0) {
         lightPatch(radius);
@@ -308,7 +317,7 @@ export function createGroundFireSystem(ctx) {
    * @returns {boolean} whether any patch or flame is still showing
    */
   function isBurning() {
-    return alive > 0 || (flames !== null && flames.life.some(l => l > 0));
+    return alive > 0 || replicaOn || (flames !== null && flames.life.some(l => l > 0));
   }
 
   /**
@@ -329,8 +338,48 @@ export function createGroundFireSystem(ctx) {
     return false;
   }
 
+  /**
+   * The host's patches as plain numbers (a snapshot's `fires` rows), read-only.
+   * @returns {{slot: number, x: number, z: number, level: number}[]}
+   */
+  function replicaState() {
+    const out = [];
+    for (let i = 0; i < patches.length; i++) {
+      const p = patches[i];
+      if (p.active && p.level > 0) out.push({ slot: i, x: p.x, z: p.z, level: p.level });
+    }
+    return out;
+  }
+
+  /**
+   * Co-op guest: takes the host's ground fires from the `fires` rows (the
+   * sampled kind, every type; the row id's index is the patch slot). The
+   * patches are only drawn (bed, flames, light); none is lit, aged or put
+   * out here. A slot missing from the rows is out.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function mirror(rows) {
+    if (!beds) return;
+    let any = false;
+    for (const patch of patches) patch.active = false;
+    for (const [id, r] of rows) {
+      if (r[1] !== 1) continue;
+      const patch = patches[id - r[1] * 1000];
+      if (!patch) continue;
+      any = true;
+      patch.active = true;
+      patch.x = r[2];
+      patch.z = r[3];
+      patch.level = r[4];
+      patch.seed = ((id * 0.6180339887) % 1);
+    }
+    replicaOn = any;
+  }
+
   /** @returns {void} */
   function resetGroundFire() {
+    replicaOn = false;
     for (const patch of patches) patch.active = false;
     for (const light of lights) light.intensity = 0;
     for (const p of [flames, beds]) {
@@ -356,5 +405,5 @@ export function createGroundFireSystem(ctx) {
     beds = null;
   }
 
-  return { initGroundFire, updateGroundFire, isBurning, contactAt, resetGroundFire, disposeGroundFire };
+  return { initGroundFire, updateGroundFire, isBurning, contactAt, replicaState, mirror, resetGroundFire, disposeGroundFire };
 }

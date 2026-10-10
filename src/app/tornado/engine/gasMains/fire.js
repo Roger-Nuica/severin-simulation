@@ -1,5 +1,6 @@
 // @ts-check
 import { GAS } from './config.js';
+import { FIRE, fireId, maskOf, segmentState } from '../net/fireFx.js';
 /** @typedef {import('./config.js').Segment} Segment */
 
 /**
@@ -196,5 +197,85 @@ export function createGasFire(ctx, S, api) {
     }
   }
 
-  return { spawnJet, spawnSmoke, updateJets, updateSmoke, requestLights, updateHazards };
+  // ---------------------------------------------------------------------
+  // Co-op guest: the host's mains, drawn and never burned
+  // ---------------------------------------------------------------------
+
+  /**
+   * The host's mains as bit masks over their segments (a snapshot's `fires`
+   * rows), read-only. A main with nothing open is left out.
+   * @returns {{index: number, burn: number, vent: number, spent: number}[]}
+   */
+  function replicaState() {
+    const out = [];
+    for (let m = 0; m < S.mains.length; m++) {
+      const segments = S.mains[m].segments;
+      const burn = segments.map(g => g.state === 'burning');
+      const vent = segments.map(g => g.state === 'venting');
+      const spent = segments.map(g => g.state === 'spent');
+      if (!burn.includes(true) && !vent.includes(true) && !spent.includes(true)) continue;
+      out.push({ index: m, burn: maskOf(burn), vent: maskOf(vent), spent: maskOf(spent) });
+    }
+    return out;
+  }
+
+  /**
+   * Co-op guest: sets every segment's state from the `fires` rows (the
+   * sampled kind, every type; a main missing from the rows is sealed). Only
+   * the states: the heat, scar, jets, smoke and light follow in `stepReplica`.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function mirror(rows) {
+    for (let m = 0; m < S.mains.length; m++) {
+      const r = rows.get(fireId(FIRE.gas, m));
+      const segments = S.mains[m].segments;
+      for (let i = 0; i < segments.length; i++) {
+        segments[i].state = r ? segmentState(r[5], r[6], r[7], i) : 'sealed';
+      }
+    }
+  }
+
+  /**
+   * Co-op guest: one segment's look from its mirrored state, at the host's
+   * rates and inside the particle budget. No timers, no hand-off to the next
+   * segment, no blast, no hazard: the heat rises in 0.35 s and falls over
+   * the fade, the scar grows as the host's does.
+   * @param {Segment} segment
+   * @param {number} dt
+   * @returns {boolean} whether it is burning or venting
+   */
+  function stepReplica(segment, dt) {
+    const state = segment.state;
+    const heat = state === 'burning'
+      ? Math.min(1, segment.heat + dt / 0.35)
+      : Math.max(0, segment.heat - dt / GAS.fadeSeconds);
+    const scar = state === 'sealed' ? 0 : Math.min(1, segment.scar + dt * 0.8);
+    if (heat !== segment.heat || scar !== segment.scar) S.seamDirty = true;
+    segment.heat = heat;
+    segment.scar = scar;
+    if (state === 'venting') {
+      S.jets.accumulator += GAS.ventRate * dt;
+      while (S.jets.accumulator >= 1) {
+        S.jets.accumulator -= 1;
+        if (S.room-- > 0) spawnJet(segment, 'vent');
+      }
+      return true;
+    }
+    if (state !== 'burning') return false;
+    S.jets.accumulator += GAS.jetRate * heat * dt;
+    if (segment.manhole) S.jets.accumulator += GAS.columnRate * heat * dt;
+    while (S.jets.accumulator >= 1) {
+      S.jets.accumulator -= 1;
+      if (S.room-- > 0) spawnJet(segment, segment.manhole && Math.random() < 0.55 ? 'column' : 'jet');
+    }
+    S.smoke.accumulator += GAS.smokeRate * heat * dt;
+    while (S.smoke.accumulator >= 1) {
+      S.smoke.accumulator -= 1;
+      if (S.room-- > 0) spawnSmoke(segment);
+    }
+    return true;
+  }
+
+  return { spawnJet, spawnSmoke, updateJets, updateSmoke, requestLights, updateHazards, replicaState, mirror, stepReplica };
 }

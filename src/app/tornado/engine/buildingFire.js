@@ -108,6 +108,7 @@ const FIRE = {
  * @property {number} accumulator flames owed to its emitter
  * @property {number} smokeAccumulator
  * @property {number} flicker
+ * @property {number} [stamp] co-op guest ghosts: the last mirror pass that saw it
  */
 
 /**
@@ -122,6 +123,8 @@ const FIRE = {
  *   isBurning: (building: SimObject) => boolean,
  *   burningCount: () => number,
  *   burning: () => SimObject[],
+ *   replicaState: () => {index: number, x: number, z: number, level: number, collapsed: boolean, width: number, depth: number, height: number}[],
+ *   mirror: (rows: Map<number, number[]>) => void,
  *   resetBuildingFire: () => void,
  *   disposeBuildingFire: () => void
  * }}
@@ -141,6 +144,15 @@ export function createBuildingFireSystem(ctx) {
   let smoke = null;
   let time = 0;
   const scratch = new THREE.Color();
+  // Co-op guest: the host's fires, drawn and never burned (mirror below). Keyed by row id;
+  // each entry has the shape of a Fire, over a stand-in for the building's mesh.
+  /** @type {Map<number, Fire>} */
+  const ghosts = new Map();
+  /** @type {Fire[]} the ghosts as a list, rebuilt only when a fire appears or goes */
+  let ghostList = [];
+  let ghostStamp = 0;
+  /** @returns {boolean} this is the co-op guest's view of the host's town */
+  const peerView = () => !!(ctx.systems.net && ctx.systems.net.isPeerView());
 
   /**
    * @param {number[]} range
@@ -208,6 +220,8 @@ export function createBuildingFireSystem(ctx) {
    * @returns {boolean} whether it caught
    */
   function igniteBuilding(building, level = 0) {
+    // The co-op guest never lights a fire of its own (R-053): the host's arrive as `fires` rows.
+    if (peerView()) return false;
     if (!building || building.shelter || building.burnedOut) return false;
     if (!building.mesh || !building.mesh.parent) return false;
     if (isBurning(building)) return false;
@@ -340,6 +354,7 @@ export function createBuildingFireSystem(ctx) {
    * @returns {void}
    */
   function spawnParticle(fire, pool, isSmoke) {
+    // Same statements and random order as before; the ghosts' stand-in mesh has the same fields.
     const max = isSmoke ? FIRE.maxSmoke : FIRE.maxFlames;
     const i = pool.next;
     pool.next = (pool.next + 1) % max;
@@ -356,6 +371,98 @@ export function createBuildingFireSystem(ctx) {
     pool.velocities[i * 3 + 2] = (Math.random() - 0.5) * 1.4;
     pool.life[i] = pool.maxLife[i] = between(isSmoke ? FIRE.smokeLife : FIRE.flameLife);
     pool.seed[i] = fire.level;
+  }
+
+  /**
+   * @param {Fire} fire
+   * @returns {void}
+   */
+  function setFlicker(fire) {
+    const phase = fire.seed * 40;
+    fire.flicker = 0.74 + 0.13 * Math.sin(time * 17 + phase) + 0.08 * Math.sin(time * 29 + phase * 1.7)
+      + 0.05 * Math.random();
+  }
+
+  /**
+   * The host's fires as plain numbers (a snapshot's `fires` rows), read-only:
+   * which building, where, how fierce. Nothing here touches a fire.
+   * @returns {{index: number, x: number, z: number, level: number, collapsed: boolean, width: number, depth: number, height: number}[]}
+   */
+  function replicaState() {
+    const out = [];
+    const buildings = ctx.Environment ? ctx.Environment.buildings : null;
+    if (!buildings) return out;
+    for (const fire of fires) {
+      const root = fire.building.mesh;
+      const fp = root && root.userData.footprint;
+      if (!fp || fire.level <= 0) continue;
+      out.push({
+        index: buildings.indexOf(fire.building), x: root.position.x, z: root.position.z, level: fire.level,
+        collapsed: fire.collapsed, width: fp.width, depth: fp.depth, height: root.userData.wallHeight || 4
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Co-op guest: takes the host's building fires from the `fires` rows (the
+   * map of the sampled kind, every type) and keeps them as ghosts. A ghost
+   * only flames, smokes and lights (updateGhosts); it spreads to nothing,
+   * collapses nothing and scores nothing. Called every frame while viewing
+   * the host; a fire missing from the rows is gone.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function mirror(rows) {
+    ghostStamp++;
+    let changed = false;
+    for (const [id, r] of rows) {
+      if (r[1] !== 0) continue;
+      let g = ghosts.get(id);
+      if (!g) {
+        const mesh = { position: { x: 0, y: 0, z: 0 }, userData: { footprint: { width: 1, depth: 1 }, wallHeight: 4 }, parent: true };
+        g = {
+          building: /** @type {any} */ ({ mesh }), age: FIRE.rampTime, level: 0, rollTimer: 0, rubbleTimer: 0, collapsed: false,
+          seed: (id * 0.6180339887) % 1, accumulator: 0, smokeAccumulator: 0, flicker: 1, stamp: 0
+        };
+        ghosts.set(id, g);
+        changed = true;
+      }
+      const mesh = /** @type {any} */ (g.building.mesh);
+      mesh.position.x = r[2];
+      mesh.position.z = r[3];
+      mesh.userData.footprint.width = r[5];
+      mesh.userData.footprint.depth = r[6];
+      mesh.userData.wallHeight = r[7] || 4;
+      g.collapsed = r[7] === 0;
+      g.level = r[4];
+      g.stamp = ghostStamp;
+    }
+    for (const [id, g] of ghosts) if (g.stamp !== ghostStamp) { ghosts.delete(id); changed = true; }
+    if (changed) ghostList = [...ghosts.values()];
+  }
+
+  /**
+   * Co-op guest: the ghosts' flames and smoke, at the host's rates, within the particle budget.
+   * @param {number} dt
+   * @returns {void}
+   */
+  function updateGhosts(dt) {
+    if (!ghostList.length) return;
+    let room = ctx.systems.caps.particleRoom();
+    for (const fire of ghostList) {
+      setFlicker(fire);
+      fire.accumulator += FIRE.flameRate * fire.level * dt;
+      while (fire.accumulator >= 1) {
+        fire.accumulator -= 1;
+        if (room > 0) { room--; spawnParticle(fire, flames, false); }
+      }
+      fire.smokeAccumulator += FIRE.smokeRate * fire.level * dt;
+      while (fire.smokeAccumulator >= 1) {
+        fire.smokeAccumulator -= 1;
+        if (room > 0) { room--; spawnParticle(fire, smoke, true); }
+      }
+    }
   }
 
   /**
@@ -414,9 +521,7 @@ export function createBuildingFireSystem(ctx) {
         rollSpread(fire);
       }
 
-      const phase = fire.seed * 40;
-      fire.flicker = 0.74 + 0.13 * Math.sin(time * 17 + phase) + 0.08 * Math.sin(time * 29 + phase * 1.7)
-        + 0.05 * Math.random();
+      setFlicker(fire);
 
       fire.accumulator += FIRE.flameRate * fire.level * dt;
       while (fire.accumulator >= 1) {
@@ -439,7 +544,7 @@ export function createBuildingFireSystem(ctx) {
    */
   function updateLights() {
     const camPos = Sim.three.camera.position;
-    const ranked = fires.slice().sort((a, b) => {
+    const ranked = (ghostList.length ? ghostList : fires).slice().sort((a, b) => {
       const da = camPos.distanceToSquared(a.building.mesh.position);
       const db = camPos.distanceToSquared(b.building.mesh.position);
       return (b.level / (1 + db * 0.002)) - (a.level / (1 + da * 0.002));
@@ -505,10 +610,11 @@ export function createBuildingFireSystem(ctx) {
     if (!flames) return;
     time += dt;
     updateFires(dt);
+    updateGhosts(dt);
     updateLights();
     const flamesAlive = updateParticles(dt, flames, FIRE.maxFlames, false);
     const smokeAlive = updateParticles(dt, smoke, FIRE.maxSmoke, true);
-    if (fires.length || flamesAlive || smokeAlive) {
+    if (fires.length || ghostList.length || flamesAlive || smokeAlive) {
       markPoolDirty(flames);
       markPoolDirty(smoke);
       const scale = pointScaleFor(Sim.three.renderer, Sim.three.camera);
@@ -521,6 +627,8 @@ export function createBuildingFireSystem(ctx) {
   function resetBuildingFire() {
     for (const fire of fires) fire.building.burnedOut = false;
     fires = [];
+    ghosts.clear();
+    ghostList = [];
     for (const light of lights) light.intensity = 0;
     for (const pool of [flames, smoke]) {
       if (!pool) continue;
@@ -540,12 +648,14 @@ export function createBuildingFireSystem(ctx) {
     for (const light of lights) scene.remove(light);
     lights.length = 0;
     fires = [];
+    ghosts.clear();
+    ghostList = [];
     flames = null;
     smoke = null;
   }
 
   return {
     initBuildingFire, updateBuildingFire, igniteBuilding, igniteNear, douse, contactAt,
-    isBurning, burningCount, burning, resetBuildingFire, disposeBuildingFire
+    isBurning, burningCount, burning, replicaState, mirror, resetBuildingFire, disposeBuildingFire
   };
 }
