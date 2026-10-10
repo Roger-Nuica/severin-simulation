@@ -26,6 +26,22 @@ The owner answered "yes" or "default" to every clarification, with the extras be
 16. **Play the same.** The guest is a second Roger in every respect except creating tornadoes and disasters: the same wheel, abilities, jetpack, Invincible and revive. **The car stays as it is: the guest rides as the passenger (the owner, 2026-10-06: "passenger"); it does not drive.** **Every ability is free for the guest and for the host** (the owner, 2026-10-06: "free for all"; the energy is infinite for now, `ENERGY.infinite`, and the cost values are disabled, not removed).
 14. Black Hole inside its own no-escape zone: keep R-031 (the caster dies, as Roger does), make it legible (the hole visible plus a warning to the shooter); no number change. This is the one place where the "same powers" principle and the safety rule meet: the guest dies exactly as the host's Roger would.
 
+## Owner's decisions, 2026-10-10 (answers to DESIGN_coop-shared-shooter.md section 5, Subtask 13 and R-061)
+1. Gravitron: the guest does not need it (the guest wheel stays at six; no protocol WEAPONS change).
+2. The guest's rifle fires on release at a charge level, as the host's (charge and MEGA through the `charge` input field).
+3. Guest kills emit `rogerKill` (they break Smooth Criminal's peace), one rule for all weapons.
+4. Kill scoring stays as it is (no uniform-scoring change).
+5. The guest takes the host's numbers in C7 (rifle, minigun, railgun, Katana, Black Hole).
+6. The guest's Katana uses the host's `targets.strike`, including the lunge.
+7. A guest's own rifle blast hurts the guest, as the host's does.
+8. Black Hole: keep the current minimum distance (12 m); no refusal, no new number; the shooter is warned (decision 14).
+9. A player's own shot does not shake its own screen.
+10. The guest's Bullet Time (Q with the minigun) freezes its own rounds.
+11. Pursuers are the host's world, hit by either player's weapons.
+12. Subtask 13: buildings are synchronised (the `bld` delta list, v1 mask then topple pose).
+13. R-061's wording is approved.
+14. The rules/design disagreements are resolved to match the current code.
+
 ## Reading done
 `CLAUDE.md`, `.claude/rules.md` (R-013, R-030, R-047, R-048, R-049, R-050, R-051, R-053, R-054, R-059, R-060), `docs/architecture.md` ("Co-op: who owns what"), `PLAN_coop-guest-fixes.md` (Subtasks 8 to 13, "Protected-value, cap and protocol items", Clarifications), `PROJECT_HISTORY.md` part 1 (co-op network measurements: 162 KiB/s worst case, typical snapshot under 1 KB), `.claude/skills/full-autonomous-run/SKILL.md` (classification, mandatory stop). Code read: `net/system.js`, `net/protocol.js`, `net/events.js`, `net/interp.js`, `net/shotFeedback.js`, `net/guestWeapons.js`, `relay/server.mjs`, `heroWeapons.js`, `hero/bullets.js`, `hero/plasma.js`, `hero/fireGun.js`, `player/blackHole.js`, `tornadoes.js`, `vortex.js` (birth, scale), `stormLife.js` (birth), `lightning.js` (`strikeAt`), `tornadoEngine.js` (frame), `engine/events.js`, `rng.js`.
 
@@ -362,7 +378,7 @@ Common rules for every subtask: functional style, every new function typed with 
   - Depends on: C0 (and the owner's Clarification 12)
   - Classification: SEPARATE: new design decision; touches the weapon and damage contracts (R-049, R-051, R-053, R-054).
   - Acceptance: a written decision the owner approves before C2.
-  - **DECISION GATE** (owner approval).
+  - [x] **DECISION GATE** (owner approval). Approved with answers, 2026-10-10 (see "Owner's decisions, 2026-10-10").
 
 - [ ] Subtask C2: Guest hitscan through the host's trace (Stage 1; fixes A for rifle, minigun, railgun). `guestFire` replaces `scan` with `traceAim(origin, dir)` from the guest's eye (including altitude, Subtask 14b) and dispatches by `hit.kind` through the same functions the host uses (`landRound`, the person branch, `plasmaHit` for the rifle, `boltAt`-equivalent for the rail), with the guest as shooter. Walls then stop shots. Scoring through `damage.addDamageScore` once, as now (R-049). `GUEST_WEAPONS` keeps only cooldown, range and gating.
   - Likely files: `net/system.js`, `net/guestWeapons.js`, `heroWeapons.js` (extract `landRound` to take a shooter), `hero/plasma.js` (extract `plasmaHit`), tests
