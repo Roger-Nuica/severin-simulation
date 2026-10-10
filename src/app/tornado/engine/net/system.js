@@ -36,6 +36,7 @@ import { GUNNER } from '../gunner/config.js';
 import { cloneRows, replicatorRow, poseOriginal, writeClones, newReplicaScratch, easeHeat, standingCount, glowLevels } from './replicatorPose.js';
 import { eulerYXZ, carClass, pickCars, carRow, poseCar, colourIndex } from './carPose.js';
 import { FIRE, fireId, buildingRow, fireRow, maskOf, orderFires } from './fireFx.js';
+import { floodRow } from './floodFx.js';
 import { FLYER, flyerId, flyerRow, poseFlyer, motherState, throttleState, headDown, headHeight, jetLook, chopperLook, spotlessLook } from './flyerPose.js';
 import { CHOPPER } from '../environment/newsChopper.js';
 import { ALIENS } from '../aliens/config.js';
@@ -1523,6 +1524,19 @@ export function createNetSystem(ctx) {
   }
 
   /**
+   * The flood as at most one `flood` row, built only while a guest is in the
+   * room and only while the dam is failing or the water is out (read-only
+   * state from the flood system).
+   * @returns {number[][]}
+   */
+  function floodRows() {
+    const state = ctx.systems.flood && ctx.systems.flood.replicaState();
+    if (!state) return [];
+    const row = floodRow(state, (/** @type {number} */ v) => THREE.MathUtils.clamp(v, -LIMITS.worldBound, LIMITS.worldBound));
+    return row ? [row] : [];
+  }
+
+  /**
    * The mothership, Captain Spotless, the news helicopter, the GHOST jets and
    * the cows as `flyers` rows (at most 14, most important first), built only
    * while a guest is in the room. Each system hands over read-only state; the
@@ -1634,6 +1648,7 @@ export function createNetSystem(ctx) {
     const figures = live ? figureRows() : [];
     const flyers = live ? flyerRows() : [];
     const fires = live ? fireRows() : [];
+    const flood = live ? floodRows() : [];
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
@@ -1646,6 +1661,7 @@ export function createNetSystem(ctx) {
       ...(figures.length ? { figures } : {}),
       ...(flyers.length ? { flyers } : {}),
       ...(fires.length ? { fires } : {}),
+      ...(flood.length ? { flood } : {}),
       ...(live ? worldRows(h) : {})
     };
   }
@@ -1875,6 +1891,7 @@ export function createNetSystem(ctx) {
     showTownCars();
     showLocalSky();
     clearFires();
+    clearFlood();
     // Let go of the input pipeline, unless a local Hero run holds it (it cannot
     // while this is a peer, but leaving must never take Roger's keys away).
     if (!(ctx.Hero && ctx.Hero.active)) ctx.systems.playerInput.detachInput();
@@ -2858,6 +2875,29 @@ export function createNetSystem(ctx) {
     if (s.gasMains) s.gasMains.resetGasMains();
   }
 
+  let floodDrawn = false;
+
+  /**
+   * The host's flood (the `flood` row) into the flood system's render-only
+   * entry; it draws the water, wave, spray and breach, nothing floods or
+   * breaks here. Called every frame while viewing the host, with an empty map
+   * when the host sends none.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function drawFlood(rows) {
+    if (rows.size) floodDrawn = true;
+    else if (!floodDrawn) return;
+    if (ctx.systems.flood) ctx.systems.flood.mirror(rows);
+  }
+
+  /** The host's flood gone (leaving the host's view): the dam rebuilt, water and spray cleared. @returns {void} */
+  function clearFlood() {
+    if (!floodDrawn) return;
+    floodDrawn = false;
+    if (ctx.systems.flood) ctx.systems.flood.mirror(NO_ROWS);
+  }
+
   /** The guest's own cows, helicopter, jets, mothership and Spotless, back (leaving the host's view). @returns {void} */
   function showLocalSky() {
     for (const m of S.hiddenSky) m.visible = true;
@@ -2919,6 +2959,7 @@ export function createNetSystem(ctx) {
       if (kind === 'tornadoes') continue;
       // The fires are not proxies either: the fire systems draw them with their own pools.
       if (kind === 'fires') { drawFires(sampled); continue; }
+      if (kind === 'flood') { drawFlood(sampled); continue; }
       // The moving-cars rows are the older host's: once `cars` arrives they are not drawn.
       const rows = kind === 'vehicles' && S.hostCars ? NO_ROWS : sampled;
       // The clones are one set of instanced meshes, not proxies.
