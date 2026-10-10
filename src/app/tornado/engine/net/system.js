@@ -38,6 +38,7 @@ import { eulerYXZ, carClass, pickCars, carRow, poseCar, colourIndex } from './ca
 import { FIRE, fireId, buildingRow, fireRow, maskOf, orderFires } from './fireFx.js';
 import { floodRow } from './floodFx.js';
 import { stormRow } from './stormFx.js';
+import { firenadoRow } from './firenadoFx.js';
 import { QUAKE, quakeId, quakeRow, chasmRow, sinkholeRow, eruptionRow } from './quakeFx.js';
 import { FLYER, flyerId, flyerRow, poseFlyer, motherState, throttleState, headDown, headHeight, jetLook, chopperLook, spotlessLook } from './flyerPose.js';
 import { CHOPPER } from '../environment/newsChopper.js';
@@ -1551,6 +1552,16 @@ export function createNetSystem(ctx) {
   }
 
   /**
+   * The Firenado as at most one `firenado` row, built only while a guest is in
+   * the room and only while the funnel burns (read-only state).
+   * @returns {number[][]}
+   */
+  function firenadoRows() {
+    const row = firenadoRow(ctx.systems.firenado ? ctx.systems.firenado.replicaState() : null);
+    return row ? [row] : [];
+  }
+
+  /**
    * The earthquake family as `quake` rows (at most 8): the quake while it
    * shakes, the chasms, the sinkholes and the lava fissures, built only while a
    * guest is in the room (read-only state from each system).
@@ -1687,6 +1698,7 @@ export function createNetSystem(ctx) {
     const flood = live ? floodRows() : [];
     const quake = live ? quakeRows() : [];
     const storm = live ? stormRows() : [];
+    const firenado = live ? firenadoRows() : [];
     return {
       type: 'snapshot', v: PROTOCOL_VERSION, room: S.code, tick: ++S.tick, t: Math.round((performance.now() / 1000 - S.t0) * 1000) / 1000,
       score: Math.max(0, Math.round(Sim.stats.damageScore)), ...rows, hp,
@@ -1702,6 +1714,7 @@ export function createNetSystem(ctx) {
       ...(flood.length ? { flood } : {}),
       ...(quake.length ? { quake } : {}),
       ...(storm.length ? { storm } : {}),
+      ...(firenado.length ? { firenado } : {}),
       ...(live ? worldRows(h) : {})
     };
   }
@@ -1934,6 +1947,7 @@ export function createNetSystem(ctx) {
     clearFlood();
     clearQuake();
     clearStorm();
+    clearFirenado();
     if (ctx.systems.meteors) ctx.systems.meteors.clearMirror();
     // Let go of the input pipeline, unless a local Hero run holds it (it cannot
     // while this is a peer, but leaving must never take Roger's keys away).
@@ -2958,6 +2972,32 @@ export function createNetSystem(ctx) {
     if (ctx.systems.electricStorm) ctx.systems.electricStorm.mirror(undefined);
   }
 
+  let firenadoDrawn = false;
+
+  /**
+   * The host's Firenado (the `firenado` row) into the firenado system's
+   * render-only entry: the flame column, embers, glow, light and roar on this
+   * screen's own funnel. Called every frame while viewing the host, with an
+   * empty map when the host sends none. Nothing is ignited, burnt or scored.
+   * @param {Map<number, number[]>} rows
+   * @returns {void}
+   */
+  function drawFirenado(rows) {
+    if (rows.size) firenadoDrawn = true;
+    else if (!firenadoDrawn) return;
+    if (ctx.systems.firenado) ctx.systems.firenado.mirror(rows.get(0));
+  }
+
+  /** The host's fire gone (leaving the host's view): flames, glow, light and roar cleared. @returns {void} */
+  function clearFirenado() {
+    if (!firenadoDrawn) return;
+    firenadoDrawn = false;
+    if (ctx.systems.firenado) {
+      ctx.systems.firenado.mirror(undefined);
+      ctx.systems.firenado.resetFirenado();
+    }
+  }
+
   let quakeDrawn = false;
 
   /**
@@ -3060,6 +3100,7 @@ export function createNetSystem(ctx) {
       if (kind === 'flood') { drawFlood(sampled); continue; }
       if (kind === 'quake') { drawQuake(sampled); continue; }
       if (kind === 'storm') { drawStorm(sampled); continue; }
+      if (kind === 'firenado') { drawFirenado(sampled); continue; }
       // The moving-cars rows are the older host's: once `cars` arrives they are not drawn.
       const rows = kind === 'vehicles' && S.hostCars ? NO_ROWS : sampled;
       // The clones are one set of instanced meshes, not proxies.
